@@ -72,6 +72,8 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   };
   kmer_dht->set_pass(pass_type);
   barrier();
+  IntermittentTimer t_pp(__FILENAME__ + string(":kmer parse and pack"));
+
   for (auto packed_reads : packed_reads_list) {
     packed_reads->reset();
     string id, seq, quals;
@@ -79,6 +81,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     size_t tot_bytes_read = 0;
     vector<Kmer<MAX_K>> kmers;
     while (true) {
+      t_pp.start();
       if (!packed_reads->get_next_read(id, seq, quals)) break;
       num_reads++;
       progbar.update();
@@ -119,15 +122,19 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
         if (quals[i - 1] < qual_offset + qual_cutoff) left_base = '0';
         char right_base = seq[i + kmer_len];
         if (quals[i + kmer_len] < qual_offset + qual_cutoff) right_base = '0';
+        t_pp.stop();
         kmer_dht->add_kmer(kmers[i], left_base, right_base, 1);
+        t_pp.start();
         DBG_ADD_KMER("kcount add_kmer ", kmers[i].to_string(), " count ", 1, "\n");
         num_kmers++;
       }
+      t_pp.stop();
       progress();
     }
     progbar.done();
   }
   kmer_dht->flush_updates();
+  t_pp.done_all();
   auto all_num_kmers = reduce_one(num_kmers, op_fast_add, 0).wait();
   DBG("This rank processed ", num_reads, " reads\n");
   auto all_num_reads = reduce_one(num_reads, op_fast_add, 0).wait();
