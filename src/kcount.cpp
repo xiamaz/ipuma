@@ -74,6 +74,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   barrier();
   IntermittentTimer t_pp(__FILENAME__ + string(":kmer parse and pack"));
 
+  t_pp.start();
   for (auto packed_reads : packed_reads_list) {
     packed_reads->reset();
     string id, seq, quals;
@@ -81,7 +82,6 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     size_t tot_bytes_read = 0;
     vector<Kmer<MAX_K>> kmers;
     while (true) {
-      t_pp.start();
       if (!packed_reads->get_next_read(id, seq, quals)) break;
       num_reads++;
       progbar.update();
@@ -130,9 +130,11 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       }
       t_pp.stop();
       progress();
+      t_pp.start();
     }
     progbar.done();
   }
+  t_pp.stop();
   kmer_dht->flush_updates();
   t_pp.done_all();
   auto all_num_kmers = reduce_one(num_kmers, op_fast_add, 0).wait();
