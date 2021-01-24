@@ -43,14 +43,19 @@
 #include <iostream>
 #include <sstream>
 #include <chrono>
+#include <tuple>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
+#include "gpu-utils/utils.hpp"
 #include "kcount_driver.hpp"
 
 #define KNORM "\x1B[0m"
 #define KLGREEN "\x1B[92m"
 
 using namespace std;
+using namespace gpu_utils;
+
+using timepoint_t = chrono::time_point<std::chrono::high_resolution_clock>;
 
 #define cudaErrchk(ans) \
   { gpuAssert((ans), __FILE__, __LINE__); }
@@ -66,38 +71,97 @@ static void gpuAssert(cudaError_t code, const char *file, int line, bool abort =
 struct kcount_gpu::DriverState {
   int device_count;
   int my_gpu_id;
-  bool first_msg;
   int upcxx_rank_me;
+  int upcxx_rank_n;
+  double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
+  char *seqs, *quals;
+  // FIXME: only allowing kmers up to 32 in length
+  uint64_t *kmers;
+  int *kmer_targets;
+  int max_kmers;
 };
 
-double kcount_gpu::KcountGPUDriver::init(int upcxx_rank_me, int upcxx_rank_n) {
-  using timepoint_t = chrono::time_point<std::chrono::high_resolution_clock>;
+double kcount_gpu::KcountGPUDriver::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len) {
   timepoint_t t = chrono::high_resolution_clock::now();
-  chrono::duration<double> elapsed;
   driver_state = new DriverState();
   cudaErrchk(cudaGetDeviceCount(&driver_state->device_count));
   driver_state->my_gpu_id = upcxx_rank_me % driver_state->device_count;
   cudaErrchk(cudaSetDevice(driver_state->my_gpu_id));
-  driver_state->first_msg = true;
   driver_state->upcxx_rank_me = upcxx_rank_me;
-  elapsed = chrono::high_resolution_clock::now() - t;
-  return elapsed.count();
+  driver_state->upcxx_rank_n = upcxx_rank_n;
+  driver_state->t_func = 0;
+  driver_state->t_malloc = 0;
+  driver_state->t_cp = 0;
+  driver_state->t_kernel = 0;
+  driver_state->max_kmers = KCOUNT_READ_BLOCK_SIZE - kmer_len;
+  // FIXME: this needs to support more than k=32
+
+  timepoint_t t_malloc = chrono::high_resolution_clock::now();
+  cudaErrchk(cudaMalloc(&driver_state->seqs, KCOUNT_READ_BLOCK_SIZE));
+  cudaErrchk(cudaMalloc(&driver_state->quals, KCOUNT_READ_BLOCK_SIZE));
+  // this is an upper limit on the kmers because there are many reads so there will be fewer kmers, but its ok to pad it
+  cudaErrchk(cudaMalloc(&driver_state->kmers, driver_state->max_kmers * sizeof(uint64_t)));
+  cudaErrchk(cudaMalloc(&driver_state->kmer_targets, driver_state->max_kmers * sizeof(int)));
+  chrono::duration<double> t_elapsed = chrono::high_resolution_clock::now() - t_malloc;
+  driver_state->t_malloc += t_elapsed.count();
+
+  t_elapsed = chrono::high_resolution_clock::now() - t;
+  return t_elapsed.count();
 }
 
-kcount_gpu::KcountGPUDriver::~KcountGPUDriver() { delete driver_state; }
+kcount_gpu::KcountGPUDriver::~KcountGPUDriver() {
+  cudaFree(driver_state->seqs);
+  cudaFree(driver_state->quals);
+  cudaFree(driver_state->kmers);
+  cudaFree(driver_state->kmer_targets);
+  cudaDeviceSynchronize();
+  delete driver_state;
+}
 
-__global__ void parse_and_pack(int upcxx_rank_me) { printf("GPU says hello from rank %d\n", upcxx_rank_me); }
+__global__ void parse_and_pack(int upcxx_rank_me) {}
 
-void kcount_gpu::KcountGPUDriver::process_read_block(unsigned kmer_len, int qual_offset,
-                                                     vector<pair<uint16_t, unsigned char *>> &read_block, int64_t &num_bad_quals,
-                                                     int64_t &num_Ns, int64_t &num_kmers) {
-  if (driver_state->first_msg) {
-    cout << KLGREEN << "GPU called from rank " << driver_state->upcxx_rank_me << ": about to process block on gpu for kmer length "
-         << kmer_len << KNORM << endl;
-    driver_state->first_msg = false;
-    int block_size = 1;
-    int num_blocks = 1;
-    parse_and_pack<<<num_blocks, block_size>>>(driver_state->upcxx_rank_me);
-    cudaDeviceSynchronize();
-  }
+void kcount_gpu::KcountGPUDriver::process_read_block(unsigned kmer_len, int qual_offset, int num_kmers_in_block, string &read_seqs,
+                                                     string &read_quals, vector<uint64_t> &host_kmers,
+                                                     vector<int> &host_kmer_targets, int64_t &num_bad_quals, int64_t &num_Ns,
+                                                     int64_t &num_kmers) {
+  timepoint_t t_func = chrono::high_resolution_clock::now();
+  timepoint_t t_cp = chrono::high_resolution_clock::now();
+  cudaErrchk(cudaMemcpy(driver_state->seqs, &read_seqs[0], read_seqs.length() * sizeof(char), cudaMemcpyHostToDevice));
+  cudaErrchk(cudaMemcpy(driver_state->quals, &read_quals[0], read_quals.length() * sizeof(char), cudaMemcpyHostToDevice));
+  cudaMemset(driver_state->kmers, 0, driver_state->max_kmers * sizeof(uint64_t));
+  cudaMemset(driver_state->kmer_targets, 0, driver_state->max_kmers * sizeof(int));
+
+  chrono::duration<double> t_elapsed = chrono::high_resolution_clock::now() - t_cp;
+  driver_state->t_cp += t_elapsed.count();
+  /*
+    int p_buff_len = ((n_kmers * BUFF_SCALE) + nproc - 1) / nproc;
+    int b = 128;
+    int g = (seq_len + (b - 1)) / b;
+    int per_block_seq_len = (seq_len + (g - 1)) / g;
+
+    timepoint_t t_kernel = chrono::high_resolution_clock::now();
+    // CUDA call
+    gpu_parseKmerNFillupBuff<<<g, b>>>(d_seq, d_kmers, klen, seq_len, d_outgoing, d_owner_counter, nproc, p_buff_len);
+    t_elapsed = chrono::high_resolution_clock::now() - t_kernel;
+    driver_state->t_kernel += t_elapsed.count();
+
+    // h_outgoing = (uint64_t *) malloc ( n_kmers * BUFF_SCALE * sizeof(uint64_t));
+    cudaErrchk(cudaMemcpy(&(h_outgoing[0]), d_outgoing, n_kmers * BUFF_SCALE * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    cudaErrchk(cudaMemcpy(owner_counter.data(), d_owner_counter, nproc * sizeof(int), cudaMemcpyDeviceToHost));
+
+    uint64_t total_counter = 0;
+    // printf("GPU ParseNPack: outgoing buufers: ");
+    for (int i = 0; i < nproc; ++i) {
+      total_counter += owner_counter[i];
+    }
+  */
+
+  cudaDeviceSynchronize();
+
+  t_elapsed = chrono::high_resolution_clock::now() - t_func;
+  driver_state->t_func += t_elapsed.count();
+}
+
+tuple<double, double, double, double> kcount_gpu::KcountGPUDriver::get_elapsed_times() {
+  return {driver_state->t_func, driver_state->t_malloc, driver_state->t_cp, driver_state->t_kernel};
 }

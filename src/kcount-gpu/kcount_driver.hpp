@@ -54,8 +54,11 @@ class KcountGPUDriver {
  public:
   ~KcountGPUDriver();
   // returns the time to execute
-  double init(int upcxx_rank_me, int upcxx_rank_n);
-  void process_read_block(unsigned kmer_len, int qual_offset, std::vector<std::pair<uint16_t, unsigned char *>> &read_block,
+  double init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len);
+  void process_read_block(unsigned kmer_len, int qual_offset, int num_kmers_in_block, std::string &read_seqs,
+                          std::string &read_quals, std::vector<uint64_t> &host_kmers, std::vector<int> &host_kmer_targets,
                           int64_t &num_bad_quals, int64_t &num_Ns, int64_t &num_kmers);
+  std::tuple<double, double, double, double> get_elapsed_times();
 };
+
 }  // namespace kcount_gpu

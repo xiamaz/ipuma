@@ -157,6 +157,7 @@ int main(int argc, char **argv) {
     if (num_gpus > 0) {
       SLOG(KLGREEN, "Using ", num_gpus, " GPUs (", gpu_utils::get_gpu_device_name(), ") on node 0, with ", get_size_str(gpu_mem),
            " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
+      SLOG(KLGREEN, gpu_utils::get_gpu_device_description(), KNORM);
     } else {
       SWARN("Compiled for GPUs but no GPUs available...");
     }
