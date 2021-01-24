@@ -40,50 +40,64 @@
  form.
 */
 
-#pragma once
-
+#include <iostream>
+#include <sstream>
 #include <chrono>
-#include <cmath>
-#include <string>
-#include <vector>
+#include <cuda_runtime_api.h>
+#include <cuda.h>
+#include "kcount_driver.hpp"
 
-#define NSTREAMS 2
+#define KNORM "\x1B[0m"
+#define KLGREEN "\x1B[92m"
 
-#ifndef KLIGN_GPU_BLOCK_SIZE
-#define KLIGN_GPU_BLOCK_SIZE 20000
-#endif
+using namespace std;
 
-namespace adept_sw {
+#define cudaErrchk(ans) \
+  { gpuAssert((ans), __FILE__, __LINE__); }
 
-// for storing the alignment results
-struct AlignmentResults {
-  short *ref_begin = nullptr;
-  short *query_begin = nullptr;
-  short *ref_end = nullptr;
-  short *query_end = nullptr;
-  short *top_scores = nullptr;
+static void gpuAssert(cudaError_t code, const char *file, int line, bool abort = true) {
+  if (code != cudaSuccess) {
+    ostringstream os;
+    os << "GPU assert " << cudaGetErrorString(code) << " " << file << ":" << line << "\n";
+    throw runtime_error(os.str());
+  }
+}
+
+struct kcount_gpu::DriverState {
+  int device_count;
+  int my_gpu_id;
+  bool first_msg;
+  int upcxx_rank_me;
 };
 
-struct DriverState;
+double kcount_gpu::KcountGPUDriver::init(int upcxx_rank_me, int upcxx_rank_n) {
+  using timepoint_t = chrono::time_point<std::chrono::high_resolution_clock>;
+  timepoint_t t = chrono::high_resolution_clock::now();
+  chrono::duration<double> elapsed;
+  driver_state = new DriverState();
+  cudaErrchk(cudaGetDeviceCount(&driver_state->device_count));
+  driver_state->my_gpu_id = upcxx_rank_me % driver_state->device_count;
+  cudaErrchk(cudaSetDevice(driver_state->my_gpu_id));
+  driver_state->first_msg = true;
+  driver_state->upcxx_rank_me = upcxx_rank_me;
+  elapsed = chrono::high_resolution_clock::now() - t;
+  return elapsed.count();
+}
 
-class GPUDriver {
-  DriverState *driver_state = nullptr;
-  AlignmentResults alignments;
+kcount_gpu::KcountGPUDriver::~KcountGPUDriver() { delete driver_state; }
 
- public:
-  ~GPUDriver();
+__global__ void parse_and_pack(int upcxx_rank_me) { printf("GPU says hello from rank %d\n", upcxx_rank_me); }
 
-  // returns the time to execute
-  double init(int upcxx_rank_me, int upcxx_rank_n, short match_score, short mismatch_score, short gap_opening_score,
-              short gap_extending_score, int rlen_limit);
-  void run_kernel_forwards(std::vector<std::string> &reads, std::vector<std::string> &contigs, unsigned maxReadSize,
-                           unsigned maxContigSize);
-  void run_kernel_backwards(std::vector<std::string> &reads, std::vector<std::string> &contigs, unsigned maxReadSize,
-                            unsigned maxContigSize);
-  bool kernel_is_done();
-  void kernel_block();
-
-  AlignmentResults &get_aln_results() { return alignments; }
-};
-
-}  // namespace adept_sw
+void kcount_gpu::KcountGPUDriver::process_read_block(unsigned kmer_len, int qual_offset,
+                                                     vector<pair<uint16_t, unsigned char *>> &read_block, int64_t &num_bad_quals,
+                                                     int64_t &num_Ns, int64_t &num_kmers) {
+  if (driver_state->first_msg) {
+    cout << KLGREEN << "GPU called from rank " << driver_state->upcxx_rank_me << ": about to process block on gpu for kmer length "
+         << kmer_len << KNORM << endl;
+    driver_state->first_msg = false;
+    int block_size = 1;
+    int num_blocks = 1;
+    parse_and_pack<<<num_blocks, block_size>>>(driver_state->upcxx_rank_me);
+    cudaDeviceSynchronize();
+  }
+}

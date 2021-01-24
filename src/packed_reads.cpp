@@ -176,6 +176,8 @@ int64_t PackedRead::to_packed_id(const string &id_str) {
 
 uint16_t PackedRead::get_read_len() { return read_len; }
 
+unsigned char *PackedRead::get_raw_bytes() { return bytes; }
+
 PackedReads::PackedReads(int qual_offset, const string &fname, bool str_ids)
     : qual_offset(qual_offset)
     , fname(fname)

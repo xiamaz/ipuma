@@ -59,6 +59,7 @@
 #include "utils.hpp"
 #include "zstr.hpp"
 #ifdef ENABLE_GPUS
+#include "gpu-utils/utils.hpp"
 #include "adept-sw/driver.hpp"
 #endif
 
@@ -446,16 +447,16 @@ class KmerCtgDHT {
     });
     gpu_devices = 0;
 #ifdef ENABLE_GPUS
-    gpu_devices = adept_sw::get_num_node_gpus();
+    gpu_devices = gpu_utils::get_num_node_gpus();
     if (gpu_devices <= 0) {
       // CPU only
       gpu_devices = 0;
     } else {
       if (ranks_per_gpu == 0) {
         // auto detect
-        gpu_mem_avail = adept_sw::get_avail_gpu_mem_per_rank(local_team().rank_n(), gpu_devices);
+        gpu_mem_avail = gpu_utils::get_avail_gpu_mem_per_rank(local_team().rank_n(), gpu_devices);
       } else {
-        gpu_mem_avail = adept_sw::get_avail_gpu_mem_per_rank(ranks_per_gpu, 1);
+        gpu_mem_avail = gpu_utils::get_avail_gpu_mem_per_rank(ranks_per_gpu, 1);
       }
       if (gpu_mem_avail) {
         SLOG_VERBOSE("GPU memory available: ", get_size_str(gpu_mem_avail), "\n");
@@ -620,21 +621,22 @@ class KmerCtgDHT {
   }
 
   future<vector<KmerAndCtgLoc<MAX_K>>> get_ctgs_with_kmers(int target_rank, vector<Kmer<MAX_K>> &kmers) {
-    return rpc(target_rank,
-               [](vector<Kmer<MAX_K>> kmers, kmer_map_t &kmer_map) {
-                 vector<KmerAndCtgLoc<MAX_K>> kmer_ctg_locs;
-                 kmer_ctg_locs.reserve(kmers.size());
-                 for (auto &kmer : kmers) {
-                   const auto it = kmer_map->find(kmer);
-                   if (it == kmer_map->end()) continue;
-                   // skip conflicts
-                   if (it->second.first) continue;
-                   // now add it
-                   kmer_ctg_locs.push_back({kmer, it->second.second});
-                 }
-                 return kmer_ctg_locs;
-               },
-               kmers, kmer_map);
+    return rpc(
+        target_rank,
+        [](vector<Kmer<MAX_K>> kmers, kmer_map_t &kmer_map) {
+          vector<KmerAndCtgLoc<MAX_K>> kmer_ctg_locs;
+          kmer_ctg_locs.reserve(kmers.size());
+          for (auto &kmer : kmers) {
+            const auto it = kmer_map->find(kmer);
+            if (it == kmer_map->end()) continue;
+            // skip conflicts
+            if (it->second.first) continue;
+            // now add it
+            kmer_ctg_locs.push_back({kmer, it->second.second});
+          }
+          return kmer_ctg_locs;
+        },
+        kmers, kmer_map);
   }
 
 #ifdef DEBUG
@@ -754,7 +756,7 @@ class KmerCtgDHT {
     auto all_ctg_bytes_fetched = reduce_one(ctg_bytes_fetched, op_fast_add, 0).wait();
     auto max_ctg_bytes_fetched = reduce_one(ctg_bytes_fetched, op_fast_max, 0).wait();
     SLOG_VERBOSE("Contig bytes fetched ", get_size_str(all_ctg_bytes_fetched), " balance ",
-         (double)all_ctg_bytes_fetched / (rank_n() * max_ctg_bytes_fetched), "\n");
+                 (double)all_ctg_bytes_fetched / (rank_n() * max_ctg_bytes_fetched), "\n");
   }
 };
 

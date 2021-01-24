@@ -1,3 +1,46 @@
+
+/*
+ HipMer v 2.0, Copyright (c) 2020, The Regents of the University of California,
+ through Lawrence Berkeley National Laboratory (subject to receipt of any required
+ approvals from the U.S. Dept. of Energy).  All rights reserved."
+
+ Redistribution and use in source and binary forms, with or without modification,
+ are permitted provided that the following conditions are met:
+
+ (1) Redistributions of source code must retain the above copyright notice, this
+ list of conditions and the following disclaimer.
+
+ (2) Redistributions in binary form must reproduce the above copyright notice,
+ this list of conditions and the following disclaimer in the documentation and/or
+ other materials provided with the distribution.
+
+ (3) Neither the name of the University of California, Lawrence Berkeley National
+ Laboratory, U.S. Dept. of Energy nor the names of its contributors may be used to
+ endorse or promote products derived from this software without specific prior
+ written permission.
+
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+ EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
+ SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+ TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ DAMAGE.
+
+ You are under no obligation whatsoever to provide any bug fixes, patches, or upgrades
+ to the features, functionality or performance of the source code ("Enhancements") to
+ anyone; however, if you choose to make your Enhancements available either publicly,
+ or directly to Lawrence Berkeley National Laboratory, without imposing a separate
+ written license agreement for such Enhancements, then you hereby grant the following
+ license: a  non-exclusive, royalty-free perpetual license to install, use, modify,
+ prepare derivative works, incorporate into other computer software, distribute, and
+ sublicense such enhancements or derivative works thereof, in binary and source code
+ form.
+*/
+
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <thrust/scan.h>
@@ -23,57 +66,6 @@ static void gpuAssert(cudaError_t code, const char* file, int line, bool abort =
     os << "GPU assert " << cudaGetErrorString(code) << " " << file << ":" << line << "\n";
     throw std::runtime_error(os.str());
   }
-}
-
-size_t adept_sw::get_avail_gpu_mem_per_rank(int totRanks, int num_devices) {
-  if (num_devices == 0) num_devices = get_num_node_gpus();
-  if (!num_devices) return 0;
-  int ranksPerDevice = totRanks / num_devices;
-  return (get_tot_gpu_mem() * 0.8) / ranksPerDevice;
-}
-
-std::string adept_sw::get_device_name(int device_id) {
-  char dev_id[256];
-  cudaErrchk(cudaDeviceGetPCIBusId(dev_id, 256, device_id));
-  return std::string(dev_id);
-}
-
-size_t adept_sw::get_tot_gpu_mem() {
-  cudaDeviceProp prop;
-  cudaErrchk(cudaGetDeviceProperties(&prop, 0));
-  return prop.totalGlobalMem;
-}
-
-int adept_sw::get_num_node_gpus() {
-  int deviceCount = 0;
-  auto res = cudaGetDeviceCount(&deviceCount);
-  if (res != cudaSuccess) return 0;
-  return deviceCount;
-}
-
-bool adept_sw::initialize_gpu(double& time_to_initialize, int& device_count, size_t& total_mem) {
-  using timepoint_t = std::chrono::time_point<std::chrono::high_resolution_clock>;
-  double* first_touch;
-
-  timepoint_t t = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> elapsed;
-
-  device_count = get_num_node_gpus();
-  if (device_count > 0) {
-    total_mem = get_tot_gpu_mem();
-    cudaErrchk(cudaMallocHost(&first_touch, sizeof(double)));
-    cudaErrchk(cudaFreeHost(first_touch));
-  }
-  elapsed = std::chrono::high_resolution_clock::now() - t;
-  time_to_initialize = elapsed.count();
-  return device_count > 0;
-}
-
-bool adept_sw::initialize_gpu() {
-  double t;
-  int c;
-  size_t m;
-  return initialize_gpu(t, c, m);
 }
 
 struct gpu_alignments {
@@ -206,8 +198,8 @@ double adept_sw::GPUDriver::init(int upcxx_rank_me, int upcxx_rank_n, short matc
   driver_state->misMatchScore = mismatch_score;
   driver_state->startGap = gap_opening_score;
   driver_state->extendGap = gap_extending_score;
+  cudaErrchk(cudaGetDeviceCount(&driver_state->device_count));
 
-  driver_state->device_count = get_num_node_gpus();
   // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " get_num_gpus=" << elapsed.count();
 
   cudaErrchk(cudaMallocHost(&(alignments.ref_begin), sizeof(short) * KLIGN_GPU_BLOCK_SIZE));

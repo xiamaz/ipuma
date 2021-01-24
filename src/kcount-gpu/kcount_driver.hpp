@@ -42,48 +42,20 @@
 
 #pragma once
 
-#include <chrono>
-#include <cmath>
-#include <string>
 #include <vector>
 
-#define NSTREAMS 2
-
-#ifndef KLIGN_GPU_BLOCK_SIZE
-#define KLIGN_GPU_BLOCK_SIZE 20000
-#endif
-
-namespace adept_sw {
-
-// for storing the alignment results
-struct AlignmentResults {
-  short *ref_begin = nullptr;
-  short *query_begin = nullptr;
-  short *ref_end = nullptr;
-  short *query_end = nullptr;
-  short *top_scores = nullptr;
-};
+namespace kcount_gpu {
 
 struct DriverState;
 
-class GPUDriver {
+class KcountGPUDriver {
   DriverState *driver_state = nullptr;
-  AlignmentResults alignments;
 
  public:
-  ~GPUDriver();
-
+  ~KcountGPUDriver();
   // returns the time to execute
-  double init(int upcxx_rank_me, int upcxx_rank_n, short match_score, short mismatch_score, short gap_opening_score,
-              short gap_extending_score, int rlen_limit);
-  void run_kernel_forwards(std::vector<std::string> &reads, std::vector<std::string> &contigs, unsigned maxReadSize,
-                           unsigned maxContigSize);
-  void run_kernel_backwards(std::vector<std::string> &reads, std::vector<std::string> &contigs, unsigned maxReadSize,
-                            unsigned maxContigSize);
-  bool kernel_is_done();
-  void kernel_block();
-
-  AlignmentResults &get_aln_results() { return alignments; }
+  double init(int upcxx_rank_me, int upcxx_rank_n);
+  void process_read_block(unsigned kmer_len, int qual_offset, std::vector<std::pair<uint16_t, unsigned char *>> &read_block,
+                          int64_t &num_bad_quals, int64_t &num_Ns, int64_t &num_kmers);
 };
-
-}  // namespace adept_sw
+}  // namespace kcount_gpu
