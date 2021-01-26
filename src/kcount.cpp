@@ -82,7 +82,6 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
   is_rc.reserve(num_kmers_in_block);
   gpu_driver.process_read_block(qual_offset, read_seqs, read_quals, packed_kmers, kmer_targets, is_rc, num_Ns);
   int num_kmer_longs = Kmer<MAX_K>::get_N_LONGS();
-  uint64_t *longs = new uint64_t[num_kmer_longs];
   for (int i = 0; i < (int)kmer_targets.size(); i++) {
     // invalid kmer
     if (kmer_targets[i] == -1) continue;
@@ -96,15 +95,17 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
       left_base = comp_nucleotide(left_base);
       right_base = comp_nucleotide(right_base);
     }
-    memcpy(longs, &(packed_kmers[i * num_kmer_longs]), sizeof(uint64_t) * num_kmer_longs);
-    Kmer<MAX_K> kmer(longs);
+    Kmer<MAX_K> kmer(&(packed_kmers[i * num_kmer_longs]));
     t_pp.stop();
-    kmer_dht->add_kmer(kmer, left_base, right_base, 1, true);
+#ifdef DEBUG
+    auto cpu_target = kmer_dht->get_kmer_target_rank(kmer);
+    if (cpu_target != kmer_targets[i]) DIE("cpu target is ", cpu_target, " but gpu target is ", kmer_targets[i]);
+#endif
+    kmer_dht->add_kmer(kmer, left_base, right_base, 1, true, kmer_targets[i]);
     t_pp.start();
     DBG_ADD_KMER("kcount add_kmer ", kmer.to_string(), " count ", 1, "\n");
     num_kmers++;
   }
-  delete[] longs;
 }
 #endif
 

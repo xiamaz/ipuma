@@ -72,6 +72,14 @@ __constant__ uint64_t GPU_TWINS[256] = {
     0xC8, 0x88, 0x48, 0x08, 0xF4, 0xB4, 0x74, 0x34, 0xE4, 0xA4, 0x64, 0x24, 0xD4, 0x94, 0x54, 0x14, 0xC4, 0x84, 0x44, 0x04,
     0xF0, 0xB0, 0x70, 0x30, 0xE0, 0xA0, 0x60, 0x20, 0xD0, 0x90, 0x50, 0x10, 0xC0, 0x80, 0x40, 0x00};
 
+__constant__ uint64_t GPU_0_MASK[32] = {
+    0x0000000000000000, 0xC000000000000000, 0xF000000000000000, 0xFC00000000000000, 0xFF00000000000000, 0xFFC0000000000000,
+    0xFFF0000000000000, 0xFFFC000000000000, 0xFFFF000000000000, 0xFFFFC00000000000, 0xFFFFF00000000000, 0xFFFFFC0000000000,
+    0xFFFFFF0000000000, 0xFFFFFFC000000000, 0xFFFFFFF000000000, 0xFFFFFFFC00000000, 0xFFFFFFFF00000000, 0xFFFFFFFFC0000000,
+    0xFFFFFFFFF0000000, 0xFFFFFFFFFC000000, 0xFFFFFFFFFF000000, 0xFFFFFFFFFFC00000, 0xFFFFFFFFFFF00000, 0xFFFFFFFFFFFC0000,
+    0xFFFFFFFFFFFF0000, 0xFFFFFFFFFFFFC000, 0xFFFFFFFFFFFFF000, 0xFFFFFFFFFFFFFC00, 0xFFFFFFFFFFFFFF00, 0xFFFFFFFFFFFFFFC0,
+    0xFFFFFFFFFFFFFFF0, 0xFFFFFFFFFFFFFFFC};
+
 #define cudaErrchk(ans) \
   { gpuAssert((ans), __FILE__, __LINE__); }
 
@@ -162,7 +170,45 @@ __device__ void revcomp(uint64_t *longs, uint64_t *rc_longs, int kmer_len, int n
   }
 }
 
-__device__ uint64_t gpu_get_minimizer(uint64_t *longs, uint64_t *rc_longs) { return 0; }
+__device__ uint64_t quick_hash(uint64_t v) {
+  v = v * 3935559000370003845 + 2691343689449507681;
+  v ^= v >> 21;
+  v ^= v << 37;
+  v ^= v >> 4;
+  v *= 4768777513237032717;
+  v ^= v << 20;
+  v ^= v >> 41;
+  v ^= v << 5;
+  return v;
+}
+
+__device__ uint64_t revcomp_minimizer(uint64_t minimizer) {
+  int m = MINIMIZER_LEN;
+  uint64_t rc_minz = 0;
+  uint64_t v = minimizer;
+  rc_minz = (GPU_TWINS[v & 0xFF] << 56) | (GPU_TWINS[(v >> 8) & 0xFF] << 48) | (GPU_TWINS[(v >> 16) & 0xFF] << 40) |
+            (GPU_TWINS[(v >> 24) & 0xFF] << 32) | (GPU_TWINS[(v >> 32) & 0xFF] << 24) | (GPU_TWINS[(v >> 40) & 0xFF] << 16) |
+            (GPU_TWINS[(v >> 48) & 0xFF] << 8) | (GPU_TWINS[(v >> 56)]);
+  return rc_minz << (2 * (32 - m));
+}
+
+__device__ uint64_t gpu_minimizer_hash(int kmer_len, int num_longs, uint64_t *longs) {
+  int m = MINIMIZER_LEN;
+  uint64_t minimizer = 0;
+  for (int i = 0; i <= kmer_len - m; i++) {
+    int j = i % 32;
+    int l = i / 32;
+    uint64_t mmer = ((longs[l]) << (2 * j)) & GPU_0_MASK[m];
+    if (j > 32 - m && l < num_longs - 1) {
+      int m_overlap = j + m - 32;
+      mmer |= ((((longs[l + 1]) << (64 * l)) & GPU_0_MASK[m_overlap]) >> 2 * (m - m_overlap));
+    }
+    auto mmer_rc = revcomp_minimizer(mmer);
+    if (mmer_rc < mmer) mmer = mmer_rc;
+    if (mmer > minimizer) minimizer = mmer;
+  }
+  return quick_hash(minimizer);
+}
 
 __global__ void parse_and_pack(char *seqs, int kmer_len, int num_longs, int seqs_len, uint64_t *kmers, int *kmer_targets,
                                char *is_rc, int num_ranks) {
@@ -208,12 +254,11 @@ __global__ void parse_and_pack(char *seqs, int kmer_len, int num_longs, int seqs
           break;
         }
       }
-      kmer_targets[i] = gpu_get_minimizer(&(kmers[i * num_longs]), rc_longs) % num_ranks;
       if (must_rc) {
         memcpy(&(kmers[i * num_longs]), rc_longs, num_longs * sizeof(uint64_t));
         is_rc[i] = 1;
       }
-      // FIXME: replace with target rank computed from minimizer
+      kmer_targets[i] = gpu_minimizer_hash(kmer_len, num_longs, &(kmers[i * num_longs])) % num_ranks;
     } else {
       // indicate invalid with -1
       kmer_targets[i] = -1;
@@ -240,6 +285,9 @@ void kcount_gpu::KcountGPUDriver::process_read_block(int qual_offset, string &re
   timepoint_t t_kernel = chrono::high_resolution_clock::now();
   parse_and_pack<<<num_blocks, block_size>>>(dr_state->seqs, dr_state->kmer_len, dr_state->num_kmer_longs, read_seqs.length(),
                                              dr_state->kmers, dr_state->kmer_targets, dr_state->is_rc, dr_state->upcxx_rank_n);
+  // FIXME: this should be async with the CPU
+  // wait for kernel to complete
+  cudaErrchk(cudaDeviceSynchronize());
   t_elapsed = chrono::high_resolution_clock::now() - t_kernel;
   dr_state->t_kernel += t_elapsed.count();
 
@@ -252,8 +300,6 @@ void kcount_gpu::KcountGPUDriver::process_read_block(int qual_offset, string &re
   cudaErrchk(cudaMemcpy(&(host_is_rc[0]), dr_state->is_rc, dr_state->max_kmers, cudaMemcpyDeviceToHost));
   t_elapsed = chrono::high_resolution_clock::now() - t_cp;
   dr_state->t_cp += t_elapsed.count();
-
-  cudaDeviceSynchronize();
 
   t_elapsed = chrono::high_resolution_clock::now() - t_func;
   dr_state->t_func += t_elapsed.count();
