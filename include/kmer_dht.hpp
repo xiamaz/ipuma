@@ -518,18 +518,23 @@ class KmerDHT {
   }
 #endif
 
-  void add_kmer(Kmer<MAX_K> kmer, char left_ext, char right_ext, kmer_count_t count) {
+  void add_kmer(Kmer<MAX_K> kmer, char left_ext, char right_ext, kmer_count_t count, bool rc_checked = false,
+                int target_rank = -1) {
     _num_kmers_counted++;
     if (!count) count = 1;
-    // get the lexicographically smallest
-    Kmer<MAX_K> kmer_rc = kmer.revcomp();
-    if (kmer_rc < kmer) {
-      kmer.swap(kmer_rc);
-      swap(left_ext, right_ext);
-      left_ext = comp_nucleotide(left_ext);
-      right_ext = comp_nucleotide(right_ext);
+    if (!rc_checked) {
+      // get the lexicographically smallest
+      Kmer<MAX_K> kmer_rc = kmer.revcomp();
+      if (kmer_rc < kmer) {
+        kmer.swap(kmer_rc);
+        swap(left_ext, right_ext);
+        left_ext = comp_nucleotide(left_ext);
+        right_ext = comp_nucleotide(right_ext);
+      }
+      if (target_rank == -1) target_rank = get_kmer_target_rank(kmer, &kmer_rc);
+    } else {
+      if (target_rank == -1) target_rank = get_kmer_target_rank(kmer);
     }
-    auto target_rank = get_kmer_target_rank(kmer, &kmer_rc);
     if (pass_type == BLOOM_SET_PASS || pass_type == CTG_BLOOM_SET_PASS) {
       if (count) {
         kmer_store_bloom.update(target_rank, kmer);

@@ -78,7 +78,9 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
   packed_kmers.reserve(num_kmers_in_block);
   vector<int> kmer_targets;
   kmer_targets.reserve(num_kmers_in_block);
-  gpu_driver.process_read_block(qual_offset, read_seqs, read_quals, packed_kmers, kmer_targets, num_Ns);
+  vector<char> is_rc;
+  is_rc.reserve(num_kmers_in_block);
+  gpu_driver.process_read_block(qual_offset, read_seqs, read_quals, packed_kmers, kmer_targets, is_rc, num_Ns);
   int num_kmer_longs = Kmer<MAX_K>::get_N_LONGS();
   uint64_t *longs = new uint64_t[num_kmer_longs];
   for (int i = 0; i < (int)kmer_targets.size(); i++) {
@@ -89,10 +91,15 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
     char right_base = '0';
     if (i < packed_kmers.size() - 1 && (read_quals[i + kmer_len] >= qual_offset + qual_cutoff))
       right_base = read_seqs[i + kmer_len];
+    if (is_rc[i]) {
+      swap(left_base, right_base);
+      left_base = comp_nucleotide(left_base);
+      right_base = comp_nucleotide(right_base);
+    }
     memcpy(longs, &(packed_kmers[i * num_kmer_longs]), sizeof(uint64_t) * num_kmer_longs);
     Kmer<MAX_K> kmer(longs);
     t_pp.stop();
-    kmer_dht->add_kmer(kmer, left_base, right_base, 1);
+    kmer_dht->add_kmer(kmer, left_base, right_base, 1, true);
     t_pp.start();
     DBG_ADD_KMER("kcount add_kmer ", kmer.to_string(), " count ", 1, "\n");
     num_kmers++;
@@ -221,6 +228,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   // assume each read is 200 long
   read_block.reserve(KCOUNT_READ_BLOCK_SIZE / 200);
   uint64_t read_block_bytes = 0;
+  int num_read_blocks = 0;
   for (auto packed_reads : packed_reads_list) {
     ProgressBar progbar(packed_reads->get_local_num_reads(), progbar_prefix);
     for (int i = 0; i < packed_reads->get_local_num_reads(); i++) {
@@ -238,6 +246,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
 #endif
         read_block.clear();
         read_block_bytes = 0;
+        num_read_blocks++;
       }
       read_block.push_back(packed_read);
       // add an additional one for separator in single array for GPU
@@ -249,6 +258,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
 #else
       process_read_block(kmer_len, qual_offset, read_block, kmer_dht, pass_type, t_pp, progbar, num_bad_quals, num_Ns, num_kmers);
 #endif
+      num_read_blocks++;
     }
     read_block.clear();
     read_block_bytes = 0;
@@ -271,6 +281,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   }
 #ifdef ENABLE_GPUS
   auto [gpu_time_tot, gpu_time_malloc, gpu_time_cp, gpu_time_kernel] = gpu_driver.get_elapsed_times();
+  SLOG(KLGREEN, "Called GPU ", num_read_blocks, " times", KNORM, "\n");
   SLOG(KLGREEN, "GPU times (secs): ", fixed, setprecision(3), " total ", gpu_time_tot, ", malloc ", gpu_time_malloc, ", cp ",
        gpu_time_cp, ", kernel ", gpu_time_kernel, KNORM, "\n");
 #endif
