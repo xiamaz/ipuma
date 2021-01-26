@@ -124,7 +124,7 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     barrier();
     BEGIN_GASNET_STATS("kmer_analysis");
     analyze_kmers(kmer_len, prev_kmer_len, options->qual_offset, packed_reads_list, options->dmin_thres, ctgs, kmer_dht,
-                  options->ranks_per_gpu);
+                  options->ranks_per_gpu, options->dump_kmers);
     END_GASNET_STATS();
     stage_timers.analyze_kmers->stop();
     barrier();

@@ -358,6 +358,7 @@ bool Options::load(int argc, char **argv) {
       ->capture_default_str();
   app.add_flag("--post-asm-only", post_assm_only, "Only run post assembly (alignment and/or abundances).")->capture_default_str();
   app.add_flag("--write-gfa", dump_gfa, "Write scaffolding contig graphs in GFA2 format.")->capture_default_str();
+  app.add_flag("--dump-kmers", dump_kmers, "Write kmers out after kmer counting.")->capture_default_str();
   app.add_option("-Q, --quality-offset", qual_offset, "Phred encoding offset (auto-detected by default).")
       ->check(CLI::IsMember({0, 33, 64}));
   app.add_flag("--progress", show_progress, "Show progress bars for operations.");
