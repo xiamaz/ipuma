@@ -118,7 +118,36 @@ kcount_gpu::KcountGPUDriver::~KcountGPUDriver() {
   delete driver_state;
 }
 
-__global__ void parse_and_pack(int upcxx_rank_me) {}
+__global__ void parse_and_pack(char *seqs, int kmer_len, int seqs_len, uint64_t *kmers, int *kmer_targets, int num_ranks) {
+  unsigned int tid = threadIdx.x;
+  unsigned int lane_id = tid & (blockDim.x - 1);
+  int per_block_seq_len = blockDim.x;
+  int st_char_block = blockIdx.x * per_block_seq_len;
+  int num_kmers = seqs_len - kmer_len + 1;
+  for (int i = st_char_block + lane_id; i < (st_char_block + per_block_seq_len) && i < num_kmers; i += blockDim.x) {
+    uint64_t longs = 0;
+    bool valid_kmer = true;
+    // each thread extracts one kmer
+    for (int k = 0; k < kmer_len; k++) {
+      char s = seqs[i + k];
+      if (s == '_' || s == 'N') {
+        valid_kmer = false;
+        break;
+      }
+      int j = k % 32;
+      uint64_t x = (s & 4) >> 1;
+      longs |= ((x + ((x ^ (s & 2)) >> 1)) << (2 * (31 - j)));
+    }
+    if (valid_kmer) {
+      kmers[i] = longs;
+      // FIXME: replace with target rank computed from minimizer
+      kmer_targets[i] = 0;
+    } else {
+      // indicate invalid with -1
+      kmer_targets[i] = -1;
+    }
+  }
+}
 
 void kcount_gpu::KcountGPUDriver::process_read_block(unsigned kmer_len, int qual_offset, int num_kmers_in_block, string &read_seqs,
                                                      string &read_quals, vector<uint64_t> &host_kmers,
@@ -129,32 +158,28 @@ void kcount_gpu::KcountGPUDriver::process_read_block(unsigned kmer_len, int qual
   cudaErrchk(cudaMemcpy(driver_state->seqs, &read_seqs[0], read_seqs.length() * sizeof(char), cudaMemcpyHostToDevice));
   cudaErrchk(cudaMemcpy(driver_state->quals, &read_quals[0], read_quals.length() * sizeof(char), cudaMemcpyHostToDevice));
   cudaMemset(driver_state->kmers, 0, driver_state->max_kmers * sizeof(uint64_t));
-  cudaMemset(driver_state->kmer_targets, 0, driver_state->max_kmers * sizeof(int));
-
+  cudaMemset(driver_state->kmer_targets, -1, driver_state->max_kmers * sizeof(int));
   chrono::duration<double> t_elapsed = chrono::high_resolution_clock::now() - t_cp;
   driver_state->t_cp += t_elapsed.count();
-  /*
-    int p_buff_len = ((n_kmers * BUFF_SCALE) + nproc - 1) / nproc;
-    int b = 128;
-    int g = (seq_len + (b - 1)) / b;
-    int per_block_seq_len = (seq_len + (g - 1)) / g;
 
-    timepoint_t t_kernel = chrono::high_resolution_clock::now();
-    // CUDA call
-    gpu_parseKmerNFillupBuff<<<g, b>>>(d_seq, d_kmers, klen, seq_len, d_outgoing, d_owner_counter, nproc, p_buff_len);
-    t_elapsed = chrono::high_resolution_clock::now() - t_kernel;
-    driver_state->t_kernel += t_elapsed.count();
+  int block_size = 128;
+  int num_blocks = (read_seqs.length() + (block_size - 1)) / block_size;
 
-    // h_outgoing = (uint64_t *) malloc ( n_kmers * BUFF_SCALE * sizeof(uint64_t));
-    cudaErrchk(cudaMemcpy(&(h_outgoing[0]), d_outgoing, n_kmers * BUFF_SCALE * sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    cudaErrchk(cudaMemcpy(owner_counter.data(), d_owner_counter, nproc * sizeof(int), cudaMemcpyDeviceToHost));
+  timepoint_t t_kernel = chrono::high_resolution_clock::now();
+  parse_and_pack<<<num_blocks, block_size>>>(driver_state->seqs, kmer_len, read_seqs.length(), driver_state->kmers,
+                                             driver_state->kmer_targets, driver_state->upcxx_rank_n);
+  t_elapsed = chrono::high_resolution_clock::now() - t_kernel;
+  driver_state->t_kernel += t_elapsed.count();
 
-    uint64_t total_counter = 0;
-    // printf("GPU ParseNPack: outgoing buufers: ");
-    for (int i = 0; i < nproc; ++i) {
-      total_counter += owner_counter[i];
-    }
-  */
+  host_kmers.resize(driver_state->max_kmers);
+  host_kmer_targets.resize(driver_state->max_kmers);
+
+  t_cp = chrono::high_resolution_clock::now();
+  cudaErrchk(cudaMemcpy(&(host_kmers[0]), driver_state->kmers, driver_state->max_kmers * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+  cudaErrchk(cudaMemcpy(&(host_kmer_targets[0]), driver_state->kmer_targets, driver_state->max_kmers * sizeof(int),
+                        cudaMemcpyDeviceToHost));
+  t_elapsed = chrono::high_resolution_clock::now() - t_cp;
+  driver_state->t_cp += t_elapsed.count();
 
   cudaDeviceSynchronize();
 

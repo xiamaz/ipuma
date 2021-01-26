@@ -120,6 +120,11 @@ class Kmer {
     longs = o.longs;
   }
 
+  Kmer(longs_t *other_longs) {
+    assert(Kmer::k > 0);
+    memcpy(&(longs[0]), other_longs, N_LONGS * sizeof(longs_t));
+  }
+
   explicit Kmer(const char *s) {
     assert(Kmer::k > 0);
     set_kmer(s);
@@ -223,7 +228,7 @@ class Kmer {
       longs_t x;
 #if 1
       x = ((*s) & 4) >> 1;
-      longs[l] |= ((x + ((x ^ (*s & 2)) >> 1)) << (2 * (31 - j)));
+
 #else
       // This is the same, but broken down...
       x = ((*s) & 4) >> 1;  // i.e. Gg/Tt will set bit 1, so x == 2 | 0
