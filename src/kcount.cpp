@@ -49,7 +49,6 @@
 #include "kcount-gpu/kcount_driver.hpp"
 #endif
 
-
 //#define DBG_DUMP_KMERS
 
 //#define DBG_ADD_KMER DBG
@@ -108,8 +107,8 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
     Kmer<MAX_K> kmer(&(packed_kmers[i * num_kmer_longs]));
     t_pp.stop();
 #ifdef DEBUG
-// FIXME: this is not giving the same value at higher kmer lengths (77). This will cause problems because the dbjg 
-// traversal will not go to the right place to find these mismatched kmers
+    // FIXME: this is not giving the same value at higher kmer lengths (77). This will cause problems because the dbjg
+    // traversal will not go to the right place to find these mismatched kmers
     auto cpu_target = kmer_dht->get_kmer_target_rank(kmer);
     if (cpu_target != kmer_targets[i]) DIE("cpu target is ", cpu_target, " but gpu target is ", kmer_targets[i]);
 #endif

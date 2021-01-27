@@ -211,6 +211,53 @@ __device__ uint64_t gpu_minimizer_hash(int kmer_len, int num_longs, uint64_t *lo
   return quick_hash(minimizer);
 }
 
+__device__ uint64_t gpu_minimizer_hash_fast(int kmer_len, int num_longs, uint64_t *longs, uint64_t *rc_longs) {
+  const int m = MINIMIZER_LEN;
+  // chunk is a uint64_t whose bases fully containing a series of chunk_step candidate minimizers
+  const int chunk = 32;
+  const int chunk_step = chunk - ((m + 3) / 4) * 4;  // chunk_step is a multiple of 4;
+
+  int base;
+  int num_candidates = kmer_len - m + 1;
+  const int max_candidates = MAX_BUILD_KMER - m + 1;
+  uint64_t rc_candidates[max_candidates];
+
+  // calculate and temporarily store all revcomp minimizer candidates on the stack
+  for (base = 0; base <= kmer_len - m; base += chunk_step) {
+    int shift = base % 32;
+    int l = base / 32;
+    uint64_t tmp = rc_longs[l];
+    if (shift) {
+      tmp = (tmp << (shift * 2));
+      if (l < num_longs - 1) tmp |= rc_longs[l + 1] >> (64 - shift * 2);
+    }
+    for (int j = 0; j < chunk_step; j++) {
+      if (base + j + m > kmer_len) break;
+      rc_candidates[base + j] = ((tmp << (j * 2)) & GPU_0_MASK[m]);
+    }
+  }
+
+  uint64_t minimizer = 0;
+  // calculate and compare minimizers from revcomp
+  for (base = 0; base <= kmer_len - m; base += chunk_step) {
+    int shift = base % 32;
+    int l = base / 32;
+    uint64_t tmp = longs[l];
+    if (shift) {
+      tmp = (tmp << (shift * 2));
+      if (l < num_longs - 1) tmp |= longs[l + 1] >> (64 - shift * 2);
+    }
+    for (int j = 0; j < chunk_step; j++) {
+      if (base + j + m > kmer_len) break;
+      uint64_t fwd_candidate = ((tmp << (j * 2)) & GPU_0_MASK[m]);
+      auto &rc_candidate = rc_candidates[num_candidates - base - j - 1];
+      uint64_t &least_candidate = (fwd_candidate < rc_candidate) ? fwd_candidate : rc_candidate;
+      if (least_candidate > minimizer) minimizer = least_candidate;
+    }
+  }
+  return quick_hash(minimizer);
+}
+
 __global__ void parse_and_pack(char *seqs, int kmer_len, int num_longs, int seqs_len, uint64_t *kmers, int *kmer_targets,
                                char *is_rcs, int num_ranks) {
   unsigned int tid = threadIdx.x;
@@ -255,11 +302,11 @@ __global__ void parse_and_pack(char *seqs, int kmer_len, int num_longs, int seqs
           break;
         }
       }
+      kmer_targets[i] = gpu_minimizer_hash_fast(kmer_len, num_longs, &(kmers[i * num_longs]), rc_longs) % num_ranks;
       if (must_rc) {
         memcpy(&(kmers[i * num_longs]), rc_longs, num_longs * sizeof(uint64_t));
         is_rcs[i] = 1;
       }
-      kmer_targets[i] = gpu_minimizer_hash(kmer_len, num_longs, &(kmers[i * num_longs])) % num_ranks;
     } else {
       // indicate invalid with -1
       kmer_targets[i] = -1;
