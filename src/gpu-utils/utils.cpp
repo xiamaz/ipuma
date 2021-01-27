@@ -71,33 +71,35 @@ std::string gpu_utils::get_gpu_device_description() {
   cudaDeviceProp prop;
   int num_devs = 0, i;
   cudaErrchk(cudaGetDeviceCount(&num_devs));
-  for (i = 0; i < num_devs; ++i) cudaErrchk(cudaGetDeviceProperties(&prop, i));
   std::ostringstream os;
+  for (i = 0; i < num_devs; ++i) {
+    cudaErrchk(cudaGetDeviceProperties(&prop, i));
 
-  os << "GPU Device number: " << i << "\n";
-  os << "  Device name: " << prop.name << "\n";
-  os << "  Compute capability: " << prop.major << "." << prop.minor << "\n";
-  os << "  Clock Rate: " << prop.clockRate << "kHz\n";
-  os << "  Total SMs: " << prop.multiProcessorCount << "\n";
-  os << "  Shared Memory Per SM: " << prop.sharedMemPerMultiprocessor << " bytes\n";
-  os << "  Registers Per SM: " << prop.regsPerMultiprocessor << " 32-bit\n";
-  os << "  Max threads per SM: " << prop.maxThreadsPerMultiProcessor << "\n";
-  os << "  L2 Cache Size: " << prop.l2CacheSize << " bytes\n";
-  os << "  Total Global Memory: " << prop.totalGlobalMem << " bytes\n";
-  os << "  Memory Clock Rate: " << prop.memoryClockRate << " kHz\n\n";
+    os << "GPU Device number: " << i << "\n";
+    os << "  Device name: " << prop.name << "\n";
+    os << "  Compute capability: " << prop.major << "." << prop.minor << "\n";
+    os << "  Clock Rate: " << prop.clockRate << "kHz\n";
+    os << "  Total SMs: " << prop.multiProcessorCount << "\n";
+    os << "  Shared Memory Per SM: " << prop.sharedMemPerMultiprocessor << " bytes\n";
+    os << "  Registers Per SM: " << prop.regsPerMultiprocessor << " 32-bit\n";
+    os << "  Max threads per SM: " << prop.maxThreadsPerMultiProcessor << "\n";
+    os << "  L2 Cache Size: " << prop.l2CacheSize << " bytes\n";
+    os << "  Total Global Memory: " << prop.totalGlobalMem << " bytes\n";
+    os << "  Memory Clock Rate: " << prop.memoryClockRate << " kHz\n\n";
 
-  os << "  Max threads per block: " << prop.maxThreadsPerBlock << "\n";
-  os << "  Max threads in X-dimension of block: " << prop.maxThreadsDim[0] << "\n";
-  os << "  Max threads in Y-dimension of block: " << prop.maxThreadsDim[1] << "\n";
-  os << "  Max threads in Z-dimension of block: " << prop.maxThreadsDim[2] << "\n\n";
+    os << "  Max threads per block: " << prop.maxThreadsPerBlock << "\n";
+    os << "  Max threads in X-dimension of block: " << prop.maxThreadsDim[0] << "\n";
+    os << "  Max threads in Y-dimension of block: " << prop.maxThreadsDim[1] << "\n";
+    os << "  Max threads in Z-dimension of block: " << prop.maxThreadsDim[2] << "\n\n";
 
-  os << "  Max blocks in X-dimension of grid: " << prop.maxGridSize[0] << "\n";
-  os << "  Max blocks in Y-dimension of grid: " << prop.maxGridSize[1] << "\n";
-  os << "  Max blocks in Z-dimension of grid: " << prop.maxGridSize[2] << "\n\n";
+    os << "  Max blocks in X-dimension of grid: " << prop.maxGridSize[0] << "\n";
+    os << "  Max blocks in Y-dimension of grid: " << prop.maxGridSize[1] << "\n";
+    os << "  Max blocks in Z-dimension of grid: " << prop.maxGridSize[2] << "\n\n";
 
-  os << "  Shared Memory Per Block: " << prop.sharedMemPerBlock << " bytes\n";
-  os << "  Registers Per Block: " << prop.regsPerBlock << " 32-bit\n";
-  os << "  Warp size: " << prop.warpSize << "\n\n";
+    os << "  Shared Memory Per Block: " << prop.sharedMemPerBlock << " bytes\n";
+    os << "  Registers Per Block: " << prop.regsPerBlock << " 32-bit\n";
+    os << "  Warp size: " << prop.warpSize << "\n\n";
+  }
   return os.str();
 }
 
