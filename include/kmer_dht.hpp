@@ -490,11 +490,12 @@ class KmerDHT {
   double get_estimated_error_rate() { return estimated_error_rate; }
 
   upcxx::intrank_t get_kmer_target_rank(const Kmer<MAX_K> &kmer, const Kmer<MAX_K> *kmer_rc = nullptr) const {
-    // return kmer.minimizer_hash(MINIMIZER_LEN) % rank_n();
-    if (use_minimizers)
-      return kmer.minimizer_hash_fast(MINIMIZER_LEN, kmer_rc) % rank_n();
-    else
+    if (use_minimizers) {
+      return kmer.minimizer_hash(MINIMIZER_LEN) % rank_n();
+      //return kmer.minimizer_hash_fast(MINIMIZER_LEN, kmer_rc) % rank_n();
+    } else {
       return std::hash<Kmer<MAX_K>>{}(kmer) % rank_n();
+    }
   }
 
   KmerCounts *get_local_kmer_counts(Kmer<MAX_K> &kmer) {

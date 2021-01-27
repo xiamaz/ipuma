@@ -103,6 +103,12 @@ std::string gpu_utils::get_gpu_device_description() {
   return os.str();
 }
 
+int gpu_utils::get_gpu_device_pci_id() {
+  cudaDeviceProp prop;
+  cudaErrchk(cudaGetDeviceProperties(&prop, 0));
+  return prop.pciBusID;
+}
+
 struct gpu_utils::GPUTimerState {
   cudaEvent_t start_event, stop_event;
   float elapsed_t_ms = 0;

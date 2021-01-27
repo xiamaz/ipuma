@@ -7,6 +7,7 @@ size_t get_avail_gpu_mem_per_rank(int totRanks, int numDevices = 0);
 std::string get_gpu_device_name();
 int get_num_node_gpus();
 std::string get_gpu_device_description();
+int get_gpu_device_pci_id();
 
 // The first call to cudaMallocHost can take several seconds of real time but no cpu time
 // so start it asap (call this in a new thread)

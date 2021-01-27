@@ -213,6 +213,16 @@ int main(int argc, char **argv) {
     int ins_avg = 0;
     int ins_stddev = 0;
 
+#ifdef ENABLE_GPUS
+    if (init_gpu_thread) {
+      Timer t("Waiting for GPU to be initialized (should be noop)");
+      init_gpu_thread = false;
+      detect_gpu_fut.wait();
+    }
+    int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
+    SLOG(KLGREEN, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
+#endif
+
     // contigging loops
     if (options->kmer_lens.size()) {
       max_kmer_len = options->kmer_lens.back();
@@ -246,14 +256,6 @@ int main(int argc, char **argv) {
         prev_kmer_len = kmer_len;
       }
     }
-
-#ifdef ENABLE_GPUS
-    if (init_gpu_thread) {
-      Timer t("Waiting for GPU to be initialized (should be noop)");
-      init_gpu_thread = false;
-      detect_gpu_fut.wait();
-    }
-#endif
 
     // scaffolding loops
     if (options->dump_gfa) {

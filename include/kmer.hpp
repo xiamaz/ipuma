@@ -385,7 +385,6 @@ class Kmer {
   }
 
   uint64_t minimizer_hash(int m) const {
-    static uint64_t seed = upcxx::rank_me();
     uint64_t minimizer = 0;
     for (int i = 0; i <= Kmer::k - m; i++) {
       int j = i % 32;

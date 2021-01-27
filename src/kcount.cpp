@@ -42,10 +42,13 @@
 
 #include "kcount.hpp"
 
-#ifdef ENABLE_GPUS
+#define KCOUNT_GPUS
+
+#if defined(ENABLE_GPUS) && defined(KCOUNT_GPUS)
 #include "gpu-utils/utils.hpp"
 #include "kcount-gpu/kcount_driver.hpp"
 #endif
+
 
 //#define DBG_DUMP_KMERS
 
@@ -54,7 +57,7 @@
 
 using namespace std;
 
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) && defined(KCOUNT_GPUS)
 template <int MAX_K>
 static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsigned kmer_len, int qual_offset,
                                    vector<PackedRead> &read_block, dist_object<KmerDHT<MAX_K>> &kmer_dht, PASS_TYPE pass_type,
@@ -105,6 +108,8 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
     Kmer<MAX_K> kmer(&(packed_kmers[i * num_kmer_longs]));
     t_pp.stop();
 #ifdef DEBUG
+// FIXME: this is not giving the same value at higher kmer lengths (77). This will cause problems because the dbjg 
+// traversal will not go to the right place to find these mismatched kmers
     auto cpu_target = kmer_dht->get_kmer_target_rank(kmer);
     if (cpu_target != kmer_targets[i]) DIE("cpu target is ", cpu_target, " but gpu target is ", kmer_targets[i]);
 #endif
@@ -198,12 +203,12 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   };
   kmer_dht->set_pass(pass_type);
   barrier();
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) && defined(KCOUNT_GPUS)
   kcount_gpu::KcountGPUDriver gpu_driver;
 #endif
   size_t gpu_mem_avail = 0;
   int gpu_devices = 0;
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) && defined(KCOUNT_GPUS)
   gpu_devices = gpu_utils::get_num_node_gpus();
   if (gpu_devices <= 0) {
     // CPU only
@@ -248,7 +253,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       auto packed_read = (*packed_reads)[i];
       if (packed_read.get_read_len() < kmer_len) continue;
       if (read_block_bytes + packed_read.get_read_len() + 1 > KCOUNT_READ_BLOCK_SIZE) {
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) && defined(KCOUNT_GPUS)
         process_read_block_gpu(gpu_driver, kmer_len, qual_offset, read_block, kmer_dht, pass_type, t_pp, t_gpu, progbar, num_Ns,
                                num_kmers, num_gpu_waits);
 #else
@@ -263,7 +268,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       read_block_bytes += packed_read.get_read_len() + 1;
     }
     if (!read_block.empty()) {
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) && defined(KCOUNT_GPUS)
       process_read_block_gpu(gpu_driver, kmer_len, qual_offset, read_block, kmer_dht, pass_type, t_pp, t_gpu, progbar, num_Ns,
                              num_kmers, num_gpu_waits);
 #else
@@ -291,7 +296,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     if (all_num_bad_quals) SLOG_VERBOSE("Found ", perc_str(all_num_bad_quals, all_num_kmers), " bad quality positions\n");
     if (all_num_Ns) SLOG_VERBOSE("Found ", perc_str(all_num_Ns, all_num_kmers), " kmers with Ns\n");
   }
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) && defined(KCOUNT_GPUS)
   SLOG(KLGREEN, "Number of calls to progress while gpu driver was running: ", num_gpu_waits, KNORM, "\n");
   auto [gpu_time_tot, gpu_time_malloc, gpu_time_cp, gpu_time_kernel] = gpu_driver.get_elapsed_times();
   SLOG(KLGREEN, "Called GPU ", num_read_blocks, " times", KNORM, "\n");
