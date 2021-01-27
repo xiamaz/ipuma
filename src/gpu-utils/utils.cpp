@@ -69,10 +69,9 @@ bool gpu_utils::initialize_gpu() {
 
 std::string gpu_utils::get_gpu_device_description() {
   cudaDeviceProp prop;
-  int num_devs = 0, i;
-  cudaErrchk(cudaGetDeviceCount(&num_devs));
+  int num_devs = get_num_node_gpus();
   std::ostringstream os;
-  for (i = 0; i < num_devs; ++i) {
+  for (int i = 0; i < num_devs; ++i) {
     cudaErrchk(cudaGetDeviceProperties(&prop, i));
 
     os << "GPU Device number: " << i << "\n";
