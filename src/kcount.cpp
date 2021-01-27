@@ -58,20 +58,24 @@ using namespace std;
 template <int MAX_K>
 static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsigned kmer_len, int qual_offset,
                                    vector<PackedRead> &read_block, dist_object<KmerDHT<MAX_K>> &kmer_dht, PASS_TYPE pass_type,
-                                   IntermittentTimer &t_pp, ProgressBar &progbar, int64_t &num_Ns, int64_t &num_kmers) {
+                                   IntermittentTimer &t_pp, IntermittentTimer &t_gpu, ProgressBar &progbar, int64_t &num_Ns,
+                                   int64_t &num_kmers, int64_t &num_gpu_waits) {
   int qual_cutoff = KCOUNT_QUAL_CUTOFF;
   string read_id, seq, quals;
-  string read_seqs, read_quals;
-  read_seqs.reserve(KCOUNT_READ_BLOCK_SIZE);
-  read_quals.reserve(KCOUNT_READ_BLOCK_SIZE);
+  // declare static so that memory is reused across calls - sizes will be about the same each time because its a fixed size buffer
+  static string read_seqs, read_quals;
+  read_seqs = "";
+  read_quals = "";
   int num_kmers_in_block = 0;
   // put all the reads into single arrays for copying to GPU memory
   for (auto packed_read : read_block) {
     packed_read.unpack(read_id, seq, quals, qual_offset);
     // separator between reads is an underscore
-    read_seqs += seq + "_";
+    read_seqs += seq;
+    read_seqs += "_";
     // the separator for the quals doesn't matter because it will be determined from the seq
-    read_quals += quals + " ";
+    read_quals += quals;
+    read_quals += " ";
     num_kmers_in_block += seq.length() - kmer_len + 1;
   }
   vector<uint64_t> packed_kmers;
@@ -80,7 +84,13 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
   kmer_targets.reserve(num_kmers_in_block);
   vector<char> is_rc;
   is_rc.reserve(num_kmers_in_block);
-  gpu_driver.process_read_block(qual_offset, read_seqs, read_quals, packed_kmers, kmer_targets, is_rc, num_Ns);
+  t_gpu.start();
+  gpu_driver.process_read_block(qual_offset, read_seqs, packed_kmers, kmer_targets, is_rc, num_Ns);
+  while (!gpu_driver.kernel_is_done()) {
+    num_gpu_waits++;
+    progress();
+  }
+  t_gpu.stop();
   int num_kmer_longs = Kmer<MAX_K>::get_N_LONGS();
   for (int i = 0; i < (int)kmer_targets.size(); i++) {
     // invalid kmer
@@ -224,12 +234,14 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
 #endif
 
   IntermittentTimer t_pp(__FILENAME__ + string(":kmer parse and pack"));
+  IntermittentTimer t_gpu(__FILENAME__ + string(":gpu kmer parse and pack"));
   t_pp.start();
   vector<PackedRead> read_block;
   // assume each read is 200 long
   read_block.reserve(KCOUNT_READ_BLOCK_SIZE / 200);
   uint64_t read_block_bytes = 0;
   int num_read_blocks = 0;
+  int64_t num_gpu_waits = 0;
   for (auto packed_reads : packed_reads_list) {
     ProgressBar progbar(packed_reads->get_local_num_reads(), progbar_prefix);
     for (int i = 0; i < packed_reads->get_local_num_reads(); i++) {
@@ -240,8 +252,8 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       if (packed_read.get_read_len() < kmer_len) continue;
       if (read_block_bytes + packed_read.get_read_len() + 1 > KCOUNT_READ_BLOCK_SIZE) {
 #ifdef ENABLE_GPUS
-        process_read_block_gpu(gpu_driver, kmer_len, qual_offset, read_block, kmer_dht, pass_type, t_pp, progbar, num_Ns,
-                               num_kmers);
+        process_read_block_gpu(gpu_driver, kmer_len, qual_offset, read_block, kmer_dht, pass_type, t_pp, t_gpu, progbar, num_Ns,
+                               num_kmers, num_gpu_waits);
 #else
         process_read_block(kmer_len, qual_offset, read_block, kmer_dht, pass_type, t_pp, progbar, num_bad_quals, num_Ns, num_kmers);
 #endif
@@ -255,7 +267,8 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     }
     if (!read_block.empty()) {
 #ifdef ENABLE_GPUS
-      process_read_block_gpu(gpu_driver, kmer_len, qual_offset, read_block, kmer_dht, pass_type, t_pp, progbar, num_Ns, num_kmers);
+      process_read_block_gpu(gpu_driver, kmer_len, qual_offset, read_block, kmer_dht, pass_type, t_pp, t_gpu, progbar, num_Ns,
+                             num_kmers, num_gpu_waits);
 #else
       process_read_block(kmer_len, qual_offset, read_block, kmer_dht, pass_type, t_pp, progbar, num_bad_quals, num_Ns, num_kmers);
 #endif
@@ -268,6 +281,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   t_pp.stop();
   kmer_dht->flush_updates();
   t_pp.done_all();
+  t_gpu.done_all();
   auto all_num_kmers = reduce_one(num_kmers, op_fast_add, 0).wait();
   DBG("This rank processed ", num_reads, " reads\n");
   auto all_num_reads = reduce_one(num_reads, op_fast_add, 0).wait();
@@ -281,6 +295,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     if (all_num_Ns) SLOG_VERBOSE("Found ", perc_str(all_num_Ns, all_num_kmers), " kmers with Ns\n");
   }
 #ifdef ENABLE_GPUS
+  SLOG(KLGREEN, "Number of calls to progress while gpu driver was running: ", num_gpu_waits, KNORM, "\n");
   auto [gpu_time_tot, gpu_time_malloc, gpu_time_cp, gpu_time_kernel] = gpu_driver.get_elapsed_times();
   SLOG(KLGREEN, "Called GPU ", num_read_blocks, " times", KNORM, "\n");
   SLOG(KLGREEN, "GPU times (secs): ", fixed, setprecision(3), " total ", gpu_time_tot, ", malloc ", gpu_time_malloc, ", cp ",

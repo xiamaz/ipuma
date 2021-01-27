@@ -49,15 +49,16 @@ namespace kcount_gpu {
 struct DriverState;
 
 class KcountGPUDriver {
-  DriverState *dr_state = nullptr;
+  DriverState *dstate = nullptr;
 
  public:
   ~KcountGPUDriver();
   // returns the time to execute
   double init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs);
-  void process_read_block(int qual_offset, std::string &read_seqs, std::string &read_quals, std::vector<uint64_t> &host_kmers,
+  void process_read_block(int qual_offset, std::string &read_seqs, std::vector<uint64_t> &host_kmers,
                           std::vector<int> &host_kmer_targets, std::vector<char> &is_rc, int64_t &num_Ns);
   std::tuple<double, double, double, double> get_elapsed_times();
+  bool kernel_is_done();
 };
 
 }  // namespace kcount_gpu
