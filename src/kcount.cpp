@@ -78,19 +78,16 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
     read_quals += " ";
     num_kmers_in_block += seq.length() - kmer_len + 1;
   }
-  vector<uint64_t> packed_kmers;
-  packed_kmers.reserve(num_kmers_in_block);
-  vector<int> kmer_targets;
-  kmer_targets.reserve(num_kmers_in_block);
-  vector<char> is_rc;
-  is_rc.reserve(num_kmers_in_block);
   t_gpu.start();
-  gpu_driver.process_read_block(qual_offset, read_seqs, packed_kmers, kmer_targets, is_rc, num_Ns);
+  gpu_driver.process_read_block(qual_offset, read_seqs, num_Ns);
   while (!gpu_driver.kernel_is_done()) {
     num_gpu_waits++;
     progress();
   }
   t_gpu.stop();
+  auto &packed_kmers = gpu_driver.get_packed_kmers();
+  auto &kmer_targets = gpu_driver.get_kmer_targets();
+  auto &is_rcs = gpu_driver.get_is_rcs();
   int num_kmer_longs = Kmer<MAX_K>::get_N_LONGS();
   for (int i = 0; i < (int)kmer_targets.size(); i++) {
     // invalid kmer
@@ -100,7 +97,7 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
     char right_base = '0';
     if (i < packed_kmers.size() - 1 && (read_quals[i + kmer_len] >= qual_offset + qual_cutoff))
       right_base = read_seqs[i + kmer_len];
-    if (is_rc[i]) {
+    if (is_rcs[i]) {
       swap(left_base, right_base);
       left_base = comp_nucleotide(left_base);
       right_base = comp_nucleotide(right_base);
