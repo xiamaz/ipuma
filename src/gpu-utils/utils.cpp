@@ -77,6 +77,7 @@ std::string gpu_utils::get_gpu_device_description() {
 
     os << "GPU Device number: " << i << "\n";
     os << "  Device name: " << prop.name << "\n";
+    os << "  PCI device ID: " << prop.pciDeviceID << "\n";
     os << "  Compute capability: " << prop.major << "." << prop.minor << "\n";
     os << "  Clock Rate: " << prop.clockRate << "kHz\n";
     os << "  Total SMs: " << prop.multiProcessorCount << "\n";
