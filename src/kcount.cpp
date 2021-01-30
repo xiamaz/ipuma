@@ -108,12 +108,11 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
     }
     Kmer<MAX_K> kmer(&(packed_kmers[i * num_kmer_longs]));
     t_pp.stop();
-//#ifdef DEBUG
+#ifdef DEBUG
     auto cpu_target = kmer_dht->get_kmer_target_rank(kmer);
     if (cpu_target != kmer_targets[i]) DIE("cpu target is ", cpu_target, " but gpu target is ", kmer_targets[i]);
-//#endif
+#endif
     kmer_dht->add_kmer(kmer, left_base, right_base, 1, true, kmer_targets[i]);
-//    kmer_dht->add_kmer(kmer, left_base, right_base, 1, true, cpu_target);
     t_pp.start();
     DBG_ADD_KMER("kcount add_kmer ", kmer.to_string(), " count ", 1, "\n");
     num_kmers++;
