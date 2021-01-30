@@ -108,13 +108,12 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
     }
     Kmer<MAX_K> kmer(&(packed_kmers[i * num_kmer_longs]));
     t_pp.stop();
-#ifdef DEBUG
-    // FIXME: this is not giving the same value at higher kmer lengths (77). This will cause problems because the dbjg
-    // traversal will not go to the right place to find these mismatched kmers
+//#ifdef DEBUG
     auto cpu_target = kmer_dht->get_kmer_target_rank(kmer);
     if (cpu_target != kmer_targets[i]) DIE("cpu target is ", cpu_target, " but gpu target is ", kmer_targets[i]);
-#endif
+//#endif
     kmer_dht->add_kmer(kmer, left_base, right_base, 1, true, kmer_targets[i]);
+//    kmer_dht->add_kmer(kmer, left_base, right_base, 1, true, cpu_target);
     t_pp.start();
     DBG_ADD_KMER("kcount add_kmer ", kmer.to_string(), " count ", 1, "\n");
     num_kmers++;
@@ -223,7 +222,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     }
     if (gpu_mem_avail) {
       SLOG(KLGREEN, "GPU memory available per rank: ", get_size_str(gpu_mem_avail), KNORM, "\n");
-      auto init_time = gpu_driver.init(local_team().rank_me(), local_team().rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS());
+      auto init_time = gpu_driver.init(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS());
       SLOG(KLGREEN, "Initialized kcount_gpu driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
     } else {
       gpu_devices = 0;

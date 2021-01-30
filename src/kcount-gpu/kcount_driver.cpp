@@ -271,6 +271,7 @@ __global__ void parse_and_pack(char *seqs, int kmer_len, int num_longs, int seqs
     int l = 0, prev_l = 0;
     bool valid_kmer = true;
     uint64_t longs = 0;
+    uint64_t *kmer = &(kmers[i * num_longs]);
     // each thread extracts one kmer
     for (int k = 0; k < kmer_len; k++) {
       char s = seqs[i + k];
@@ -283,28 +284,28 @@ __global__ void parse_and_pack(char *seqs, int kmer_len, int num_longs, int seqs
       l = k / 32;
       // we do it this way so we can operate on the variable longs in a register, rather than local memory in the array
       if (l > prev_l) {
-        kmers[i * num_longs + prev_l] = longs;
+        kmer[prev_l] = longs;
         longs = 0;
         prev_l = l;
       }
       uint64_t x = (s & 4) >> 1;
       longs |= ((x + ((x ^ (s & 2)) >> 1)) << (2 * (31 - j)));
     }
-    kmers[i * num_longs + l] = longs;
+    kmer[l] = longs;
     if (valid_kmer) {
-      revcomp(&(kmers[i * num_longs]), rc_longs, kmer_len, num_longs);
+      revcomp(kmer, rc_longs, kmer_len, num_longs);
       bool must_rc = false;
       for (l = 0; l < num_longs; l++) {
-        if (rc_longs[l] < kmers[i * num_longs + l]) {
+        if (rc_longs[l] < kmer[l]) {
           must_rc = true;
           break;
-        } else if (rc_longs[l] > kmers[i * num_longs + l]) {
+        } else if (rc_longs[l] > kmers[l]) {
           break;
         }
       }
-      kmer_targets[i] = gpu_minimizer_hash_fast(kmer_len, num_longs, &(kmers[i * num_longs]), rc_longs) % num_ranks;
+      kmer_targets[i] = gpu_minimizer_hash_fast(kmer_len, num_longs, kmer, rc_longs) % num_ranks;
       if (must_rc) {
-        memcpy(&(kmers[i * num_longs]), rc_longs, num_longs * sizeof(uint64_t));
+        memcpy(kmer, rc_longs, num_longs * sizeof(uint64_t));
         is_rcs[i] = 1;
       }
     } else {
