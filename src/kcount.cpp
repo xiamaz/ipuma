@@ -42,7 +42,7 @@
 
 #include "kcount.hpp"
 
-//#define KCOUNT_GPUS
+#define KCOUNT_GPUS
 
 #if defined(ENABLE_GPUS) && defined(KCOUNT_GPUS)
 #include "gpu-utils/utils.hpp"
@@ -169,8 +169,17 @@ static void process_read_block(unsigned kmer_len, int qual_offset, vector<Packed
       if (i > 0 && (quals[i - 1] >= qual_offset + qual_cutoff)) left_base = seq[i - 1];
       char right_base = '0';
       if (i < kmers.size() - 1 && (quals[i + kmer_len] >= qual_offset + qual_cutoff)) right_base = seq[i + kmer_len];
+      // get the lexicographically smallest
+      Kmer<MAX_K> kmer_rc = kmers[i].revcomp();
+      if (kmer_rc < kmers[i]) {
+        kmers[i].swap(kmer_rc);
+        swap(left_base, right_base);
+        left_base = comp_nucleotide(left_base);
+        right_base = comp_nucleotide(right_base);
+      }
+      auto target_rank = kmer_dht->get_kmer_target_rank(kmers[i], &kmer_rc);
       t_pp.stop();
-      kmer_dht->add_kmer(kmers[i], left_base, right_base, 1);
+      kmer_dht->add_kmer(kmers[i], left_base, right_base, 1, true, target_rank);
       t_pp.start();
       DBG_ADD_KMER("kcount add_kmer ", kmers[i].to_string(), " count ", 1, "\n");
       num_kmers++;
