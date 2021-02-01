@@ -71,7 +71,6 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
   int num_kmers_in_block = 0;
   // put all the reads into single arrays for copying to GPU memory
   for (auto packed_read : read_block) {
-    progress();
     packed_read.unpack(read_id, seq, quals, qual_offset);
     // separator between reads is an underscore
     read_seqs += seq;
@@ -95,7 +94,6 @@ static void process_read_block_gpu(kcount_gpu::KcountGPUDriver &gpu_driver, unsi
   for (int i = 0; i < (int)kmer_targets.size(); i++) {
     // invalid kmer
     if (kmer_targets[i] == -1) continue;
-    progress();
     char left_base = '0';
     if (i > 0 && (read_quals[i - 1] >= qual_offset + qual_cutoff)) left_base = read_seqs[i - 1];
     char right_base = '0';
@@ -129,7 +127,6 @@ static void process_read_block(unsigned kmer_len, int qual_offset, vector<Packed
   string read_id, seq, quals;
   vector<Kmer<MAX_K>> kmers;
   for (auto packed_read : read_block) {
-    progress();
     packed_read.unpack(read_id, seq, quals, qual_offset);
     // split into kmers
     Kmer<MAX_K>::get_kmers(kmer_len, seq, kmers);
