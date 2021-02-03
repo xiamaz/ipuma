@@ -333,7 +333,7 @@ class QuickTimer {
   double get_elapsed() { return secs; }
 };
 
-void kcount_gpu::KcountGPUDriver::process_read_block(int qual_offset, string &read_seqs, int64_t &num_Ns) {
+void kcount_gpu::KcountGPUDriver::process_read_block(int qual_offset, const string &read_seqs, int64_t &num_Ns) {
   QuickTimer t_func, t_cp, t_kernel;
 
   t_func.start();

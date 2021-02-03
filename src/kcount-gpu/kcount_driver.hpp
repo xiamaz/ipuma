@@ -55,7 +55,7 @@ class KcountGPUDriver {
   ~KcountGPUDriver();
   // returns the time to execute
   double init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs);
-  void process_read_block(int qual_offset, std::string &read_seqs, int64_t &num_Ns);
+  void process_read_block(int qual_offset, const std::string &read_seqs, int64_t &num_Ns);
   std::tuple<double, double, double, double> get_elapsed_times();
   bool kernel_is_done();
   std::vector<uint64_t> &get_packed_kmers();
