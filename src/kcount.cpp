@@ -229,6 +229,13 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     if (all_num_bad_quals) SLOG_VERBOSE("Found ", perc_str(all_num_bad_quals, all_num_kmers), " bad quality positions\n");
     if (all_num_Ns) SLOG_VERBOSE("Found ", perc_str(all_num_Ns, all_num_kmers), " kmers with Ns\n");
   }
+  auto tot_kmers_stored = reduce_one(kmer_dht->get_local_num_kmers(), op_fast_add, 0).wait();
+  auto max_kmers_stored = reduce_one(kmer_dht->get_local_num_kmers(), op_fast_max, 0).wait();
+  if (!rank_me()) {
+    auto avg_kmers_stored = tot_kmers_stored / rank_n();
+    SLOG(KLGREEN, "Avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
+         (double)avg_kmers_stored / max_kmers_stored, KNORM, "\n");
+  }
 };
 
 // count ctg kmers if using bloom
@@ -274,6 +281,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   ProgressBar progbar(ctgs.size(), "Adding extra contig kmers from kmer length " + to_string(prev_kmer_len));
   vector<Kmer<MAX_K>> kmers;
   kmer_dht->set_pass(CTG_KMERS_PASS);
+  auto start_local_num_kmers = kmer_dht->get_local_num_kmers();
   for (auto it = ctgs.begin(); it != ctgs.end(); ++it) {
     auto ctg = it;
     progbar.update();
@@ -307,6 +315,14 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   SLOG_VERBOSE(KLRED, "Average depth diff ", all_tot_depth_diff / all_num_kmers, " max depth diff ",
                reduce_one(max_depth_diff, op_fast_max, 0).wait(), KNORM, "\n");
 #endif
+  auto local_kmers = kmer_dht->get_local_num_kmers() - start_local_num_kmers;
+  auto tot_kmers_stored = reduce_one(local_kmers, op_fast_add, 0).wait();
+  auto max_kmers_stored = reduce_one(local_kmers, op_fast_max, 0).wait();
+  if (!rank_me()) {
+    auto avg_kmers_stored = tot_kmers_stored / rank_n();
+    SLOG(KLGREEN, "add ctgs: avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
+         (double)avg_kmers_stored / max_kmers_stored, KNORM, "\n");
+  }
 };
 
 template <int MAX_K>
