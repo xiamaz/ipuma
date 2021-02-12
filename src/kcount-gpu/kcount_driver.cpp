@@ -105,6 +105,7 @@ struct kcount_gpu::DriverState {
   int max_kmers;
   int kmer_len;
   int num_kmer_longs;
+  int minimizer_len;
   size_t kmer_bytes;
   size_t kmer_targets_bytes;
   cudaEvent_t event;
@@ -113,7 +114,7 @@ struct kcount_gpu::DriverState {
   vector<char> host_is_rcs;
 };
 
-double kcount_gpu::KcountGPUDriver::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs) {
+double kcount_gpu::KcountGPUDriver::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int minimizer_len) {
   timepoint_t t = chrono::high_resolution_clock::now();
   dstate = new DriverState();
   cudaErrchk(cudaGetDeviceCount(&dstate->device_count));
@@ -128,6 +129,7 @@ double kcount_gpu::KcountGPUDriver::init(int upcxx_rank_me, int upcxx_rank_n, in
   dstate->max_kmers = KCOUNT_READ_BLOCK_SIZE - kmer_len;
   dstate->kmer_len = kmer_len;
   dstate->num_kmer_longs = num_kmer_longs;
+  dstate->minimizer_len = minimizer_len;
 
   timepoint_t t_malloc = chrono::high_resolution_clock::now();
   cudaErrchk(cudaMalloc(&dstate->seqs, KCOUNT_READ_BLOCK_SIZE));
@@ -183,8 +185,7 @@ __device__ uint64_t quick_hash(uint64_t v) {
   return v;
 }
 
-__device__ uint64_t revcomp_minimizer(uint64_t minimizer) {
-  int m = MINIMIZER_LEN;
+__device__ uint64_t revcomp_minimizer(int m, uint64_t minimizer) {
   uint64_t rc_minz = 0;
   uint64_t v = minimizer;
   rc_minz = (GPU_TWINS[v & 0xFF] << 56) | (GPU_TWINS[(v >> 8) & 0xFF] << 48) | (GPU_TWINS[(v >> 16) & 0xFF] << 40) |
@@ -193,8 +194,7 @@ __device__ uint64_t revcomp_minimizer(uint64_t minimizer) {
   return rc_minz << (2 * (32 - m));
 }
 
-__device__ uint64_t gpu_minimizer_hash(int kmer_len, int num_longs, uint64_t *longs) {
-  int m = MINIMIZER_LEN;
+__device__ uint64_t gpu_minimizer_hash(int m, int kmer_len, int num_longs, uint64_t *longs) {
   uint64_t minimizer = 0;
   for (int i = 0; i <= kmer_len - m; i++) {
     int j = i % 32;
@@ -204,22 +204,21 @@ __device__ uint64_t gpu_minimizer_hash(int kmer_len, int num_longs, uint64_t *lo
       int m_overlap = j + m - 32;
       mmer |= ((((longs[l + 1]) << (64 * l)) & GPU_0_MASK[m_overlap]) >> 2 * (m - m_overlap));
     }
-    auto mmer_rc = revcomp_minimizer(mmer);
+    auto mmer_rc = revcomp_minimizer(m, mmer);
     if (mmer_rc < mmer) mmer = mmer_rc;
     if (mmer > minimizer) minimizer = mmer;
   }
   return quick_hash(minimizer);
 }
 
-__device__ uint64_t gpu_minimizer_hash_fast(int kmer_len, int num_longs, uint64_t *longs, uint64_t *rc_longs) {
-  const int m = MINIMIZER_LEN;
+__device__ uint64_t gpu_minimizer_hash_fast(int m, int kmer_len, int num_longs, uint64_t *longs, uint64_t *rc_longs) {
   // chunk is a uint64_t whose bases fully containing a series of chunk_step candidate minimizers
   const int chunk = 32;
   const int chunk_step = chunk - ((m + 3) / 4) * 4;  // chunk_step is a multiple of 4;
 
   int base;
   int num_candidates = kmer_len - m + 1;
-  const int max_candidates = MAX_BUILD_KMER - m + 1;
+  const int max_candidates = MAX_BUILD_KMER;
   uint64_t rc_candidates[max_candidates];
 
   // calculate and temporarily store all revcomp minimizer candidates on the stack
@@ -258,8 +257,8 @@ __device__ uint64_t gpu_minimizer_hash_fast(int kmer_len, int num_longs, uint64_
   return quick_hash(minimizer);
 }
 
-__global__ void parse_and_pack(char *seqs, int kmer_len, int num_longs, int seqs_len, uint64_t *kmers, int *kmer_targets,
-                               char *is_rcs, int num_ranks) {
+__global__ void parse_and_pack(char *seqs, int minimizer_len, int kmer_len, int num_longs, int seqs_len, uint64_t *kmers,
+                               int *kmer_targets, char *is_rcs, int num_ranks) {
   unsigned int tid = threadIdx.x;
   unsigned int lane_id = tid & (blockDim.x - 1);
   int per_block_seq_len = blockDim.x;
@@ -303,7 +302,7 @@ __global__ void parse_and_pack(char *seqs, int kmer_len, int num_longs, int seqs
           break;
         }
       }
-      kmer_targets[i] = gpu_minimizer_hash_fast(kmer_len, num_longs, kmer, rc_longs) % num_ranks;
+      kmer_targets[i] = gpu_minimizer_hash_fast(minimizer_len, kmer_len, num_longs, kmer, rc_longs) % num_ranks;
       if (must_rc) {
         memcpy(kmer, rc_longs, num_longs * sizeof(uint64_t));
         is_rcs[i] = 1;
@@ -350,8 +349,9 @@ void kcount_gpu::KcountGPUDriver::process_read_block(int qual_offset, const stri
   int block_size = 128;
   int num_blocks = (read_seqs.length() + (block_size - 1)) / block_size;
 
-  parse_and_pack<<<num_blocks, block_size>>>(dstate->seqs, dstate->kmer_len, dstate->num_kmer_longs, read_seqs.length(),
-                                             dstate->kmers, dstate->kmer_targets, dstate->is_rcs, dstate->upcxx_rank_n);
+  parse_and_pack<<<num_blocks, block_size>>>(dstate->seqs, dstate->minimizer_len, dstate->kmer_len, dstate->num_kmer_longs,
+                                             read_seqs.length(), dstate->kmers, dstate->kmer_targets, dstate->is_rcs,
+                                             dstate->upcxx_rank_n);
 
   dstate->host_kmers.resize(dstate->max_kmers * dstate->num_kmer_longs);
   dstate->host_kmer_targets.resize(dstate->max_kmers);
