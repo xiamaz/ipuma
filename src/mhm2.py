@@ -448,7 +448,7 @@ def main():
     if 'LMOD_SYSTEM_NAME' in os.environ and os.environ['LMOD_SYSTEM_NAME'] == "summit":
         print("This is Summit - executing custom script mhm2-upcxx-run-summit to spawn the job")
         # expect mhm2-upcxx-run-summit to be in same directory as mhm2.py too
-        cmd = [mhm2_binary_path + "-upcxx-run-summit"]
+        cmd = [os.path.split(sys.argv[0])[0] + '/mhm2-upcxx-run-summit']
         if 'UPCXX_RUN_SUMMIT_OPTS' in os.environ:
             cmd.extend(os.environ['UPCXX_RUN_SUMMIT_OPTS'].split())
 
