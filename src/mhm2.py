@@ -422,6 +422,7 @@ def main():
     argparser.add_argument("--trace-dir", default=None, help="Output directory for stacktrace")
     argparser.add_argument("--stats-dir", default=None, help="Output directory for stacktrace")
     argparser.add_argument("--preproc", default=None, help="Comma separated preprocesses and options like (valgrind,--leak-check=full) or options to upcxx-run before binary")
+    argparser.add_argument("--binary", default="mhm2", help="File name for UPC++ binary (default mhm2)")
 
     options, unknown_options = argparser.parse_known_args()
 
@@ -430,9 +431,9 @@ def main():
 
     check_exec('upcxx-run', '-h', 'UPC++')
     # expect mhm2 to be in same directory as mhm2.py
-    mhm2_binary_path = os.path.split(sys.argv[0])[0] + '/mhm2'
+    mhm2_binary_path = os.path.split(sys.argv[0])[0] + '/' + options.binary
     if not (os.path.exists(mhm2_binary_path) or which(mhm2_binary_path)):
-        die("Cannot find binary mhm2 in '", mhm2_binary_path, "'")
+        die("Cannot find binary ", options.binary + " in '", mhm2_binary_path, "'")
 
     #cores_per_node = int(options.procs_per_node)
     #if cores_per_node == 0:

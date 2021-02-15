@@ -25,7 +25,10 @@ rootdir=`pwd`
 
 INSTALL_PATH=${MHM2_INSTALL_PATH:=$rootdir/install}
 
+BINARY="${MHM2_BINARY:=mhm2}"
+
 rm -rf $INSTALL_PATH/bin/mhm2
+rm -rf $INSTALL_PATH/bin/${BINARY}
 
 if [ "$1" == "clean" ]; then
     rm -rf .build/*
@@ -43,6 +46,7 @@ else
     make -j ${MHM2_BUILD_THREADS} all install
     # this check could fail on cross-compiled systems, so don't abort
 #    make -j ${MHM2_BUILD_THREADS} check
+    mv $INSTALL_PATH/bin/mhm2 $INSTALL_PATH/bin/${BINARY}
 fi
 
 echo "Build took $((SECONDS))s"
