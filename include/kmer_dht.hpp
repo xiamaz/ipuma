@@ -218,7 +218,6 @@ class KmerDHT {
   std::chrono::time_point<std::chrono::high_resolution_clock> start_t;
   PASS_TYPE pass_type;
   bool use_bloom;
-  bool use_minimizers;
   int64_t bytes_sent = 0;
   int minimizer_len = 15;
 
@@ -332,8 +331,7 @@ class KmerDHT {
   }
 
  public:
-  KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool force_bloom, bool useHHSS,
-          bool use_minimizers)
+  KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool force_bloom, bool useHHSS)
       : kmers({})
       , bloom_filter1({})
       , bloom_filter2({})
@@ -344,8 +342,7 @@ class KmerDHT {
       , my_num_kmers(my_num_kmers)
       , max_rpcs_in_flight(max_rpcs_in_flight)
       , bloom1_cardinality(0)
-      , estimated_error_rate(0.0)
-      , use_minimizers(use_minimizers) {
+      , estimated_error_rate(0.0) {
     // minimizer len depends on k
     minimizer_len = Kmer<MAX_K>::get_k() * 2 / 3 + 1;
     if (minimizer_len < 15) minimizer_len = 15;
@@ -498,11 +495,7 @@ class KmerDHT {
   double get_estimated_error_rate() { return estimated_error_rate; }
 
   upcxx::intrank_t get_kmer_target_rank(const Kmer<MAX_K> &kmer, const Kmer<MAX_K> *kmer_rc = nullptr) const {
-    if (use_minimizers) {
-      return kmer.minimizer_hash_fast(minimizer_len, kmer_rc) % rank_n();
-    } else {
-      return std::hash<Kmer<MAX_K>>{}(kmer) % rank_n();
-    }
+    return kmer.minimizer_hash_fast(minimizer_len, kmer_rc) % rank_n();
   }
 
   KmerCounts *get_local_kmer_counts(Kmer<MAX_K> &kmer) {

@@ -60,7 +60,7 @@ using std::tie;
 using std::vector;
 
 template <int MAX_K>
-void traverse_debruijn_graph(unsigned kmer_len, dist_object<KmerDHT<MAX_K>> &kmer_dht, Contigs &my_uutigs, bool use_minimizers);
+void traverse_debruijn_graph(unsigned kmer_len, dist_object<KmerDHT<MAX_K>> &kmer_dht, Contigs &my_uutigs);
 void localassm(int max_kmer_len, int kmer_len, vector<PackedReads *> &packed_reads_list, int insert_avg, int insert_stddev,
                int qual_offset, Contigs &ctgs, const Alns &alns);
 void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Alns &alns, size_t num_ctgs);
@@ -120,7 +120,7 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     // use the max among all ranks
     my_num_kmers = upcxx::reduce_all(my_num_kmers, upcxx::op_max).wait();
     dist_object<KmerDHT<MAX_K>> kmer_dht(world(), my_num_kmers, max_kmer_store, options->max_rpcs_in_flight, options->force_bloom,
-                                         options->use_heavy_hitters, options->use_minimizers);
+                                         options->use_heavy_hitters);
     barrier();
     BEGIN_GASNET_STATS("kmer_analysis");
     analyze_kmers(kmer_len, prev_kmer_len, options->qual_offset, packed_reads_list, options->dmin_thres, ctgs, kmer_dht,
@@ -130,7 +130,7 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     barrier();
     stage_timers.dbjg_traversal->start();
     BEGIN_GASNET_STATS("dbjg_traversal");
-    traverse_debruijn_graph(kmer_len, kmer_dht, ctgs, options->use_minimizers);
+    traverse_debruijn_graph(kmer_len, kmer_dht, ctgs);
     END_GASNET_STATS();
     stage_timers.dbjg_traversal->stop();
     if (is_debug || options->checkpoint) {
