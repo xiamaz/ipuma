@@ -163,7 +163,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     gpu_devices = 0;
     SWARN("GPUs are enabled but no GPU could be configured for kmer counting");
   } else {
-    auto init_time = gpu_driver.init(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(), MINIMIZER_LEN);
+    auto init_time = gpu_driver.init(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(), kmer_dht->get_minimizer_len());
     SLOG(KLGREEN, "Initialized kcount_gpu driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
   }
   int64_t num_gpu_waits = 0;

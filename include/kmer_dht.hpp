@@ -220,6 +220,7 @@ class KmerDHT {
   bool use_bloom;
   bool use_minimizers;
   int64_t bytes_sent = 0;
+  int minimizer_len = 15;
 
   static void update_bloom_set(Kmer<MAX_K> kmer, dist_object<BloomFilter> &bloom_filter1, dist_object<BloomFilter> &bloom_filter2) {
     // look for it in the first bloom filter - if not found, add it just to the first bloom filter
@@ -345,6 +346,11 @@ class KmerDHT {
       , bloom1_cardinality(0)
       , estimated_error_rate(0.0)
       , use_minimizers(use_minimizers) {
+    // minimizer len depends on k
+    minimizer_len = Kmer<MAX_K>::get_k() * 2 / 3 + 1;
+    if (minimizer_len < 15) minimizer_len = 15;
+    if (minimizer_len > 27) minimizer_len = 27;
+    SLOG(KLGREEN, "minimizer len is ", minimizer_len, KNORM, "\n");
     // main purpose of the timer here is to track memory usage
     BarrierTimer timer(__FILEFUNC__);
     auto node0_cores = upcxx::local_team().rank_n();
@@ -468,6 +474,8 @@ class KmerDHT {
     };
   }
 
+  int get_minimizer_len() { return minimizer_len; }
+
   int64_t get_num_kmers(bool all = false) {
     if (!all)
       return reduce_one(kmers->size(), op_fast_add, 0).wait();
@@ -491,7 +499,7 @@ class KmerDHT {
 
   upcxx::intrank_t get_kmer_target_rank(const Kmer<MAX_K> &kmer, const Kmer<MAX_K> *kmer_rc = nullptr) const {
     if (use_minimizers) {
-      return kmer.minimizer_hash_fast(MINIMIZER_LEN, kmer_rc) % rank_n();
+      return kmer.minimizer_hash_fast(minimizer_len, kmer_rc) % rank_n();
     } else {
       return std::hash<Kmer<MAX_K>>{}(kmer) % rank_n();
     }

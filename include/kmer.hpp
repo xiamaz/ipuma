@@ -285,7 +285,6 @@ class Kmer {
   // -- least compliment should help smooth the distribution space of m-mers
   // -- returns a m-mer between the minimizer of the trivial fwd and rc for this kmer
   uint64_t get_minimizer_fast(int m, const Kmer *revcomp) const {
-    // static_assert(MINIMIZER_LEN <= 28);
     assert(m <= Kmer::k);
     assert(m <= 28);
     // chunk is a uint64_t whose bases fully containing a series of chunk_step candidate minimizers
