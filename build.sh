@@ -46,7 +46,9 @@ else
     make -j ${MHM2_BUILD_THREADS} all install
     # this check could fail on cross-compiled systems, so don't abort
 #    make -j ${MHM2_BUILD_THREADS} check
-    mv $INSTALL_PATH/bin/mhm2 $INSTALL_PATH/bin/${BINARY}
+    if [ "$BINARY" != "mhm2" ]; then
+        mv -f $INSTALL_PATH/bin/mhm2 $INSTALL_PATH/bin/${BINARY}
+    fi
 fi
 
 echo "Build took $((SECONDS))s"
