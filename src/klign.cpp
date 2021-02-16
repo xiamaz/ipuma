@@ -146,8 +146,6 @@ class KmerCtgDHT {
   int64_t ctg_bytes_fetched = 0;
   HASH_TABLE<cid_t, string> ctg_cache;
 
-  bool use_minimizers;
-
   int get_cigar_length(const string &cigar) {
     // check that cigar string length is the same as the sequence, but only if the sequence is included
     int base_count = 0;
@@ -415,7 +413,7 @@ class KmerCtgDHT {
   // aligner construction: SSW internal defaults are 2 2 3 1
 
   KmerCtgDHT(int kmer_len, int max_store_size, int max_rpcs_in_flight, Alns &alns, AlnScoring &aln_scoring, int rlen_limit,
-             bool compute_cigar, bool use_minimizers, int all_num_ctgs, int ranks_per_gpu = 0)
+             bool compute_cigar, int all_num_ctgs, int ranks_per_gpu = 0)
       : kmer_map({})
       , kmer_store(kmer_map)
       , num_alns(0)
@@ -429,8 +427,7 @@ class KmerCtgDHT {
       , active_kernel_fut(make_future())
       , aln_cpu_bypass_timer("klign.cpp:CPU_BSW-bypass")
       , alns(&alns)
-      , kmer_len(kmer_len)
-      , use_minimizers(use_minimizers) {
+      , kmer_len(kmer_len) {
     this->aln_scoring = aln_scoring;
     ssw_filter.report_cigar = compute_cigar;
     kmer_store.set_size("insert ctg seeds", max_store_size, max_rpcs_in_flight);
@@ -493,10 +490,7 @@ class KmerCtgDHT {
   int64_t size() const { return kmer_map->size(); }
 
   intrank_t get_target_rank(const Kmer<MAX_K> &kmer, const Kmer<MAX_K> *kmer_rc = nullptr) const {
-    if (use_minimizers)
-      return kmer.minimizer_hash_fast(MINIMIZER_LEN, kmer_rc) % rank_n();
-    else
-      return std::hash<Kmer<MAX_K>>{}(kmer) % rank_n();
+    return std::hash<Kmer<MAX_K>>{}(kmer) % rank_n();
   }
 
   int64_t get_num_kmers(bool all = false) {
@@ -1047,8 +1041,8 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
 
 template <int MAX_K>
 double find_alignments(unsigned kmer_len, vector<PackedReads *> &packed_reads_list, int max_store_size, int max_rpcs_in_flight,
-                       Contigs &ctgs, Alns &alns, int seed_space, int rlen_limit, bool use_minimizers, bool compute_cigar,
-                       int min_ctg_len, int ranks_per_gpu) {
+                       Contigs &ctgs, Alns &alns, int seed_space, int rlen_limit, bool compute_cigar, int min_ctg_len,
+                       int ranks_per_gpu) {
   BarrierTimer timer(__FILEFUNC__);
   _num_dropped_seed_to_ctgs = 0;
   Kmer<MAX_K>::set_k(kmer_len);
@@ -1066,7 +1060,7 @@ double find_alignments(unsigned kmer_len, vector<PackedReads *> &packed_reads_li
   auto all_num_ctgs = reduce_all(ctgs.size(), op_fast_add).wait();
   SLOG_VERBOSE("Alignment scoring parameters: ", aln_scoring.to_string(), "\n");
   KmerCtgDHT<MAX_K> kmer_ctg_dht(kmer_len, max_store_size, max_rpcs_in_flight, alns, aln_scoring, rlen_limit, compute_cigar,
-                                 use_minimizers, all_num_ctgs, ranks_per_gpu);
+                                 all_num_ctgs, ranks_per_gpu);
   barrier();
   build_alignment_index(kmer_ctg_dht, ctgs, min_ctg_len);
 #ifdef DEBUG
