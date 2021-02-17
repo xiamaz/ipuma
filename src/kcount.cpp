@@ -233,8 +233,8 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   auto max_kmers_stored = reduce_one(kmer_dht->get_local_num_kmers(), op_fast_max, 0).wait();
   if (!rank_me()) {
     auto avg_kmers_stored = tot_kmers_stored / rank_n();
-    SLOG(KLGREEN, "Avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
-         (double)avg_kmers_stored / max_kmers_stored, KNORM, "\n");
+    SLOG_VERBOSE("Avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
+                 (double)avg_kmers_stored / max_kmers_stored, "\n");
   }
 };
 
@@ -320,8 +320,8 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   auto max_kmers_stored = reduce_one(local_kmers, op_fast_max, 0).wait();
   if (!rank_me()) {
     auto avg_kmers_stored = tot_kmers_stored / rank_n();
-    SLOG(KLGREEN, "add ctgs: avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
-         (double)avg_kmers_stored / max_kmers_stored, KNORM, "\n");
+    SLOG_VERBOSE("add ctgs: avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
+                 (double)avg_kmers_stored / max_kmers_stored, "\n");
   }
 };
 
