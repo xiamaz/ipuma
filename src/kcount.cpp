@@ -42,8 +42,6 @@
 
 #include "kcount.hpp"
 
-#define KCOUNT_GPUS
-
 #if defined(ENABLE_GPUS) && defined(KCOUNT_GPUS)
 #include "gpu-utils/utils.hpp"
 #include "kcount-gpu/kcount_driver.hpp"

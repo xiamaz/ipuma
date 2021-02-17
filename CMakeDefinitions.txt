@@ -51,6 +51,8 @@ add_definitions(-DKCOUNT_KMER_CACHE_FRACTION=0.2)
 add_definitions(-DKCOUNT_KMER_CACHE_MAX_LOAD=0.8)
 # how many bytes for reads gathered at one time for processing - only makes a difference to GPU
 add_definitions(-DKCOUNT_READ_BLOCK_SIZE=1048576)
+# use GPUs for kmer counting
+add_definitions(-DKCOUNT_GPUS)
 
 # dynamic min depth used in debruijn graph traversal
 add_definitions(-DDYN_MIN_DEPTH=0.9)

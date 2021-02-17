@@ -383,6 +383,10 @@ class KmerDHT {
       kmer_store.set_size("kmers", max_kmer_store_bytes, max_rpcs_in_flight, useHHSS);
 
     if (use_bloom) {
+#if defined(ENABLE_GPUS) && defined(KCOUNT_GPUS)
+      SDIE("Cannot use bloom with GPU kmer counting");
+#endif
+
       // in this case we get an accurate estimate of the hash table size after the first bloom round, so the hash table space
       // is reserved then
       double init_mem_free = get_free_mem();
