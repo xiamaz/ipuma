@@ -272,10 +272,6 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   BarrierTimer timer(__FILEFUNC__);
   int64_t num_kmers = 0;
   int64_t num_prev_kmers = kmer_dht->get_num_kmers();
-#ifdef USE_KMER_DEPTHS
-  double tot_depth_diff = 0;
-  double max_depth_diff = 0;
-#endif
   ProgressBar progbar(ctgs.size(), "Adding extra contig kmers from kmer length " + to_string(prev_kmer_len));
   vector<Kmer<MAX_K>> kmers;
   kmer_dht->set_pass(CTG_KMERS_PASS);
@@ -289,12 +285,6 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
         DIE("kmers size mismatch ", kmers.size(), " != ", (ctg->seq.length() - kmer_len + 1), " '", ctg->seq, "'");
       for (int i = 1; i < (int)(ctg->seq.length() - kmer_len); i++) {
         kmer_count_t depth = ctg->depth;
-#ifdef USE_KMER_DEPTHS
-        kmer_count_t kmer_depth = ctg->get_kmer_depth(i, kmer_len, prev_kmer_len);
-        tot_depth_diff += (double)(kmer_depth - depth) / depth;
-        max_depth_diff = max(max_depth_diff, (double)abs(kmer_depth - depth));
-        depth = kmer_depth;
-#endif
         kmer_dht->add_kmer(kmers[i], ctg->seq[i - 1], ctg->seq[i + kmer_len], depth);
         num_kmers++;
       }
@@ -308,11 +298,6 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   auto all_num_kmers = reduce_one(num_kmers, op_fast_add, 0).wait();
   SLOG_VERBOSE("Processed a total of ", all_num_ctgs, " contigs and ", all_num_kmers, " kmers\n");
   SLOG_VERBOSE("Found ", perc_str(kmer_dht->get_num_kmers() - num_prev_kmers, all_num_kmers), " additional unique kmers\n");
-#ifdef USE_KMER_DEPTH
-  auto all_tot_depth_diff = reduce_one(tot_depth_diff, op_fast_add, 0).wait();
-  SLOG_VERBOSE(KLRED, "Average depth diff ", all_tot_depth_diff / all_num_kmers, " max depth diff ",
-               reduce_one(max_depth_diff, op_fast_max, 0).wait(), KNORM, "\n");
-#endif
   auto local_kmers = kmer_dht->get_local_num_kmers() - start_local_num_kmers;
   auto tot_kmers_stored = reduce_one(local_kmers, op_fast_add, 0).wait();
   auto max_kmers_stored = reduce_one(local_kmers, op_fast_max, 0).wait();

@@ -102,9 +102,6 @@ class Options {
   string pin_by = "core";
   int ranks_per_gpu = 0;  // autodetect
   string ctgs_fname;
-#ifdef USE_KMER_DEPTHS
-  string kmer_depths_fname;
-#endif
   vector<int> insert_size = {0, 0};
   int min_ctg_print_len = 500;
   int break_scaff_Ns = 10;

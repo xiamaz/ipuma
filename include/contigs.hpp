@@ -63,12 +63,6 @@ struct Contig {
   // histogram of teranucleotide frequencies for contig similarity check in cgraph walks
   tnf_t tnf;
 #endif
-
-#ifdef USE_KMER_DEPTHS
-  vector<uint16_t> kmer_depths;
-
-  uint16_t get_kmer_depth(int start_pos, int kmer_len, int prev_kmer_len);
-#endif
 };
 
 class Contigs {
@@ -98,10 +92,4 @@ class Contigs {
   void dump_contigs(const string &fname, unsigned min_ctg_len);
 
   void load_contigs(const string &ctgs_fname);
-
-#ifdef USE_KMER_DEPTHS
-  void dump_kmer_depths(const string &fname) {}
-
-  void load_kmer_depths(const string &ctgs_fname) {}
-#endif
 };
