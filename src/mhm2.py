@@ -577,7 +577,8 @@ def main():
                         return 127
                     else:
                         return 0
-                print_red("\nERROR: subprocess terminated with return code ", _proc.returncode)
+                print_red("\nERROR: subprocess terminated with return code ", _proc.returncode,
+                          (" (OOM)" if _proc.returncode == 137 else ""))
                 signals_found = {}
                 for err_msg in err_msgs:
                     for signame in SIGNAMES:

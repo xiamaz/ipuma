@@ -347,7 +347,7 @@ class KmerDHT {
     minimizer_len = Kmer<MAX_K>::get_k() * 2 / 3 + 1;
     if (minimizer_len < 15) minimizer_len = 15;
     if (minimizer_len > 27) minimizer_len = 27;
-    SLOG(KLGREEN, "minimizer len is ", minimizer_len, KNORM, "\n");
+    SLOG_VERBOSE("Using a minimizer length of ", minimizer_len, "\n");
     // main purpose of the timer here is to track memory usage
     BarrierTimer timer(__FILEFUNC__);
     auto node0_cores = upcxx::local_team().rank_n();
