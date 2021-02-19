@@ -63,6 +63,7 @@ struct Contig {
   // histogram of teranucleotide frequencies for contig similarity check in cgraph walks
   tnf_t tnf;
 #endif
+  uint16_t get_uint16_t_depth() { return (depth > UINT16_MAX ? UINT16_MAX : depth); }
 };
 
 class Contigs {
