@@ -99,7 +99,6 @@ template <int MAX_K>
 static void process_ctg_block_gpu(unsigned kmer_len, const string &seq_block, const vector<kmer_count_t> &depth_block,
                                   dist_object<KmerDHT<MAX_K>> &kmer_dht, int64_t &num_kmers, int64_t &num_gpu_waits) {
   int64_t num_Ns = 0;  // we don't expect any when processing ctg kmers
-  // ofstream f("gpu-kmers-" + to_string(kmer_len) + "_" + to_string(rank_me()), ios::app);
   if (!gpu_driver->process_seq_block(seq_block, num_Ns))
     DIE("ctg seq length is too high, ", seq_block.length(), " >= ", KCOUNT_GPU_SEQ_BLOCK_SIZE);
   while (!gpu_driver->kernel_is_done()) {
@@ -129,13 +128,9 @@ static void process_ctg_block_gpu(unsigned kmer_len, const string &seq_block, co
     if (cpu_target != kmer_targets[i]) DIE("cpu target is ", cpu_target, " but gpu target is ", kmer_targets[i]);
 #endif
     kmer_dht->add_kmer(kmer, left_base, right_base, depth_block[i], true, kmer_targets[i]);
-    // f << kmer << " " << left_base << " " << right_base << " " << depth_block[i] << " " << kmer_targets[i] << " " <<
-    // (int)is_rcs[i]
-    //  << endl;
     DBG_ADD_KMER("kcount add_kmer ", kmer.to_string(), " count ", depth_block[i], "\n");
     num_kmers++;
   }
-  // f.close();
 }
 #endif
 
@@ -321,7 +316,6 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   kmer_dht->set_pass(CTG_KMERS_PASS);
   auto start_local_num_kmers = kmer_dht->get_local_num_kmers();
 
-  // ofstream f("cpu-kmers-" + to_string(kmer_len) + "_" + to_string(rank_me()), ios::app);
 #ifdef ENABLE_GPUS
   int64_t num_gpu_waits = 0;
   int num_ctg_blocks = 0;
@@ -363,29 +357,11 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
       DIE("kmers size mismatch ", kmers.size(), " != ", (ctg->seq.length() - kmer_len + 1), " '", ctg->seq, "'");
     for (int i = 1; i < (int)kmers.size() - 1; i++) {
       kmer_dht->add_kmer(kmers[i], ctg->seq[i - 1], ctg->seq[i + kmer_len], ctg->get_uint16_t_depth());
-      /*
-      auto kmer = kmers[i];
-      Kmer<MAX_K> kmer_rc = kmer.revcomp();
-      char left_ext = ctg->seq[i - 1];
-      char right_ext = ctg->seq[i + kmer_len];
-      int is_rc = 0;
-      if (kmer_rc < kmer) {
-        is_rc = 1;
-        kmer.swap(kmer_rc);
-        swap(left_ext, right_ext);
-        left_ext = comp_nucleotide(left_ext);
-        right_ext = comp_nucleotide(right_ext);
-      }
-      auto target_rank = kmer_dht->get_kmer_target_rank(kmer, &kmer_rc);
-      f << kmer << " " << left_ext << " " << right_ext << " " << ctg->get_uint16_t_depth() << " " << target_rank << " " << is_rc
-        << endl;
-        */
       num_kmers++;
     }
     progress();
 #endif
   }
-  // f.close();
   progbar.done();
 #ifdef ENABLE_GPUS
   if (!seq_block.empty()) {
