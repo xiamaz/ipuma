@@ -263,12 +263,9 @@ __global__ void parse_and_pack(char *seqs, int minimizer_len, int kmer_len, int 
       revcomp(kmer, rc_longs, kmer_len, num_longs);
       bool must_rc = false;
       for (l = 0; l < num_longs; l++) {
-        if (rc_longs[l] < kmer[l]) {
-          must_rc = true;
-          break;
-        } else if (rc_longs[l] > kmers[l]) {
-          break;
-        }
+        if (rc_longs[l] == kmer[l]) continue;
+        if (rc_longs[l] < kmer[l]) must_rc = true;
+        break;
       }
       kmer_targets[i] = gpu_minimizer_hash_fast(minimizer_len, kmer_len, num_longs, kmer, rc_longs) % num_ranks;
       if (must_rc) {
@@ -325,7 +322,6 @@ bool kcount_gpu::KcountGPUDriver::process_seq_block(const string &seqs, int64_t 
   parse_and_pack<<<num_blocks, block_size>>>(dstate->seqs, dstate->minimizer_len, dstate->kmer_len, dstate->num_kmer_longs,
                                              seqs.length(), dstate->kmers, dstate->kmer_targets, dstate->is_rcs,
                                              dstate->upcxx_rank_n);
-
   dstate->host_kmers.resize(num_kmers * dstate->num_kmer_longs);
   dstate->host_kmer_targets.resize(num_kmers);
   dstate->host_is_rcs.resize(num_kmers);
