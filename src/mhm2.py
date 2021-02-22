@@ -80,7 +80,7 @@ def get_hdw_cores_per_node():
         import psutil
         cores = psutil.cpu_count(logical=False)
         print("Found %d cpus from psutil" % cores)
-    except (NameError, ImportError):
+    except (NameError, ImportError, TypeError):
         #print("Could not get cpus from psutil")
         pass
     # always trust lscpu, not psutil
@@ -446,9 +446,9 @@ def main():
 
     # special spawner for summit -- executes jsrun and picks up job size from the environment!
     if 'LMOD_SYSTEM_NAME' in os.environ and os.environ['LMOD_SYSTEM_NAME'] == "summit":
-        print("This is Summit - executing custom script mhm2-upcxx-run-summit to spawn the job")
         # expect mhm2-upcxx-run-summit to be in same directory as mhm2.py too
         cmd = [os.path.split(sys.argv[0])[0] + '/mhm2-upcxx-run-summit']
+        print("This is Summit - executing custom script mhm2-upcxx-run-summit to spawn the job", cmd)
         if 'UPCXX_RUN_SUMMIT_OPTS' in os.environ:
             cmd.extend(os.environ['UPCXX_RUN_SUMMIT_OPTS'].split())
 
