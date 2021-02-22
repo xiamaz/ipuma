@@ -134,8 +134,8 @@ dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_to_read
   auto all_num_mapped_reads = reduce_all(num_mapped_reads, op_fast_add).wait();
   auto avg_num_mapped_reads = all_num_mapped_reads / rank_n();
   auto max_num_mapped_reads = reduce_one(num_mapped_reads, op_fast_max, 0).wait();
-  SLOG("Avg mapped reads per rank ", avg_num_mapped_reads, " max ", max_num_mapped_reads, " balance ",
-       (double)avg_num_mapped_reads / max_num_mapped_reads, "\n");
+  SLOG_VERBOSE("Avg mapped reads per rank ", avg_num_mapped_reads, " max ", max_num_mapped_reads, " balance ",
+               (double)avg_num_mapped_reads / max_num_mapped_reads, "\n");
   atomic_domain<int64_t> fetch_add_domain({atomic_op::fetch_add});
   dist_object<global_ptr<int64_t>> read_counter_dobj = (!rank_me() ? new_<int64_t>(0) : nullptr);
   global_ptr<int64_t> read_counter = read_counter_dobj.fetch(0).wait();
@@ -208,7 +208,7 @@ dist_object<vector<PackedRead>> move_reads_to_targets(vector<PackedReads *> &pac
   read_seq_store.flush_updates();
   barrier();
   auto all_num_not_found = reduce_one(num_not_found, op_fast_add, 0).wait();
-  SLOG("Didn't find contig targets for ", perc_str(all_num_not_found, all_num_reads / 2), " pairs\n");
+  SLOG_VERBOSE("Didn't find contig targets for ", perc_str(all_num_not_found, all_num_reads / 2), " pairs\n");
   return new_packed_reads;
 }
 

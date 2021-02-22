@@ -169,8 +169,8 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
         }
         avg_num_reads = reduce_one(num_reads, op_fast_add, 0).wait() / rank_n();
         max_num_reads = reduce_one(num_reads, op_fast_max, 0).wait();
-        SLOG("After shuffle: avg reads per rank ", avg_num_reads, " max ", max_num_reads, " (load balance ",
-             (double)avg_num_reads / max_num_reads, ")\n");
+        SLOG_VERBOSE("After shuffle: avg reads per rank ", avg_num_reads, " max ", max_num_reads, " (load balance ",
+                     (double)avg_num_reads / max_num_reads, ")\n");
       }
     }
 #ifdef DEBUG
