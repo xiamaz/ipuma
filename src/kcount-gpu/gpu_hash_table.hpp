@@ -47,8 +47,14 @@ namespace kcount_gpu {
 struct HashTableDriverState;
 
 class HashTableGPUDriver {
+  // stores CUDA specific variables, etc
   HashTableDriverState *dstate = nullptr;
 
+    int upcxx_rank_me;
+    int upcxx_rank_n;
+    int kmer_len;
+    int num_kmer_longs;
+    
  public:
   HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int minimizer_len, double &init_time) {}
   ~HashTableGPUDriver() {}

@@ -113,10 +113,10 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
   max_kmers = KCOUNT_GPU_SEQ_BLOCK_SIZE - kmer_len + 1;
 
   timepoint_t tm = chrono::high_resolution_clock::now();
-  cudaErrchk(cudaMalloc(&seqs, KCOUNT_GPU_SEQ_BLOCK_SIZE));
-  cudaErrchk(cudaMalloc(&kmers, max_kmers * num_kmer_longs * sizeof(uint64_t)));
-  cudaErrchk(cudaMalloc(&kmer_targets, max_kmers * sizeof(int)));
-  cudaErrchk(cudaMalloc(&is_rcs, max_kmers));
+  cudaErrchk(cudaMalloc(&dev_seqs, KCOUNT_GPU_SEQ_BLOCK_SIZE));
+  cudaErrchk(cudaMalloc(&dev_kmers, max_kmers * num_kmer_longs * sizeof(uint64_t)));
+  cudaErrchk(cudaMalloc(&dev_kmer_targets, max_kmers * sizeof(int)));
+  cudaErrchk(cudaMalloc(&dev_is_rcs, max_kmers));
   chrono::duration<double> t_elapsed = chrono::high_resolution_clock::now() - tm;
   t_malloc += t_elapsed.count();
 
@@ -127,10 +127,10 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
 }
 
 kcount_gpu::ParseAndPackGPUDriver::~ParseAndPackGPUDriver() {
-  cudaFree(seqs);
-  cudaFree(kmers);
-  cudaFree(kmer_targets);
-  cudaFree(is_rcs);
+  cudaFree(dev_seqs);
+  cudaFree(dev_kmers);
+  cudaFree(dev_kmer_targets);
+  cudaFree(dev_is_rcs);
   cudaDeviceSynchronize();
   delete dstate;
 }
@@ -283,35 +283,35 @@ class QuickTimer {
   double get_elapsed() { return secs; }
 };
 
-bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs_str, int64_t &num_Ns) {
+bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, int64_t &num_Ns) {
   QuickTimer func_timer, cp_timer, kernel_timer;
 
-  if (seqs_str.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) return false;
+  if (seqs.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) return false;
 
   func_timer.start();
   cudaErrchk(cudaEventCreateWithFlags(&dstate->event, cudaEventDisableTiming | cudaEventBlockingSync));
 
-  int num_kmers = seqs_str.length() - kmer_len + 1;
+  int num_kmers = seqs.length() - kmer_len + 1;
   kernel_timer.start();
   cp_timer.start();
   size_t kmer_bytes = num_kmers * num_kmer_longs * sizeof(uint64_t);
-  cudaErrchk(cudaMemcpy(seqs, &seqs_str[0], seqs_str.length(), cudaMemcpyHostToDevice));
-  cudaErrchk(cudaMemset(kmers, 0, kmer_bytes));
-  cudaErrchk(cudaMemset(is_rcs, 0, num_kmers));
+  cudaErrchk(cudaMemcpy(dev_seqs, &seqs[0], seqs.length(), cudaMemcpyHostToDevice));
+  cudaErrchk(cudaMemset(dev_kmers, 0, kmer_bytes));
+  cudaErrchk(cudaMemset(dev_is_rcs, 0, num_kmers));
   cp_timer.stop();
 
   int block_size = 128;
-  int num_blocks = (seqs_str.length() + (block_size - 1)) / block_size;
+  int num_blocks = (seqs.length() + (block_size - 1)) / block_size;
 
-  parse_and_pack<<<num_blocks, block_size>>>(seqs, minimizer_len, kmer_len, num_kmer_longs, seqs_str.length(), kmers, kmer_targets,
-                                             is_rcs, upcxx_rank_n);
+  parse_and_pack<<<num_blocks, block_size>>>(dev_seqs, minimizer_len, kmer_len, num_kmer_longs, seqs.length(), dev_kmers,
+                                             dev_kmer_targets, dev_is_rcs, upcxx_rank_n);
   host_kmers.resize(num_kmers * num_kmer_longs);
   host_kmer_targets.resize(num_kmers);
   host_is_rcs.resize(num_kmers);
   cp_timer.start();
-  cudaErrchk(cudaMemcpy(&(host_kmers[0]), kmers, num_kmers * num_kmer_longs * sizeof(uint64_t), cudaMemcpyDeviceToHost));
-  cudaErrchk(cudaMemcpy(&(host_kmer_targets[0]), kmer_targets, num_kmers * sizeof(int), cudaMemcpyDeviceToHost));
-  cudaErrchk(cudaMemcpy(&(host_is_rcs[0]), is_rcs, num_kmers, cudaMemcpyDeviceToHost));
+  cudaErrchk(cudaMemcpy(&(host_kmers[0]), dev_kmers, num_kmers * num_kmer_longs * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+  cudaErrchk(cudaMemcpy(&(host_kmer_targets[0]), dev_kmer_targets, num_kmers * sizeof(int), cudaMemcpyDeviceToHost));
+  cudaErrchk(cudaMemcpy(&(host_is_rcs[0]), dev_is_rcs, num_kmers, cudaMemcpyDeviceToHost));
   cp_timer.stop();
   t_cp += cp_timer.get_elapsed();
   kernel_timer.stop();
