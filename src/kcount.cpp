@@ -204,7 +204,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     double init_time;
     gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
                                                        kmer_dht->get_minimizer_len(), init_time);
-    SLOG(KLMAGENTA, "Initialized kcount_gpu driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
+    SLOG(KLMAGENTA, "Initialized parse and pack GPU driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
   }
 #else
   vector<Kmer<MAX_K>> kmers;

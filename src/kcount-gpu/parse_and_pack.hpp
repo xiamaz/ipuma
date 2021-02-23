@@ -49,13 +49,29 @@ namespace kcount_gpu {
 struct ParseAndPackDriverState;
 
 class ParseAndPackGPUDriver {
+  // this opaque data type stores CUDA specific variables
   ParseAndPackDriverState *dstate = nullptr;
+
+  int upcxx_rank_me;
+  int upcxx_rank_n;
+  int max_kmers;
+  int kmer_len;
+  int num_kmer_longs;
+  int minimizer_len;
+  double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
+  char *seqs;
+  uint64_t *kmers;
+  int *kmer_targets;
+  char *is_rcs;
+  std::vector<uint64_t> host_kmers;
+  std::vector<int> host_kmer_targets;
+  std::vector<char> host_is_rcs;
 
  public:
   ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int minimizer_len,
                         double &init_time);
   ~ParseAndPackGPUDriver();
-  bool process_seq_block(const std::string &read_seqs, int64_t &num_Ns);
+  bool process_seq_block(const std::string &seqs_str, int64_t &num_Ns);
   std::tuple<double, double, double, double> get_elapsed_times();
   bool kernel_is_done();
   std::vector<uint64_t> &get_packed_kmers();

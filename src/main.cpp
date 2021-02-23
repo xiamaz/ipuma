@@ -220,7 +220,7 @@ int main(int argc, char **argv) {
       detect_gpu_fut.wait();
     }
     int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
-    SLOG(KLGREEN, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
+    SLOG(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
 #endif
 
     // contigging loops

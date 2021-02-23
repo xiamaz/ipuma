@@ -425,7 +425,7 @@ class KmerDHT {
         double init_time;
         gpu_driver = new kcount_gpu::HashTableGPUDriver(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), Kmer<MAX_K>::get_N_LONGS(),
                                                         minimizer_len, init_time);
-        SLOG(KLGREEN, "Initialized hash table GPU driver in ", std::fixed, std::setprecision(3), init_time, " s", KNORM, "\n");
+        SLOG(KLMAGENTA, "Initialized hash table GPU driver in ", std::fixed, std::setprecision(3), init_time, " s", KNORM, "\n");
       }
 #endif
       barrier();

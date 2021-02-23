@@ -42,8 +42,6 @@
 
 #pragma once
 
-#include <vector>
-
 namespace kcount_gpu {
 
 struct HashTableDriverState;
