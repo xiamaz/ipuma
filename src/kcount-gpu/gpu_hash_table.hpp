@@ -46,21 +46,14 @@
 
 namespace kcount_gpu {
 
-struct ParseAndPackDriverState;
+struct HashTableDriverState;
 
-class ParseAndPackGPUDriver {
-  ParseAndPackDriverState *dstate = nullptr;
+class HashTableGPUDriver {
+  HashTableDriverState *dstate = nullptr;
 
  public:
-  ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int minimizer_len,
-                        double &init_time);
-  ~ParseAndPackGPUDriver();
-  bool process_seq_block(const std::string &read_seqs, int64_t &num_Ns);
-  std::tuple<double, double, double, double> get_elapsed_times();
-  bool kernel_is_done();
-  std::vector<uint64_t> &get_packed_kmers();
-  std::vector<int> &get_kmer_targets();
-  std::vector<char> &get_is_rcs();
+  HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int minimizer_len, double &init_time) {}
+  ~HashTableGPUDriver() {}
 };
 
 }  // namespace kcount_gpu

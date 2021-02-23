@@ -91,7 +91,7 @@ static void gpuAssert(cudaError_t code, const char *file, int line, bool abort =
   }
 }
 
-struct kcount_gpu::DriverState {
+struct kcount_gpu::ParseAndPackDriverState {
   int device_count;
   int my_gpu_id;
   int upcxx_rank_me;
@@ -115,7 +115,7 @@ struct kcount_gpu::DriverState {
 kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs,
                                                          int minimizer_len, double &init_time) {
   timepoint_t t = chrono::high_resolution_clock::now();
-  dstate = new DriverState();
+  dstate = new ParseAndPackDriverState();
   cudaErrchk(cudaGetDeviceCount(&dstate->device_count));
   dstate->my_gpu_id = upcxx_rank_me % dstate->device_count;
   cudaErrchk(cudaSetDevice(dstate->my_gpu_id));

@@ -40,27 +40,19 @@
  form.
 */
 
-#pragma once
+#include <iostream>
+#include <sstream>
+#include <chrono>
+#include <tuple>
+#include <cuda_runtime_api.h>
+#include <cuda.h>
+#include "gpu-utils/utils.hpp"
+#include "gpu_hash_table.hpp"
 
-#include <vector>
+#define KNORM "\x1B[0m"
+#define KLGREEN "\x1B[92m"
 
-namespace kcount_gpu {
+using namespace std;
+using namespace gpu_utils;
 
-struct ParseAndPackDriverState;
-
-class ParseAndPackGPUDriver {
-  ParseAndPackDriverState *dstate = nullptr;
-
- public:
-  ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int minimizer_len,
-                        double &init_time);
-  ~ParseAndPackGPUDriver();
-  bool process_seq_block(const std::string &read_seqs, int64_t &num_Ns);
-  std::tuple<double, double, double, double> get_elapsed_times();
-  bool kernel_is_done();
-  std::vector<uint64_t> &get_packed_kmers();
-  std::vector<int> &get_kmer_targets();
-  std::vector<char> &get_is_rcs();
-};
-
-}  // namespace kcount_gpu
+using timepoint_t = chrono::time_point<std::chrono::high_resolution_clock>;
