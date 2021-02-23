@@ -52,7 +52,7 @@
 #include "upcxx_utils.hpp"
 #include "upcxx_utils/thread_pool.hpp"
 #include "utils.hpp"
-#include "gpu-utils/utils.hpp"
+#include "gpu-utils/gpu_utils.hpp"
 
 #include "kmer.hpp"
 
@@ -155,9 +155,9 @@ int main(int argc, char **argv) {
       [&gpu_startup_duration, &num_gpus, &gpu_mem]() { gpu_utils::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
   detect_gpu_fut = detect_gpu_fut.then([&gpu_startup_duration, &num_gpus, &gpu_mem]() {
     if (num_gpus > 0) {
-      SLOG(KLGREEN, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
+      SLOG(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
            get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
-      SLOG(KLGREEN, gpu_utils::get_gpu_device_description(), KNORM);
+      SLOG(gpu_utils::get_gpu_device_description());
     } else {
       SWARN("Compiled for GPUs but no GPUs available...");
     }

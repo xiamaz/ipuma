@@ -63,6 +63,11 @@
 #include "utils.hpp"
 #include "zstr.hpp"
 
+#ifdef ENABLE_GPUS
+#include "gpu-utils/gpu_utils.hpp"
+#include "kcount-gpu/gpu_hash_table.hpp"
+#endif
+
 using std::array;
 using std::endl;
 using std::get;
@@ -220,6 +225,9 @@ class KmerDHT {
   bool use_bloom;
   int64_t bytes_sent = 0;
   int minimizer_len = 15;
+#ifdef ENABLE_GPUS
+  kcount_gpu::HashTableGPUDriver *gpu_driver;
+#endif
 
   static void update_bloom_set(Kmer<MAX_K> kmer, dist_object<BloomFilter> &bloom_filter1, dist_object<BloomFilter> &bloom_filter2) {
     // look for it in the first bloom filter - if not found, add it just to the first bloom filter
@@ -408,6 +416,18 @@ class KmerDHT {
       double init_free_mem = get_free_mem();
       if (my_adjusted_num_kmers <= 0) DIE("no kmers to reserve space for");
       kmers->reserve(my_adjusted_num_kmers);
+#ifdef ENABLE_GPUS
+      // vector<GPUKmerCounts> gpu_kmer_counts;
+      // gpu_kmer_counts.reserve(KCOUNT_GPU_MAX_HT_ENTRIES);
+      if (gpu_utils::get_num_node_gpus() <= 0) {
+        DIE("GPUs are enabled but no GPU could be configured for kmer counting");
+      } else {
+        double init_time;
+        gpu_driver = new kcount_gpu::HashTableGPUDriver(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), Kmer<MAX_K>::get_N_LONGS(),
+                                                        minimizer_len, init_time);
+        SLOG(KLGREEN, "Initialized hash table GPU driver in ", std::fixed, std::setprecision(3), init_time, " s", KNORM, "\n");
+      }
+#endif
       barrier();
     }
     start_t = CLOCK_NOW();
@@ -424,7 +444,12 @@ class KmerDHT {
     kmer_store.clear();
   }
 
-  ~KmerDHT() { clear(); }
+  ~KmerDHT() {
+    clear();
+#ifdef ENABLE_GPUS
+    delete gpu_driver;
+#endif
+  }
 
   void reserve_space_and_clear_bloom1() {
     BarrierTimer timer(__FILEFUNC__);
@@ -526,6 +551,10 @@ class KmerDHT {
 
   void add_kmer(Kmer<MAX_K> kmer, char left_ext, char right_ext, kmer_count_t count, bool rc_checked = false,
                 int target_rank = -1) {
+#ifdef ENABLE_GPUS
+// FIXME: buffer the new entry locally, and once the buffer is full, call the GPU driver code to stick it into the
+// GPU hash table
+#endif
     _num_kmers_counted++;
     if (!count) count = 1;
     if (!rc_checked) {
@@ -564,6 +593,10 @@ class KmerDHT {
       kmer_store_bloom.flush_updates();
     else
       kmer_store.flush_updates();
+#ifdef ENABLE_GPUS
+      // FIXME: call gpus to process any outstanding buffered local updates
+      // FIXME: copy from gpu to cpu and insert in cpu unordered_map
+#endif
     auto avg_kmers_processed = reduce_one(_num_kmers_counted, op_fast_add, 0).wait() / rank_n();
     auto max_kmers_processed = reduce_one(_num_kmers_counted, op_fast_max, 0).wait();
     auto avg_local_kmers = reduce_one(_num_kmers_counted_locally, op_fast_add, 0).wait() / rank_n();

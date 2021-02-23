@@ -46,14 +46,11 @@
 #include <tuple>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
-#include "gpu-utils/utils.hpp"
+
+#include "gpu_common.hpp"
 #include "parse_and_pack.hpp"
 
-#define KNORM "\x1B[0m"
-#define KLGREEN "\x1B[92m"
-
 using namespace std;
-using namespace gpu_utils;
 
 using timepoint_t = chrono::time_point<std::chrono::high_resolution_clock>;
 
@@ -79,17 +76,6 @@ __constant__ uint64_t GPU_0_MASK[32] = {
     0xFFFFFFFFF0000000, 0xFFFFFFFFFC000000, 0xFFFFFFFFFF000000, 0xFFFFFFFFFFC00000, 0xFFFFFFFFFFF00000, 0xFFFFFFFFFFFC0000,
     0xFFFFFFFFFFFF0000, 0xFFFFFFFFFFFFC000, 0xFFFFFFFFFFFFF000, 0xFFFFFFFFFFFFFC00, 0xFFFFFFFFFFFFFF00, 0xFFFFFFFFFFFFFFC0,
     0xFFFFFFFFFFFFFFF0, 0xFFFFFFFFFFFFFFFC};
-
-#define cudaErrchk(ans) \
-  { gpuAssert((ans), __FILE__, __LINE__); }
-
-static void gpuAssert(cudaError_t code, const char *file, int line, bool abort = true) {
-  if (code != cudaSuccess) {
-    ostringstream os;
-    os << "GPU assert " << cudaGetErrorString(code) << " " << file << ":" << line << "\n";
-    throw runtime_error(os.str());
-  }
-}
 
 struct kcount_gpu::ParseAndPackDriverState {
   int device_count;

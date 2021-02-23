@@ -43,7 +43,7 @@
 #include "kcount.hpp"
 
 #ifdef ENABLE_GPUS
-#include "gpu-utils/utils.hpp"
+#include "gpu-utils/gpu_utils.hpp"
 #include "kcount-gpu/parse_and_pack.hpp"
 
 static kcount_gpu::ParseAndPackGPUDriver *gpu_driver;
@@ -204,7 +204,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     double init_time;
     gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
                                                        kmer_dht->get_minimizer_len(), init_time);
-    SLOG(KLGREEN, "Initialized kcount_gpu driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
+    SLOG(KLMAGENTA, "Initialized kcount_gpu driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
   }
 #else
   vector<Kmer<MAX_K>> kmers;
@@ -242,10 +242,10 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     process_read_block_gpu(kmer_len, qual_offset, seq_block, quals_block, kmer_dht, num_Ns, num_kmers, num_gpu_waits);
     num_read_blocks++;
   }
-  SLOG(KLGREEN, "Number of calls to progress while gpu driver was running: ", num_gpu_waits, KNORM, "\n");
+  SLOG(KLMAGENTA, "Number of calls to progress while gpu driver was running: ", num_gpu_waits, KNORM, "\n");
   auto [gpu_time_tot, gpu_time_malloc, gpu_time_cp, gpu_time_kernel] = gpu_driver->get_elapsed_times();
-  SLOG(KLGREEN, "Called GPU ", num_read_blocks, " times", KNORM, "\n");
-  SLOG(KLGREEN, "GPU times (secs): ", fixed, setprecision(3), " total ", gpu_time_tot, ", malloc ", gpu_time_malloc, ", cp ",
+  SLOG(KLMAGENTA, "Called GPU ", num_read_blocks, " times", KNORM, "\n");
+  SLOG(KLMAGENTA, "GPU times (secs): ", fixed, setprecision(3), " total ", gpu_time_tot, ", malloc ", gpu_time_malloc, ", cp ",
        gpu_time_cp, ", kernel ", gpu_time_kernel, KNORM, "\n");
   delete gpu_driver;
   gpu_driver = nullptr;
@@ -271,9 +271,6 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     SLOG_VERBOSE("Avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
                  (double)avg_kmers_stored / max_kmers_stored, "\n");
   }
-#ifdef ENABLE_GPUS
-  delete gpu_driver;
-#endif
 };
 
 // count ctg kmers if using bloom
@@ -329,7 +326,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     double init_time;
     gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
                                                        kmer_dht->get_minimizer_len(), init_time);
-    SLOG(KLGREEN, "Initialized kcount_gpu driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
+    SLOG(KLMAGENTA, "Initialized parse and pack GPU driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
   }
 #else
   vector<Kmer<MAX_K>> kmers;
@@ -369,10 +366,10 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     process_ctg_block_gpu(kmer_len, seq_block, depth_block, kmer_dht, num_kmers, num_gpu_waits);
     num_ctg_blocks++;
   }
-  SLOG(KLGREEN, "Number of calls to progress while gpu driver was running: ", num_gpu_waits, KNORM, "\n");
+  SLOG(KLMAGENTA, "Number of calls to progress while gpu driver was running: ", num_gpu_waits, KNORM, "\n");
   auto [gpu_time_tot, gpu_time_malloc, gpu_time_cp, gpu_time_kernel] = gpu_driver->get_elapsed_times();
-  SLOG(KLGREEN, "Called GPU ", num_ctg_blocks, " times", KNORM, "\n");
-  SLOG(KLGREEN, "GPU times (secs): ", fixed, setprecision(3), " total ", gpu_time_tot, ", malloc ", gpu_time_malloc, ", cp ",
+  SLOG(KLMAGENTA, "Called GPU ", num_ctg_blocks, " times", KNORM, "\n");
+  SLOG(KLMAGENTA, "GPU times (secs): ", fixed, setprecision(3), " total ", gpu_time_tot, ", malloc ", gpu_time_malloc, ", cp ",
        gpu_time_cp, ", kernel ", gpu_time_kernel, KNORM, "\n");
 #endif
   kmer_dht->flush_updates();

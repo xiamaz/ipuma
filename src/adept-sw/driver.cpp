@@ -49,24 +49,14 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <chrono>
 
 #include <cuda_runtime_api.h>
 #include <cuda.h>
 
 #include "driver.hpp"
 #include "kernel.hpp"
-#include <chrono>
-
-#define cudaErrchk(ans) \
-  { gpuAssert((ans), __FILE__, __LINE__); }
-
-static void gpuAssert(cudaError_t code, const char* file, int line, bool abort = true) {
-  if (code != cudaSuccess) {
-    std::ostringstream os;
-    os << "GPU assert " << cudaGetErrorString(code) << " " << file << ":" << line << "\n";
-    throw std::runtime_error(os.str());
-  }
-}
+#include "gpu_common.hpp"
 
 struct gpu_alignments {
   short* ref_start_gpu;

@@ -40,16 +40,28 @@
  form.
 */
 
+#pragma once
+
 #include <iostream>
-#include <sstream>
-#include <chrono>
-#include <tuple>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
 
 #include "upcxx_utils/colors.h"
-#include "gpu_hash_table.hpp"
+#include "gpu_common.hpp"
 
-using namespace std;
+// Functions that are common to all cuda code; not to be used by upcxx code
 
-using timepoint_t = chrono::time_point<std::chrono::high_resolution_clock>;
+#define cudaErrchk(ans) \
+  { gpu_utils::gpu_die((ans), __FILE__, __LINE__); }
+
+namespace gpu_utils {
+
+inline void gpu_die(cudaError_t code, const char *file, int line, bool abort = true) {
+  if (code != cudaSuccess) {
+    std::cerr << KLRED << "<" << file << ":" << line << "> ERROR:" << KNORM << cudaGetErrorString(code) << "\n";
+    std::abort();
+    // do not throw exceptions -- does not work properly within progress() throw std::runtime_error(outstr);
+  }
+}
+
+}  // namespace gpu_utils
