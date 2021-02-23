@@ -47,7 +47,7 @@
 #include <cuda_runtime_api.h>
 #include <cuda.h>
 #include "gpu-utils/utils.hpp"
-#include "kcount_driver.hpp"
+#include "parse_and_pack.hpp"
 
 #define KNORM "\x1B[0m"
 #define KLGREEN "\x1B[92m"
@@ -112,8 +112,8 @@ struct kcount_gpu::DriverState {
   vector<char> host_is_rcs;
 };
 
-kcount_gpu::KcountGPUDriver::KcountGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs,
-                                             int minimizer_len, double &init_time) {
+kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs,
+                                                         int minimizer_len, double &init_time) {
   timepoint_t t = chrono::high_resolution_clock::now();
   dstate = new DriverState();
   cudaErrchk(cudaGetDeviceCount(&dstate->device_count));
@@ -142,7 +142,7 @@ kcount_gpu::KcountGPUDriver::KcountGPUDriver(int upcxx_rank_me, int upcxx_rank_n
   init_time = t_elapsed.count();
 }
 
-kcount_gpu::KcountGPUDriver::~KcountGPUDriver() {
+kcount_gpu::ParseAndPackGPUDriver::~ParseAndPackGPUDriver() {
   cudaFree(dstate->seqs);
   cudaFree(dstate->kmers);
   cudaFree(dstate->kmer_targets);
@@ -299,7 +299,7 @@ class QuickTimer {
   double get_elapsed() { return secs; }
 };
 
-bool kcount_gpu::KcountGPUDriver::process_seq_block(const string &seqs, int64_t &num_Ns) {
+bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, int64_t &num_Ns) {
   QuickTimer t_func, t_cp, t_kernel;
 
   if (seqs.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) return false;
@@ -342,18 +342,18 @@ bool kcount_gpu::KcountGPUDriver::process_seq_block(const string &seqs, int64_t 
   return true;
 }
 
-tuple<double, double, double, double> kcount_gpu::KcountGPUDriver::get_elapsed_times() {
+tuple<double, double, double, double> kcount_gpu::ParseAndPackGPUDriver::get_elapsed_times() {
   return {dstate->t_func, dstate->t_malloc, dstate->t_cp, dstate->t_kernel};
 }
 
-bool kcount_gpu::KcountGPUDriver::kernel_is_done() {
+bool kcount_gpu::ParseAndPackGPUDriver::kernel_is_done() {
   if (cudaEventQuery(dstate->event) != cudaSuccess) return false;
   cudaErrchk(cudaEventDestroy(dstate->event));
   return true;
 }
 
-std::vector<uint64_t> &kcount_gpu::KcountGPUDriver::get_packed_kmers() { return dstate->host_kmers; }
+std::vector<uint64_t> &kcount_gpu::ParseAndPackGPUDriver::get_packed_kmers() { return dstate->host_kmers; }
 
-std::vector<int> &kcount_gpu::KcountGPUDriver::get_kmer_targets() { return dstate->host_kmer_targets; }
+std::vector<int> &kcount_gpu::ParseAndPackGPUDriver::get_kmer_targets() { return dstate->host_kmer_targets; }
 
-std::vector<char> &kcount_gpu::KcountGPUDriver::get_is_rcs() { return dstate->host_is_rcs; }
+std::vector<char> &kcount_gpu::ParseAndPackGPUDriver::get_is_rcs() { return dstate->host_is_rcs; }

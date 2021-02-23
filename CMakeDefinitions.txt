@@ -49,7 +49,7 @@ add_definitions(-DKCOUNT_BLOOM_FP=0.05)
 add_definitions(-DKCOUNT_NO_BLOOM_ADJUSTMENT_FACTOR=0.2)
 add_definitions(-DKCOUNT_KMER_CACHE_FRACTION=0.2)
 add_definitions(-DKCOUNT_KMER_CACHE_MAX_LOAD=0.8)
-# how many bytes for sequences (reads or ctgs) gathered at one time for processing on GPU. 
+# how many bytes for sequences (reads or ctgs) gathered at one time for processing on GPU.
 # Must be big enough for expected max ctg length
 add_definitions(-DKCOUNT_GPU_SEQ_BLOCK_SIZE=5242880)
 

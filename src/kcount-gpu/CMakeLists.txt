@@ -39,12 +39,12 @@ message(STATUS "ARCH_FLAGS=${ARCH_FLAGS}")
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-Wall,${OpenMP_CXX_FLAGS} ${ARCH_FLAGS}")
 message(STATUS "CMAKE_CUDA_FLAGS=${CMAKE_CUDA_FLAGS}")
 
-add_library(KCOUNT_GPU_LIBRARY_obj OBJECT kcount_driver.cpp)
+add_library(KCOUNT_GPU_LIBRARY_obj OBJECT parse_and_pack.cpp)
 if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13)
   target_link_libraries(KCOUNT_GPU_LIBRARY_obj INTERFACE OpenMP::OpenMP_CXX)
 endif()
 
-set_source_files_properties(kcount_driver.cpp PROPERTIES LANGUAGE CUDA LINKER_LANGUAGE CUDA)
+set_source_files_properties(parse_and_pack.cpp PROPERTIES LANGUAGE CUDA LINKER_LANGUAGE CUDA)
 option(KCOUNT_GPU_SHARED "kcount-GPU shared library" OFF)
 option(KCOUNT_GPU_STATIC "kcount-GPU static library" ON)
 

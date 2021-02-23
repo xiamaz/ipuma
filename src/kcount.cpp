@@ -44,9 +44,9 @@
 
 #ifdef ENABLE_GPUS
 #include "gpu-utils/utils.hpp"
-#include "kcount-gpu/kcount_driver.hpp"
+#include "kcount-gpu/parse_and_pack.hpp"
 
-static kcount_gpu::KcountGPUDriver *gpu_driver;
+static kcount_gpu::ParseAndPackGPUDriver *gpu_driver;
 
 #endif
 
@@ -202,8 +202,8 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     DIE("GPUs are enabled but no GPU could be configured for kmer counting");
   } else {
     double init_time;
-    gpu_driver = new kcount_gpu::KcountGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
-                                                 kmer_dht->get_minimizer_len(), init_time);
+    gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
+                                                       kmer_dht->get_minimizer_len(), init_time);
     SLOG(KLGREEN, "Initialized kcount_gpu driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
   }
 #else
@@ -327,8 +327,8 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     DIE("GPUs are enabled but no GPU could be configured for kmer counting");
   } else {
     double init_time;
-    gpu_driver = new kcount_gpu::KcountGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
-                                                 kmer_dht->get_minimizer_len(), init_time);
+    gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
+                                                       kmer_dht->get_minimizer_len(), init_time);
     SLOG(KLGREEN, "Initialized kcount_gpu driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
   }
 #else
@@ -347,7 +347,8 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
       num_ctg_blocks++;
     }
     if (ctg->seq.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE)
-      DIE("ctg seq is too long for this GPU implementation, ", ctg->seq.length(), " >= ", KCOUNT_GPU_SEQ_BLOCK_SIZE);
+      DIE("Oh dear, my laziness is revealed: the ctg seq is too long ", ctg->seq.length(), " for this GPU implementation ",
+          KCOUNT_GPU_SEQ_BLOCK_SIZE);
     seq_block += ctg->seq;
     seq_block += "_";
     depth_block.insert(depth_block.end(), ctg->seq.length() + 1, ctg->get_uint16_t_depth());
@@ -417,10 +418,12 @@ void analyze_kmers(unsigned kmer_len, unsigned prev_kmer_len, int qual_offset, v
   int64_t new_count = kmer_dht->get_num_kmers();
   SLOG_VERBOSE("After purge of kmers < 2, there are ", new_count, " unique kmers\n");
   barrier();
-  if (fut_has_contigs.wait()) add_ctg_kmers(kmer_len, prev_kmer_len, ctgs, kmer_dht);
-  barrier();
-  kmer_dht->purge_kmers(1);
-  barrier();
+  if (fut_has_contigs.wait()) {
+    add_ctg_kmers(kmer_len, prev_kmer_len, ctgs, kmer_dht);
+    barrier();
+    kmer_dht->purge_kmers(1);
+    barrier();
+  }
   kmer_dht->compute_kmer_exts();
   if (dump_kmers) kmer_dht->dump_kmers(kmer_len);
   barrier();
