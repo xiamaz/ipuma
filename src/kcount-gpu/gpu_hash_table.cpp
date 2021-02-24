@@ -52,8 +52,6 @@
 
 using namespace std;
 
-using timepoint_t = chrono::time_point<std::chrono::high_resolution_clock>;
-
 struct kcount_gpu::HashTableDriverState {
   int device_count;
   int my_gpu_id;

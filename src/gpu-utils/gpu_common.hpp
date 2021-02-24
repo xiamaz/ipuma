@@ -43,6 +43,7 @@
 #pragma once
 
 #include <iostream>
+#include <chrono>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
 
@@ -63,5 +64,25 @@ inline void gpu_die(cudaError_t code, const char *file, int line, bool abort = t
     // do not throw exceptions -- does not work properly within progress() throw std::runtime_error(outstr);
   }
 }
+
+using timepoint_t = std::chrono::time_point<std::chrono::high_resolution_clock>;
+
+class QuickTimer {
+  timepoint_t t;
+  double secs = 0;
+
+ public:
+  QuickTimer()
+      : secs(0) {}
+
+  void start() { t = std::chrono::high_resolution_clock::now(); }
+
+  void stop() {
+    std::chrono::duration<double> t_elapsed = std::chrono::high_resolution_clock::now() - t;
+    secs += t_elapsed.count();
+  }
+
+  double get_elapsed() { return secs; }
+};
 
 }  // namespace gpu_utils

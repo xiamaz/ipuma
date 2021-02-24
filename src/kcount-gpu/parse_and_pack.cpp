@@ -51,8 +51,7 @@
 #include "parse_and_pack.hpp"
 
 using namespace std;
-
-using timepoint_t = chrono::time_point<std::chrono::high_resolution_clock>;
+using namespace gpu_utils;
 
 __constant__ uint64_t GPU_TWINS[256] = {
     0xFF, 0xBF, 0x7F, 0x3F, 0xEF, 0xAF, 0x6F, 0x2F, 0xDF, 0x9F, 0x5F, 0x1F, 0xCF, 0x8F, 0x4F, 0x0F, 0xFB, 0xBB, 0x7B, 0x3B,
@@ -80,20 +79,7 @@ __constant__ uint64_t GPU_0_MASK[32] = {
 struct kcount_gpu::ParseAndPackDriverState {
   cudaEvent_t event;
 };
-/*
-  int max_kmers;
-  int kmer_len;
-  int num_kmer_longs;
-  int minimizer_len;
-  double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
-  char *seqs;
-  uint64_t *kmers;
-  int *kmer_targets;
-  char *is_rcs;
-  std::vector<uint64_t> host_kmers;
-  std::vector<int> host_kmer_targets;
-  std::vector<char> host_is_rcs;
-  */
+
 kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs,
                                                          int minimizer_len, double &init_time)
     : upcxx_rank_me(upcxx_rank_me)
@@ -265,24 +251,6 @@ __global__ void parse_and_pack(char *seqs, int minimizer_len, int kmer_len, int 
   }
 }
 
-class QuickTimer {
-  timepoint_t t;
-  double secs = 0;
-
- public:
-  QuickTimer()
-      : secs(0) {}
-
-  void start() { t = chrono::high_resolution_clock::now(); }
-
-  void stop() {
-    chrono::duration<double> t_elapsed = chrono::high_resolution_clock::now() - t;
-    secs += t_elapsed.count();
-  }
-
-  double get_elapsed() { return secs; }
-};
-
 bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, int64_t &num_Ns) {
   QuickTimer func_timer, cp_timer, kernel_timer;
 
@@ -319,6 +287,7 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, in
   t_kernel += (kernel_timer.get_elapsed() - cp_timer.get_elapsed());
   // this is used to signal completion
   cudaErrchk(cudaEventRecord(dstate->event));
+  cudaErrchk(cudaEventSynchronize(dstate->event));
   func_timer.stop();
   t_func += func_timer.get_elapsed();
   return true;
@@ -333,9 +302,3 @@ bool kcount_gpu::ParseAndPackGPUDriver::kernel_is_done() {
   cudaErrchk(cudaEventDestroy(dstate->event));
   return true;
 }
-
-std::vector<uint64_t> &kcount_gpu::ParseAndPackGPUDriver::get_packed_kmers() { return host_kmers; }
-
-std::vector<int> &kcount_gpu::ParseAndPackGPUDriver::get_kmer_targets() { return host_kmer_targets; }
-
-std::vector<char> &kcount_gpu::ParseAndPackGPUDriver::get_is_rcs() { return host_is_rcs; }

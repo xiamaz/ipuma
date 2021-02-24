@@ -42,6 +42,8 @@
 
 #pragma once
 
+#include <vector>
+
 namespace kcount_gpu {
 
 struct HashTableDriverState;
@@ -50,11 +52,17 @@ class HashTableGPUDriver {
   // stores CUDA specific variables, etc
   HashTableDriverState *dstate = nullptr;
 
-    int upcxx_rank_me;
-    int upcxx_rank_n;
-    int kmer_len;
-    int num_kmer_longs;
-    
+  int upcxx_rank_me;
+  int upcxx_rank_n;
+  int kmer_len;
+  int num_kmer_longs;
+  // packed kmers, can be 1 or more uint64_t in length per kmer
+  uint64_t *dev_kmers;
+  // extension and kmer counts. Each kmer has 9 entries, left ACGT, right ACGT and total count
+  uint16_t *dev_counts;
+  // used by locks to protect critical sections
+  unsigned char *dev_mutexes;
+
  public:
   HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int minimizer_len, double &init_time) {}
   ~HashTableGPUDriver() {}
