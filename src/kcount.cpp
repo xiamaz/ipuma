@@ -68,12 +68,12 @@ static void process_read_block_gpu(unsigned kmer_len, int qual_offset, const str
     progress();
   }
   int num_kmer_longs = Kmer<MAX_K>::get_N_LONGS();
-  for (int i = 0; i < (int)gpu_driver->host_kmer_targets.size(); i++) {
+  for (int i = 1; i < (int)gpu_driver->host_kmer_targets.size() - 1; i++) {
     // invalid kmer
     if (gpu_driver->host_kmer_targets[i] == -1) continue;
-    char left_base = (i > 0 && quals_block[i - 1] >= qual_offset + qual_cutoff ? seq_block[i - 1] : '0');
-    char right_base =
-        (i + kmer_len < seq_block.size() && quals_block[i + kmer_len] >= qual_offset + qual_cutoff ? seq_block[i + kmer_len] : '0');
+    if (seq_block[i - 1] == '_' || seq_block[i + kmer_len] == '_') continue;
+    char left_base = (quals_block[i - 1] >= qual_offset + qual_cutoff ? seq_block[i - 1] : '0');
+    char right_base = (quals_block[i + kmer_len] >= qual_offset + qual_cutoff ? seq_block[i + kmer_len] : '0');
     if (gpu_driver->host_is_rcs[i]) {
       swap(left_base, right_base);
       left_base = comp_nucleotide(left_base);
@@ -102,11 +102,12 @@ static void process_ctg_block_gpu(unsigned kmer_len, const string &seq_block, co
     progress();
   }
   int num_kmer_longs = Kmer<MAX_K>::get_N_LONGS();
-  for (int i = 0; i < (int)gpu_driver->host_kmer_targets.size(); i++) {
+  for (int i = 1; i < (int)gpu_driver->host_kmer_targets.size() - 1; i++) {
     // invalid kmer
     if (gpu_driver->host_kmer_targets[i] == -1) continue;
-    char left_base = (i > 0 ? seq_block[i - 1] : '0');
-    char right_base = (i + kmer_len < seq_block.size() ? seq_block[i + kmer_len] : '0');
+    if (seq_block[i - 1] == '_' || seq_block[i + kmer_len] == '_') continue;
+    char left_base = seq_block[i - 1];
+    char right_base = seq_block[i + kmer_len];
     if (gpu_driver->host_is_rcs[i]) {
       swap(left_base, right_base);
       left_base = comp_nucleotide(left_base);
