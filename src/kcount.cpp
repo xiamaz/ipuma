@@ -68,12 +68,15 @@ static void process_read_block_gpu(unsigned kmer_len, int qual_offset, const str
     progress();
   }
   int num_kmer_longs = Kmer<MAX_K>::get_N_LONGS();
-  for (int i = 1; i < (int)gpu_driver->host_kmer_targets.size() - 1; i++) {
+  for (int i = 0; i < (int)gpu_driver->host_kmer_targets.size(); i++) {
     // invalid kmer
     if (gpu_driver->host_kmer_targets[i] == -1) continue;
-    if (seq_block[i - 1] == '_' || seq_block[i + kmer_len] == '_') continue;
-    char left_base = (quals_block[i - 1] >= qual_offset + qual_cutoff ? seq_block[i - 1] : '0');
-    char right_base = (quals_block[i + kmer_len] >= qual_offset + qual_cutoff ? seq_block[i + kmer_len] : '0');
+    // if (seq_block[i - 1] == '_' || seq_block[i + kmer_len] == '_') continue;
+    char left_base = '0', right_base = '0';
+    int qthres = qual_offset + qual_cutoff;
+    if (i > 0 && quals_block[i - 1] >= qthres && seq_block[i - 1] != '_') left_base = seq_block[i - 1];
+    if (i + kmer_len < quals_block.size() && quals_block[i + kmer_len] >= qthres && seq_block[i + kmer_len] != '_')
+      right_base = seq_block[i + kmer_len];
     if (gpu_driver->host_is_rcs[i]) {
       swap(left_base, right_base);
       left_base = comp_nucleotide(left_base);
@@ -138,7 +141,7 @@ static void process_read(unsigned kmer_len, int qual_offset, const string &seq, 
     found_N_pos = seq.length();
   else
     num_Ns++;
-  for (int i = 1; i < (int)kmers.size() - 1; i++) {
+  for (int i = 0; i < (int)kmers.size(); i++) {
     // skip kmers that contain an N
     if (i + kmer_len > found_N_pos) {
       i = found_N_pos;  // skip
@@ -150,8 +153,10 @@ static void process_read(unsigned kmer_len, int qual_offset, const string &seq, 
         num_Ns++;
       continue;
     }
-    char left_base = (quals[i - 1] >= qual_offset + qual_cutoff ? seq[i - 1] : '0');
-    char right_base = (quals[i + kmer_len] >= qual_offset + qual_cutoff ? seq[i + kmer_len] : '0');
+    char left_base = '0', right_base = '0';
+    int qthres = qual_offset + qual_cutoff;
+    if (i > 0 && quals[i - 1] >= qthres) left_base = seq[i - 1];
+    if (i + kmer_len < quals.length() && quals[i + kmer_len] >= qthres) right_base = seq[i + kmer_len];
     kmer_dht->add_kmer(kmers[i], left_base, right_base, 1);
     DBG_ADD_KMER("kcount add_kmer ", kmers[i].to_string(), " count ", 1, "\n");
     num_kmers++;
