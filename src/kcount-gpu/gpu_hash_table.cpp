@@ -48,16 +48,44 @@
 #include <cuda.h>
 
 #include "upcxx_utils/colors.h"
+#include "gpu_common.hpp"
 #include "gpu_hash_table.hpp"
 
 using namespace std;
+using namespace gpu_utils;
 
 struct kcount_gpu::HashTableDriverState {
-  int device_count;
-  int my_gpu_id;
-  int upcxx_rank_me;
-  int upcxx_rank_n;
-  int kmer_len;
-  int num_kmer_longs;
   cudaEvent_t event;
 };
+
+kcount_gpu::HashTableGPUDriver::HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs,
+                                                   double &init_time)
+    : upcxx_rank_me(upcxx_rank_me)
+    , upcxx_rank_n(upcxx_rank_n)
+    , kmer_len(kmer_len)
+    , num_kmer_longs(num_kmer_longs)
+    , t_func(0)
+    , t_malloc(0)
+    , t_cp(0)
+    , t_kernel(0) {
+  QuickTimer init_timer, malloc_timer;
+  init_timer.start();
+  int device_count = 0;
+  cudaErrchk(cudaGetDeviceCount(&device_count));
+  int my_gpu_id = upcxx_rank_me % device_count;
+  cudaErrchk(cudaSetDevice(my_gpu_id));
+
+  malloc_timer.start();
+  /*
+  cudaErrchk(cudaMalloc(&dev_seqs, KCOUNT_GPU_SEQ_BLOCK_SIZE));
+  cudaErrchk(cudaMalloc(&dev_kmers, max_kmers * num_kmer_longs * sizeof(uint64_t)));
+  cudaErrchk(cudaMalloc(&dev_kmer_targets, max_kmers * sizeof(int)));
+  cudaErrchk(cudaMalloc(&dev_is_rcs, max_kmers));
+  */
+  malloc_timer.stop();
+  t_malloc += malloc_timer.get_elapsed();
+
+  dstate = new HashTableDriverState();
+  init_timer.stop();
+  init_time = init_timer.get_elapsed();
+}

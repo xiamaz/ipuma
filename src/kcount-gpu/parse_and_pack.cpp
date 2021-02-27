@@ -91,25 +91,25 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
     , t_malloc(0)
     , t_cp(0)
     , t_kernel(0) {
-  timepoint_t t = chrono::high_resolution_clock::now();
+  QuickTimer init_timer, malloc_timer;
+  init_timer.start();
   int device_count = 0;
   cudaErrchk(cudaGetDeviceCount(&device_count));
   int my_gpu_id = upcxx_rank_me % device_count;
   cudaErrchk(cudaSetDevice(my_gpu_id));
   max_kmers = KCOUNT_GPU_SEQ_BLOCK_SIZE - kmer_len + 1;
 
-  timepoint_t tm = chrono::high_resolution_clock::now();
-  cudaErrchk(cudaMalloc(&dev_seqs, KCOUNT_GPU_SEQ_BLOCK_SIZE));
-  cudaErrchk(cudaMalloc(&dev_kmers, max_kmers * num_kmer_longs * sizeof(uint64_t)));
-  cudaErrchk(cudaMalloc(&dev_kmer_targets, max_kmers * sizeof(int)));
-  cudaErrchk(cudaMalloc(&dev_is_rcs, max_kmers));
-  chrono::duration<double> t_elapsed = chrono::high_resolution_clock::now() - tm;
-  t_malloc += t_elapsed.count();
+  malloc_timer.start();
+  cudaErrchk(cudaMalloc((void **)&dev_seqs, KCOUNT_GPU_SEQ_BLOCK_SIZE));
+  cudaErrchk(cudaMalloc((void **)&dev_kmers, max_kmers * num_kmer_longs * sizeof(uint64_t)));
+  cudaErrchk(cudaMalloc((void **)&dev_kmer_targets, max_kmers * sizeof(int)));
+  cudaErrchk(cudaMalloc((void **)&dev_is_rcs, max_kmers));
+  malloc_timer.stop();
+  t_malloc += malloc_timer.get_elapsed();
 
   dstate = new ParseAndPackDriverState();
-
-  t_elapsed = chrono::high_resolution_clock::now() - t;
-  init_time = t_elapsed.count();
+  init_timer.stop();
+  init_time = init_timer.get_elapsed();
 }
 
 kcount_gpu::ParseAndPackGPUDriver::~ParseAndPackGPUDriver() {
