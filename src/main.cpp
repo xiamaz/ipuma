@@ -67,7 +67,7 @@ void merge_reads(vector<string> reads_fname_list, int qual_offset, double &elaps
 int main(int argc, char **argv) {
   upcxx::init();
 #if defined(ENABLE_GASNET_STATS)
-  const char *gasnet_stats_stage = getenv("GASNET_STATS_STAGE");
+  const char *gasnet_stats_stage = getenv("MHM2_GSTATS_STAGE");
   const char *gasnet_statsfile = getenv("GASNET_STATSFILE");
   if (gasnet_stats_stage && gasnet_statsfile) {
     mhm2_stats_set_mask("");
