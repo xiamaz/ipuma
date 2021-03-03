@@ -28,6 +28,12 @@ size_t gpu_utils::get_tot_gpu_mem() {
   return prop.totalGlobalMem;
 }
 
+size_t gpu_utils::get_free_gpu_mem() {
+  size_t free_mem, tot_mem;
+  cudaErrchk(cudaMemGetInfo(&free_mem, &tot_mem));
+  return free_mem;
+}
+
 int gpu_utils::get_num_node_gpus() {
   int deviceCount = 0;
   auto res = cudaGetDeviceCount(&deviceCount);

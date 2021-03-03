@@ -104,6 +104,7 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
   cudaErrchk(cudaMalloc((void **)&dev_kmers, max_kmers * num_kmer_longs * sizeof(uint64_t)));
   cudaErrchk(cudaMalloc((void **)&dev_kmer_targets, max_kmers * sizeof(int)));
   cudaErrchk(cudaMalloc((void **)&dev_is_rcs, max_kmers));
+  // total storage required is approx KCOUNT_GPU_SEQ_BLOCK_SIZE * (1 + num_kmers_longs * sizeof(uint64_t) + sizeof(int) + 1)
   malloc_timer.stop();
   t_malloc += malloc_timer.get_elapsed();
 

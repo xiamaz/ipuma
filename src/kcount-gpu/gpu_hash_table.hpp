@@ -57,6 +57,7 @@ class HashTableGPUDriver {
   int kmer_len;
   int num_kmer_longs;
   double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
+  int num_ht_slots;
   // packed kmers, can be 1 or more uint64_t in length per kmer
   uint64_t *dev_kmers;
   // extension and kmer counts. Each kmer has 9 entries, left ACGT, right ACGT and total count
@@ -65,8 +66,10 @@ class HashTableGPUDriver {
   unsigned char *dev_mutexes;
 
  public:
-  HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, double &init_time);
-  ~HashTableGPUDriver() {}
+  HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int num_ht_slots, double &init_time);
+  ~HashTableGPUDriver();
+
+  int get_num_ht_slots();
 };
 
 }  // namespace kcount_gpu

@@ -58,8 +58,16 @@ struct kcount_gpu::HashTableDriverState {
   cudaEvent_t event;
 };
 
+static size_t get_nearest_pow2(size_t val) {
+  for (size_t i = val; i >= 1; i--) {
+    // If i is a power of 2
+    if ((i & (i - 1)) == 0) return i;
+  }
+  return 0;
+}
+
 kcount_gpu::HashTableGPUDriver::HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs,
-                                                   double &init_time)
+                                                   int gpu_avail_mem, double &init_time)
     : upcxx_rank_me(upcxx_rank_me)
     , upcxx_rank_n(upcxx_rank_n)
     , kmer_len(kmer_len)
@@ -74,14 +82,12 @@ kcount_gpu::HashTableGPUDriver::HashTableGPUDriver(int upcxx_rank_me, int upcxx_
   cudaErrchk(cudaGetDeviceCount(&device_count));
   int my_gpu_id = upcxx_rank_me % device_count;
   cudaErrchk(cudaSetDevice(my_gpu_id));
-
+  int bytes_per_slot = num_kmer_longs * sizeof(uint64_t) + sizeof(uint16_t) + 1;
+  num_ht_slots = get_nearest_pow2(gpu_avail_mem / bytes_per_slot);
   malloc_timer.start();
-  /*
-  cudaErrchk(cudaMalloc(&dev_seqs, KCOUNT_GPU_SEQ_BLOCK_SIZE));
-  cudaErrchk(cudaMalloc(&dev_kmers, max_kmers * num_kmer_longs * sizeof(uint64_t)));
-  cudaErrchk(cudaMalloc(&dev_kmer_targets, max_kmers * sizeof(int)));
-  cudaErrchk(cudaMalloc(&dev_is_rcs, max_kmers));
-  */
+  cudaErrchk(cudaMalloc(&dev_kmers, num_ht_slots * num_kmer_longs * sizeof(uint64_t)));
+  cudaErrchk(cudaMalloc(&dev_counts, num_ht_slots * sizeof(uint16_t)));
+  cudaErrchk(cudaMalloc(&dev_mutexes, num_ht_slots * sizeof(char)));
   malloc_timer.stop();
   t_malloc += malloc_timer.get_elapsed();
 
@@ -89,3 +95,12 @@ kcount_gpu::HashTableGPUDriver::HashTableGPUDriver(int upcxx_rank_me, int upcxx_
   init_timer.stop();
   init_time = init_timer.get_elapsed();
 }
+
+kcount_gpu::HashTableGPUDriver::~HashTableGPUDriver() {
+  cudaFree(dev_kmers);
+  cudaFree(dev_counts);
+  cudaFree(dev_mutexes);
+  delete dstate;
+}
+
+int kcount_gpu::HashTableGPUDriver::get_num_ht_slots() { return num_ht_slots; }

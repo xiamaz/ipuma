@@ -391,7 +391,7 @@ class KmerDHT {
       kmer_store.set_size("kmers", max_kmer_store_bytes, max_rpcs_in_flight, useHHSS);
 
     if (use_bloom) {
-#if defined(ENABLE_GPUS) && defined(KCOUNT_GPUS)
+#ifdef ENABLE_GPUS
       SDIE("Cannot use bloom with GPU kmer counting");
 #endif
 
@@ -422,10 +422,24 @@ class KmerDHT {
       if (gpu_utils::get_num_node_gpus() <= 0) {
         DIE("GPUs are enabled but no GPU could be configured for kmer counting");
       } else {
+        // calculate total slots for hash table. Reserve space for parse and pack
+        int bytes_for_pnp = KCOUNT_GPU_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
+        int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
+        auto gpu_avail_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
+        auto gpu_tot_mem = gpu_utils::get_tot_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
+        SLOG(KLMAGENTA, "Available GPU memory per rank for kcount hash table is ", get_size_str(gpu_avail_mem), " out of a max of ",
+             get_size_str(gpu_tot_mem), KNORM, "\n");
+        // don't use up all the memory
+        // gpu_avail_mem *= 0.9;
         double init_time;
-        gpu_driver =
-            new kcount_gpu::HashTableGPUDriver(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), Kmer<MAX_K>::get_N_LONGS(), init_time);
+        gpu_driver = new kcount_gpu::HashTableGPUDriver(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), Kmer<MAX_K>::get_N_LONGS(),
+                                                        gpu_avail_mem, init_time);
         SLOG(KLMAGENTA, "Initialized hash table GPU driver in ", std::fixed, std::setprecision(3), init_time, " s", KNORM, "\n");
+        auto num_ht_slots = gpu_driver->get_num_ht_slots();
+        SLOG(KLMAGENTA, "GPU hash table has ", num_ht_slots, " slots/rank", KNORM, "\n");
+        auto gpu_free_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n();
+        SLOG(KLMAGENTA, "After initializing GPU hash table, there is ", get_size_str(gpu_free_mem),
+             " memory available per rank, with ", get_size_str(bytes_for_pnp), " reserved for parse and pack" KNORM, "\n");
       }
 #endif
       barrier();

@@ -4,6 +4,7 @@ namespace gpu_utils {
 
 size_t get_tot_gpu_mem();
 size_t get_avail_gpu_mem_per_rank(int totRanks, int numDevices = 0);
+size_t get_free_gpu_mem();
 std::string get_gpu_device_name();
 int get_num_node_gpus();
 std::string get_gpu_device_description();
