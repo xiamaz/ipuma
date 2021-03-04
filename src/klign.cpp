@@ -143,8 +143,14 @@ class KmerCtgDHT {
 
   Alns *alns;
 
+  HASH_TABLE<Kmer<MAX_K>, KmerAndCtgLoc<MAX_K>> kmer_cache;
+  int64_t kmer_cache_hits = 0;
+  int64_t kmer_lookups = 0;
+
   int64_t ctg_bytes_fetched = 0;
   HASH_TABLE<cid_t, string> ctg_cache;
+  int64_t ctg_cache_hits = 0;
+  int64_t ctg_lookups = 0;
 
   int get_cigar_length(const string &cigar) {
     // check that cigar string length is the same as the sequence, but only if the sequence is included
@@ -703,6 +709,7 @@ class KmerCtgDHT {
 
       string ctg_subseq;
       bool found = false;
+      ctg_lookups++;
       auto it = ctg_cache.find(ctg_loc.cid);
       if (it != ctg_cache.end()) {
         found = true;
@@ -726,6 +733,8 @@ class KmerCtgDHT {
         for (int i = 0; i < overlap_len; i++) {
           it->second[i + cstart] = ctg_subseq[i];
         }
+      } else {
+        ctg_cache_hits++;
       }
       align_read(rname, ctg_loc.cid, read_subseq, ctg_subseq, rstart, rlen, cstart, ctg_loc.clen, orient, overlap_len,
                  read_group_id, aln_kernel_timer);
@@ -752,6 +761,26 @@ class KmerCtgDHT {
     auto max_ctg_bytes_fetched = reduce_one(ctg_bytes_fetched, op_fast_max, 0).wait();
     SLOG_VERBOSE("Contig bytes fetched ", get_size_str(all_ctg_bytes_fetched), " balance ",
                  (double)all_ctg_bytes_fetched / (rank_n() * max_ctg_bytes_fetched), "\n");
+  }
+
+  KmerAndCtgLoc<MAX_K> *find_cached_kmer(Kmer<MAX_K> &kmer) {
+    kmer_lookups++;
+    auto it = kmer_cache.find(kmer);
+    if (it == kmer_cache.end()) return nullptr;
+    kmer_cache_hits++;
+    return &it->second;
+  }
+
+  void cache_kmer(const KmerAndCtgLoc<MAX_K> &kmer_ctg_loc) { kmer_cache.insert({kmer_ctg_loc.kmer, kmer_ctg_loc}); }
+
+  void print_cache_stats() {
+    auto all_kmer_cache_hits = reduce_one(kmer_cache_hits, op_fast_add, 0).wait();
+    auto all_lookups = reduce_one(kmer_lookups, op_fast_add, 0).wait();
+    SLOG("Hits on kmer cache: ", perc_str(all_kmer_cache_hits, all_lookups), "\n");
+
+    auto all_ctg_cache_hits = reduce_one(ctg_cache_hits, op_fast_add, 0).wait();
+    auto all_ctg_lookups = reduce_one(ctg_lookups, op_fast_add, 0).wait();
+    SLOG("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), "\n");
   }
 };
 
@@ -821,8 +850,7 @@ struct KmerToRead {
 
 template <int MAX_K>
 static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, vector<KmerToRead>> &kmer_read_map,
-                       vector<ReadRecord *> &read_records, HASH_TABLE<Kmer<MAX_K>, KmerAndCtgLoc<MAX_K>> &kmer_cache,
-                       int64_t &kmer_cache_hits, IntermittentTimer &compute_alns_timer, IntermittentTimer &get_ctgs_timer,
+                       vector<ReadRecord *> &read_records, IntermittentTimer &compute_alns_timer, IntermittentTimer &get_ctgs_timer,
                        IntermittentTimer &fetch_ctg_seqs_timer, IntermittentTimer &aln_kernel_timer, int64_t &num_excess_alns_reads,
                        int &read_group_id, int64_t &kmer_bytes_sent, int64_t &kmer_bytes_received) {
   auto process_kmer_ctg_loc = [](HASH_TABLE<Kmer<MAX_K>, vector<KmerToRead>> &kmer_read_map, int64_t &num_excess_alns_reads,
@@ -853,16 +881,13 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
   auto kmer_lists = new vector<Kmer<MAX_K>>[rank_n()];
   for (auto &elem : kmer_read_map) {
     auto kmer = elem.first;
-    // FIXME: when creating this list, look for kmers in cache.
-    // If found, don't add to the list instead add to read_record
-    auto it = kmer_cache.find(kmer);
-    if (it == kmer_cache.end()) {
-      kmer_lists[kmer_ctg_dht.get_target_rank(kmer)].push_back(kmer);
-    } else {
-      progress();
-      process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, it->second);
-      kmer_cache_hits++;
-    }
+    // auto *kmer_ctg_loc = kmer_ctg_dht.find_cached_kmer(kmer);
+    // if (!kmer_ctg_loc) {
+    kmer_lists[kmer_ctg_dht.get_target_rank(kmer)].push_back(kmer);
+    //} else {
+    //  progress();
+    //  process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, *kmer_ctg_loc);
+    //}
   }
   get_ctgs_timer.start();
   future<> fut_serial_results = make_future();
@@ -879,8 +904,7 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
       // iterate through the kmers, each one has an associated ctg location
       for (auto &kmer_ctg_loc : kmer_ctg_locs) {
         process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, kmer_ctg_loc);
-        // now cache it
-        kmer_cache.insert({kmer_ctg_loc.kmer, kmer_ctg_loc});
+        // kmer_ctg_dht.cache_kmer(kmer_ctg_loc);
       }
     });
 
@@ -942,9 +966,6 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
   int64_t kmer_bytes_sent = 0;
   upcxx::future<> all_done = make_future();
   int read_group_id = 0;
-  HASH_TABLE<Kmer<MAX_K>, KmerAndCtgLoc<MAX_K>> kmer_cache;
-  int64_t kmer_cache_hits = 0;
-  int64_t num_lookups = 0;
   for (auto packed_reads : packed_reads_list) {
     packed_reads->reset();
     string read_id, read_seq, quals;
@@ -977,32 +998,24 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
         if (kmer_read_map.size() >= KLIGN_CTG_FETCH_BUF_SIZE) filled = true;
       }
       if (filled) {
-        num_lookups += kmer_read_map.size();
-        num_reads_aligned += align_kmers(kmer_ctg_dht, kmer_read_map, read_records, kmer_cache, kmer_cache_hits, compute_alns_timer,
-                                         get_ctgs_timer, fetch_ctg_seqs_timer, aln_kernel_timer, num_excess_alns_reads,
-                                         read_group_id, kmer_bytes_sent, kmer_bytes_received);
+        num_reads_aligned +=
+            align_kmers(kmer_ctg_dht, kmer_read_map, read_records, compute_alns_timer, get_ctgs_timer, fetch_ctg_seqs_timer,
+                        aln_kernel_timer, num_excess_alns_reads, read_group_id, kmer_bytes_sent, kmer_bytes_received);
       }
       num_reads++;
     }
     if (read_records.size()) {
-      num_lookups += kmer_read_map.size();
-      num_reads_aligned += align_kmers(kmer_ctg_dht, kmer_read_map, read_records, kmer_cache, kmer_cache_hits, compute_alns_timer,
-                                       get_ctgs_timer, fetch_ctg_seqs_timer, aln_kernel_timer, num_excess_alns_reads, read_group_id,
-                                       kmer_bytes_sent, kmer_bytes_received);
+      num_reads_aligned +=
+          align_kmers(kmer_ctg_dht, kmer_read_map, read_records, compute_alns_timer, get_ctgs_timer, fetch_ctg_seqs_timer,
+                      aln_kernel_timer, num_excess_alns_reads, read_group_id, kmer_bytes_sent, kmer_bytes_received);
     }
     kmer_ctg_dht.flush_remaining(aln_kernel_timer, read_group_id);
     read_group_id++;
     all_done = when_all(all_done, progbar.set_done());
   }
-  kmer_cache.clear();
-  HASH_TABLE<Kmer<MAX_K>, KmerAndCtgLoc<MAX_K>>().swap(kmer_cache);
-  auto all_kmer_cache_hits = reduce_one(kmer_cache_hits, op_fast_add, 0).wait();
-  auto all_lookups = reduce_one(num_lookups, op_fast_add, 0).wait();
 
-  SLOG_VERBOSE("Got ", perc_str(all_kmer_cache_hits, all_lookups), " cache hits for ", all_lookups, " kmer lookups\n");
-
+  kmer_ctg_dht.print_cache_stats();
   // make sure to do any outstanding kernel block alignments
-
   auto tot_num_reads_fut = reduce_one(num_reads, op_fast_add, 0);
   auto num_excess_alns_reads_fut = reduce_one(num_excess_alns_reads, op_fast_add, 0);
   auto num_seeds_fut = reduce_one(tot_num_kmers, op_fast_add, 0);

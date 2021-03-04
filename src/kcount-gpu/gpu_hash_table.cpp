@@ -83,6 +83,7 @@ kcount_gpu::HashTableGPUDriver::HashTableGPUDriver(int upcxx_rank_me, int upcxx_
   int my_gpu_id = upcxx_rank_me % device_count;
   cudaErrchk(cudaSetDevice(my_gpu_id));
   int bytes_per_slot = num_kmer_longs * sizeof(uint64_t) + sizeof(uint16_t) + 1;
+  // ensure the size is a power of 2 in order to use optimized binary & instead of % for index calculation
   num_ht_slots = get_nearest_pow2(gpu_avail_mem / bytes_per_slot);
   malloc_timer.start();
   cudaErrchk(cudaMalloc(&dev_kmers, num_ht_slots * num_kmer_longs * sizeof(uint64_t)));
