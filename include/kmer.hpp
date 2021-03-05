@@ -42,31 +42,12 @@
  form.
 */
 
-#include <stdint.h>
-#include <stdio.h>
-
 #include <array>
-#include <bitset>
-#include <cassert>
-#include <cstdint>
-#include <cstring>
-#include <functional>
 #include <iostream>
 #include <string>
 #include <vector>
-#ifdef __APPLE__
-#include <machine/endian.h>
-#define H2BE htonll
-#define BE2H ntohll
-#else
-#include <endian.h>
-#define H2BE htobe64
-#define BE2H be64toh
-#endif
 
 #include <upcxx/upcxx.hpp>
-
-#include "hash_funcs.h"
 
 /* Short description:
  *  - Store kmer strings by using 2 bits per base instead of 8

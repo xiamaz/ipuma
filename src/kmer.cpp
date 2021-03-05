@@ -43,15 +43,11 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include <array>
 #include <bitset>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <functional>
-#include <iostream>
-#include <string>
-#include <vector>
 #ifdef __APPLE__
 #include <machine/endian.h>
 #define H2BE htonll
@@ -61,8 +57,6 @@
 #define H2BE htobe64
 #define BE2H be64toh
 #endif
-
-#include <upcxx/upcxx.hpp>
 
 #include "hash_funcs.h"
 #include "kmer.hpp"
@@ -142,14 +136,14 @@ unsigned int Kmer<MAX_K>::get_MAX_K() {
 }
 
 template <int MAX_K>
-void Kmer<MAX_K>::get_kmers(unsigned kmer_len, std::string seq, std::vector<Kmer> &kmers) {
+void Kmer<MAX_K>::get_kmers(unsigned kmer_len, string seq, vector<Kmer> &kmers) {
   // only need rank 0 to check
   assert(Kmer::k > 0);
   assert(kmer_len == Kmer::k);
   kmers.clear();
   if (seq.size() < Kmer::k) return;
   for (auto &c : seq) c = toupper(c);
-  int bufsize = std::max((int)N_LONGS, (int)(seq.size() + 31) / 32) + N_LONGS;
+  int bufsize = max((int)N_LONGS, (int)(seq.size() + 31) / 32) + N_LONGS;
   int lastLong = N_LONGS - 1;
   assert(lastLong >= 0 && lastLong < N_LONGS);
   kmers.resize(seq.size() - Kmer::k + 1);
@@ -277,7 +271,7 @@ string Kmer<MAX_K>::mer_to_string(longs_t mmer, int m) {
     }
   }
   *s = '\0';
-  return std::string(buf);
+  return string(buf);
 }
 
 template <int MAX_K>
@@ -290,7 +284,7 @@ string Kmer<MAX_K>::get_minimizer_slow(int m) {
     if (strncmp(s + i, min_s, m) > 0) min_s = s + i;
   }
   min_s[m] = '\0';
-  return std::string(min_s);
+  return string(min_s);
 }
 
 // returns the *greatest* least-complement m-mer of this k-mer
@@ -554,20 +548,20 @@ void Kmer<MAX_K>::to_string(char *s) const {
 }
 
 template <int MAX_K>
-std::string Kmer<MAX_K>::to_string() const {
+string Kmer<MAX_K>::to_string() const {
   char buf[Kmer::k + 1];
   to_string(buf);
-  return std::string(buf);
+  return string(buf);
 }
 
 template <int MAX_K>
-std::string Kmer<MAX_K>::to_hex() const {
-  std::ostringstream os;
+string Kmer<MAX_K>::to_hex() const {
+  ostringstream os;
   assert(N_LONGS == longs.size());
   os << "longs=" << N_LONGS << ",k=" << get_k() << ":" << to_string() << ":";
   for (auto l : longs) os << l << ",";
   os << ":";
-  os << std::hex;
+  os << hex;
   for (auto l : longs) {
     os << l << ",";
   }
@@ -575,7 +569,7 @@ std::string Kmer<MAX_K>::to_hex() const {
 }
 
 template <int MAX_K>
-std::pair<const uint8_t *, int> Kmer<MAX_K>::get_bytes() const {
+pair<const uint8_t *, int> Kmer<MAX_K>::get_bytes() const {
   return {reinterpret_cast<const uint8_t *>(longs.data()), N_LONGS * sizeof(longs_t)};
 }
 
@@ -584,36 +578,12 @@ const uint64_t *Kmer<MAX_K>::get_longs() const {
   return longs.data();
 }
 
-/*
-
 template <int MAX_K>
-struct KmerHash {
-  size_t operator()(const Kmer<MAX_K> &km) const { return km.hash(); }
-};
-
-template <int MAX_K>
-struct KmerEqual {
-  size_t operator()(const Kmer<MAX_K> &k1, const Kmer<MAX_K> &k2) const { return k1 == k2; }
-};
-
-// specialization of std::Hash
-
-namespace std {
-
-template <int MAX_K>
-struct hash<Kmer<MAX_K>> {
-  typedef std::size_t result_type;
-  result_type operator()(Kmer<MAX_K> const &km) const { return km.hash(); }
-};
-}  // namespace std
-*/
-
-template <int MAX_K>
-ostream &operator<<(std::ostream &out, const Kmer<MAX_K> &k) {
+ostream &operator<<(ostream &out, const Kmer<MAX_K> &k) {
   return out << k.to_string();
 }
 
-#define KMER_K(KMER_LEN) template ostream &operator<<<KMER_LEN>(std::ostream &out, const Kmer<KMER_LEN> &k);
+#define KMER_K(KMER_LEN) template ostream &operator<<<KMER_LEN>(ostream &out, const Kmer<KMER_LEN> &k);
 
 KMER_K(32);
 #if MAX_BUILD_KMER >= 64
