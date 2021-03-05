@@ -40,6 +40,8 @@
  form.
 */
 
+#include "upcxx_utils.hpp"
+#include "utils.hpp"
 #include "kcount.hpp"
 
 #ifdef ENABLE_GPUS
@@ -54,6 +56,8 @@ static kcount_gpu::ParseAndPackGPUDriver *gpu_driver;
 #define DBG_ADD_KMER(...)
 
 using namespace std;
+using namespace upcxx_utils;
+using namespace upcxx;
 
 #ifdef ENABLE_GPUS
 template <int MAX_K>

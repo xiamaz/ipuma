@@ -50,10 +50,7 @@
 #include "contigs.hpp"
 #include "kmer_dht.hpp"
 #include "packed_reads.hpp"
-#include "upcxx_utils/log.hpp"
-#include "upcxx_utils/progress_bar.hpp"
-#include "upcxx_utils/three_tier_aggr_store.hpp"
-#include "upcxx_utils/limit_outstanding.hpp"
+#include "upcxx_utils.hpp"
 #include "utils.hpp"
 
 using namespace std;
@@ -102,7 +99,7 @@ class ReadsToCtgsDHT {
       else
         it->second.push_back(std::move(read_ctg_info.ctg_info));
     });
-    int est_update_size = sizeof(ReadCtgInfo) + 13; // read_id
+    int est_update_size = sizeof(ReadCtgInfo) + 13;  // read_id
     int64_t mem_to_use = 0.05 * get_free_mem() / local_team().rank_n();
     auto max_store_bytes = max(mem_to_use, (int64_t)est_update_size * 100);
     rtc_store.set_size("ReadsToContigs", max_store_bytes);
