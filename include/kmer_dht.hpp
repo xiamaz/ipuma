@@ -251,6 +251,12 @@ class KmerDHT {
   }
 
   static void update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers, dist_object<BloomFilter> &bloom_filter) {
+#ifdef ENABLE_GPUS
+    // FIXME: buffer hash table entries, and when full, copy across to
+    // gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right);
+#endif
+
+    //#else
     // find it - if it isn't found then insert it, otherwise increment the counts
     const auto it = kmers->find(kmer_and_ext.kmer);
     if (it == kmers->end()) {
@@ -265,11 +271,9 @@ class KmerDHT {
       kmer_counts.right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
       auto prev_bucket_count = kmers->bucket_count();
       kmers->insert({kmer_and_ext.kmer, kmer_counts});
-      //#ifdef DEBUG
       // since sizes are an estimate this could happen, but it will impact performance
       if (prev_bucket_count < kmers->bucket_count())
         SWARN("Hash table on rank 0 was resized from ", prev_bucket_count, " to ", kmers->bucket_count());
-      //#endif
       DBG_INSERT_KMER("inserted kmer ", kmer_and_ext.kmer.to_string(), " with count ", kmer_counts.count, "\n");
     } else {
       auto kmer_count = &it->second;
@@ -279,6 +283,7 @@ class KmerDHT {
       kmer_count->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
       kmer_count->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
     }
+    //#endif
   }
 
   static void update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers, dist_object<BloomFilter> &bloom_filter) {
@@ -563,15 +568,10 @@ class KmerDHT {
   }
 #endif
 
-  void add_kmer(Kmer<MAX_K> kmer, char left_ext, char right_ext, kmer_count_t count, bool rc_checked = false,
-                int target_rank = -1) {
-#ifdef ENABLE_GPUS
-// FIXME: buffer the new entry locally, and once the buffer is full, call the GPU driver code to stick it into the
-// GPU hash table
-#endif
+  void add_kmer(Kmer<MAX_K> kmer, char left_ext, char right_ext, kmer_count_t count, int target_rank = -1) {
     _num_kmers_counted++;
     if (!count) count = 1;
-    if (!rc_checked) {
+    if (target_rank == -1) {
       // get the lexicographically smallest
       Kmer<MAX_K> kmer_rc = kmer.revcomp();
       if (kmer_rc < kmer) {
@@ -580,9 +580,7 @@ class KmerDHT {
         left_ext = comp_nucleotide(left_ext);
         right_ext = comp_nucleotide(right_ext);
       }
-      if (target_rank == -1) target_rank = get_kmer_target_rank(kmer, &kmer_rc);
-    } else {
-      if (target_rank == -1) target_rank = get_kmer_target_rank(kmer);
+      target_rank = get_kmer_target_rank(kmer, &kmer_rc);
     }
     if (pass_type == BLOOM_SET_PASS || pass_type == CTG_BLOOM_SET_PASS) {
       if (count) {

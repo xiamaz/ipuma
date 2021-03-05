@@ -91,7 +91,7 @@ list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:hash_funcs>)
 # build all the extern template souce code instantiation explosion
 set(EXTERN_TEMPLATE_FILES)
 foreach(KMER_LENGTH ${MHM2_KMER_LENGTHS})
-  foreach(TEMPLATE "kmer_dht" "kmer")
+  foreach(TEMPLATE "kmer_dht")
     set(TEMPLATE_FILE "${TEMPLATE}-extern-template-${KMER_LENGTH}")
     configure_file("${TEMPLATE}-extern-template.in.cpp" "${TEMPLATE_FILE}.cpp" @ONLY)
     list(APPEND EXTERN_TEMPLATE_FILES ${TEMPLATE_FILE})
@@ -99,7 +99,7 @@ foreach(KMER_LENGTH ${MHM2_KMER_LENGTHS})
 endforeach()
 
 foreach(KMER_LENGTH ${MHM2_KMER_LENGTHS})
-  foreach(TEMPLATE "kcount" "klign" "contigging" "scaffolding" "post_assembly")
+  foreach(TEMPLATE "kcount" "klign" "contigging" "scaffolding" "post_assembly" "kmer")
     set(TEMPLATE_FILE "${TEMPLATE}-extern-template-${KMER_LENGTH}")
     string(TOUPPER ${TEMPLATE} TEMPLATE_UPPER)
     configure_file("extern_template.in.cpp" "${TEMPLATE_FILE}.cpp" @ONLY)
@@ -110,7 +110,7 @@ endforeach()
 
 foreach(tgt fastq alignments contigs packed_reads utils bloom ctg_graph options
             merge_reads dbjg_traversal klign cgraph build_ctg_graph
-            walk_ctg_graph spanner splinter localassm histogrammer aln_depths shuffle_reads
+            walk_ctg_graph spanner splinter localassm histogrammer aln_depths shuffle_reads kmer
             ${EXTERN_TEMPLATE_FILES}
         )
   add_library(${tgt} OBJECT ${tgt}.cpp)

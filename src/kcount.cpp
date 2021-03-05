@@ -88,7 +88,7 @@ static void process_read_block_gpu(unsigned kmer_len, int qual_offset, const str
     if (cpu_target != gpu_driver->host_kmer_targets[i])
       DIE("cpu target is ", cpu_target, " but gpu target is ", gpu_driver->host_kmer_targets[i]);
 #endif
-    kmer_dht->add_kmer(kmer, left_base, right_base, 1, true, gpu_driver->host_kmer_targets[i]);
+    kmer_dht->add_kmer(kmer, left_base, right_base, 1, gpu_driver->host_kmer_targets[i]);
     DBG_ADD_KMER("kcount add_kmer ", kmer.to_string(), " count ", 1, "\n");
     num_kmers++;
   }
@@ -122,7 +122,7 @@ static void process_ctg_block_gpu(unsigned kmer_len, const string &seq_block, co
     if (cpu_target != gpu_driver->host_kmer_targets[i])
       DIE("cpu target is ", cpu_target, " but gpu target is ", gpu_driver->host_kmer_targets[i]);
 #endif
-    kmer_dht->add_kmer(kmer, left_base, right_base, depth_block[i], true, gpu_driver->host_kmer_targets[i]);
+    kmer_dht->add_kmer(kmer, left_base, right_base, depth_block[i], gpu_driver->host_kmer_targets[i]);
     DBG_ADD_KMER("kcount add_kmer ", kmer.to_string(), " count ", depth_block[i], "\n");
     num_kmers++;
   }

@@ -70,6 +70,8 @@ class HashTableGPUDriver {
   ~HashTableGPUDriver();
 
   int get_num_ht_slots();
+
+  void insert_kmer(uint64_t *kmer, uint16_t kmer_count, char left, char right) {}
 };
 
 }  // namespace kcount_gpu
