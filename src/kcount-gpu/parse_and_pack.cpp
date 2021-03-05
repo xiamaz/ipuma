@@ -288,7 +288,7 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, in
   t_kernel += (kernel_timer.get_elapsed() - cp_timer.get_elapsed());
   // this is used to signal completion
   cudaErrchk(cudaEventRecord(dstate->event));
-  cudaErrchk(cudaEventSynchronize(dstate->event));
+  // cudaErrchk(cudaEventSynchronize(dstate->event));
   func_timer.stop();
   t_func += func_timer.get_elapsed();
   return true;
