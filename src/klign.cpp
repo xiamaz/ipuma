@@ -143,9 +143,12 @@ class KmerCtgDHT {
 
   Alns *alns;
 
+#ifdef USE_KMER_CACHE
+  // HASH_TABLE<Kmer<MAX_K>, KmerAndCtgLoc<MAX_K>, KmerMinimizerHash<MAX_K>> kmer_cache;
   HASH_TABLE<Kmer<MAX_K>, KmerAndCtgLoc<MAX_K>> kmer_cache;
   int64_t kmer_cache_hits = 0;
   int64_t kmer_lookups = 0;
+#endif
 
   int64_t ctg_bytes_fetched = 0;
   HASH_TABLE<cid_t, string> ctg_cache;
@@ -219,7 +222,7 @@ class KmerCtgDHT {
     */
   }
 
-  void align_read(const string &rname, int64_t cid, const string &rseq, const string &cseq, int rstart, int rlen, int cstart,
+  bool align_read(const string &rname, int64_t cid, const string &rseq, const string &cseq, int rstart, int rlen, int cstart,
                   int clen, char orient, int overlap_len, int read_group_id, IntermittentTimer &aln_kernel_timer) {
     if (cseq.compare(0, overlap_len, rseq, rstart, overlap_len) == 0) {
       num_perfect_alns++;
@@ -232,6 +235,7 @@ class KmerCtgDHT {
       assert(aln.is_valid());
       if (ssw_filter.report_cigar) set_sam_string(aln, rseq, to_string(overlap_len) + "=");  // exact match '=' not 'M'
       alns->add_aln(aln);
+      return true;
     } else {
       max_clen = max((int64_t)cseq.size(), max_clen);
       max_rlen = max((int64_t)rseq.size(), max_rlen);
@@ -249,6 +253,7 @@ class KmerCtgDHT {
             " alignments\n");
         kernel_align_block(aln_kernel_timer, read_group_id);
       }
+      return false;
     }
   }
 
@@ -736,8 +741,32 @@ class KmerCtgDHT {
       } else {
         ctg_cache_hits++;
       }
-      align_read(rname, ctg_loc.cid, read_subseq, ctg_subseq, rstart, rlen, cstart, ctg_loc.clen, orient, overlap_len,
-                 read_group_id, aln_kernel_timer);
+      if (align_read(rname, ctg_loc.cid, read_subseq, ctg_subseq, rstart, rlen, cstart, ctg_loc.clen, orient, overlap_len,
+                     read_group_id, aln_kernel_timer)) {
+        // if (orient == '+') {
+        vector<Kmer<MAX_K>> read_kmers;
+        // cache all the kmer->cid mappings from this read for future lookups
+        auto nkmers = std::min((int)(ctg_loc.clen - ctg_loc.pos_in_ctg), (int)rseq.length());
+        Kmer<MAX_K>::get_kmers(kmer_len, rseq.substr(rstart, nkmers), read_kmers);
+        for (int i = 0; i < read_kmers.size(); i++) {
+          auto &kmer = read_kmers[i];
+          Kmer<MAX_K> kmer_rc = kmer.revcomp();
+          bool is_rc = false;
+          int pos_in_ctg = ctg_loc.pos_in_ctg + i;
+          if (kmer_rc < kmer) {
+            kmer.swap(kmer_rc);
+            is_rc = true;
+            // pos_in_ctg = ctg_loc.pos_in_ctg - i;
+          }
+          // if (is_rc) continue;
+          if (pos_in_ctg > ctg_loc.clen - kmer_len || pos_in_ctg < 0)
+            DIE("pos in ctg is wrong: ", pos_in_ctg, " clen ", ctg_loc.clen, " rlen ", rseq.length(), " cstart ", cstart, " is_rc ",
+                ctg_loc.is_rc, " rstart ", rstart, " orient ", orient, " overlap ", overlap_len, " pos in ctg ", ctg_loc.pos_in_ctg,
+                " i ", i);
+          cache_kmer({kmer, {ctg_loc.cid, ctg_loc.seq_gptr, ctg_loc.clen, pos_in_ctg, is_rc}});
+        }
+        //}
+      }
       num_alns++;
     }
     delete[] seq_buf;
@@ -763,21 +792,36 @@ class KmerCtgDHT {
                  (double)all_ctg_bytes_fetched / (rank_n() * max_ctg_bytes_fetched), "\n");
   }
 
-  KmerAndCtgLoc<MAX_K> *find_cached_kmer(Kmer<MAX_K> &kmer) {
+  KmerAndCtgLoc<MAX_K> *find_cached_kmer(Kmer<MAX_K> kmer) {
+#ifdef USE_KMER_CACHE
     kmer_lookups++;
+    Kmer<MAX_K> kmer_rc = kmer.revcomp();
+    if (kmer_rc < kmer) kmer.swap(kmer_rc);
     auto it = kmer_cache.find(kmer);
     if (it == kmer_cache.end()) return nullptr;
     kmer_cache_hits++;
+    return nullptr;
     return &it->second;
+#else
+    return nullptr;
+#endif
   }
 
-  void cache_kmer(const KmerAndCtgLoc<MAX_K> &kmer_ctg_loc) { kmer_cache.insert({kmer_ctg_loc.kmer, kmer_ctg_loc}); }
+  void cache_kmer(const KmerAndCtgLoc<MAX_K> &kmer_ctg_loc) {
+#ifdef USE_KMER_CACHE
+    Kmer<MAX_K> kmer = kmer_ctg_loc.kmer;
+    //    Kmer<MAX_K> kmer_rc = kmer.revcomp();
+    //    if (kmer_rc < kmer) kmer.swap(kmer_rc);
+    kmer_cache.insert({kmer, kmer_ctg_loc});
+#endif
+  }
 
   void print_cache_stats() {
+#ifdef USE_KMER_CACHE
     auto all_kmer_cache_hits = reduce_one(kmer_cache_hits, op_fast_add, 0).wait();
     auto all_lookups = reduce_one(kmer_lookups, op_fast_add, 0).wait();
     SLOG("Hits on kmer cache: ", perc_str(all_kmer_cache_hits, all_lookups), "\n");
-
+#endif
     auto all_ctg_cache_hits = reduce_one(ctg_cache_hits, op_fast_add, 0).wait();
     auto all_ctg_lookups = reduce_one(ctg_lookups, op_fast_add, 0).wait();
     SLOG("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), "\n");
@@ -881,13 +925,13 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
   auto kmer_lists = new vector<Kmer<MAX_K>>[rank_n()];
   for (auto &elem : kmer_read_map) {
     auto kmer = elem.first;
-    // auto *kmer_ctg_loc = kmer_ctg_dht.find_cached_kmer(kmer);
-    // if (!kmer_ctg_loc) {
-    kmer_lists[kmer_ctg_dht.get_target_rank(kmer)].push_back(kmer);
-    //} else {
-    //  progress();
-    //  process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, *kmer_ctg_loc);
-    //}
+    auto *kmer_ctg_loc = kmer_ctg_dht.find_cached_kmer(kmer);
+    if (!kmer_ctg_loc) {
+      kmer_lists[kmer_ctg_dht.get_target_rank(kmer)].push_back(kmer);
+    } else {
+      progress();
+      process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, *kmer_ctg_loc);
+    }
   }
   get_ctgs_timer.start();
   future<> fut_serial_results = make_future();
@@ -904,7 +948,7 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
       // iterate through the kmers, each one has an associated ctg location
       for (auto &kmer_ctg_loc : kmer_ctg_locs) {
         process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, kmer_ctg_loc);
-        // kmer_ctg_dht.cache_kmer(kmer_ctg_loc);
+        kmer_ctg_dht.cache_kmer(kmer_ctg_loc);
       }
     });
 

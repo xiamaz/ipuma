@@ -146,13 +146,8 @@ class Kmer {
 };
 
 template <int MAX_K>
-struct KmerHash {
-  size_t operator()(const Kmer<MAX_K> &km) const { return km.hash(); }
-};
-
-template <int MAX_K>
-struct KmerEqual {
-  size_t operator()(const Kmer<MAX_K> &k1, const Kmer<MAX_K> &k2) const { return k1 == k2; }
+struct KmerMinimizerHash {
+  size_t operator()(const Kmer<MAX_K> &km) const { return km.minimizer_hash_fast(MINIMIZER_LEN); }
 };
 
 // specialization of std::Hash
@@ -171,8 +166,7 @@ std::ostream &operator<<(std::ostream &out, const Kmer<MAX_K> &k);
 
 #define __MACRO_KMER__(KMER_LEN, MODIFIER) \
   MODIFIER class Kmer<KMER_LEN>;           \
-  MODIFIER struct KmerHash<KMER_LEN>;      \
-  MODIFIER struct KmerEqual<KMER_LEN>
+  MODIFIER struct KmerMinimizerHash<KMER_LEN>
 
 // Reduce compile time by instantiating templates of common types
 // extern template declarations are in kmer.hpp

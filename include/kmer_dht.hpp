@@ -158,7 +158,7 @@ class KmerDHT {
     UPCXX_SERIALIZED_FIELDS(kmer, count, left, right);
   };
 
-  using KmerMap = HASH_TABLE<Kmer<MAX_K>, KmerCounts, KmerHash<MAX_K>, KmerEqual<MAX_K>>;
+  using KmerMap = HASH_TABLE<Kmer<MAX_K>, KmerCounts>;
 
  private:
   upcxx::dist_object<KmerMap> kmers;
