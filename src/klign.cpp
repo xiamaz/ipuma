@@ -144,8 +144,7 @@ class KmerCtgDHT {
   Alns *alns;
 
 #ifdef USE_KMER_CACHE
-  // HASH_TABLE<Kmer<MAX_K>, KmerAndCtgLoc<MAX_K>, KmerMinimizerHash<MAX_K>> kmer_cache;
-  HASH_TABLE<Kmer<MAX_K>, KmerAndCtgLoc<MAX_K>> kmer_cache;
+  HASH_TABLE<Kmer<MAX_K>, CtgLoc> kmer_cache;
   int64_t kmer_cache_hits = 0;
   int64_t kmer_lookups = 0;
 #endif
@@ -482,6 +481,10 @@ class KmerCtgDHT {
     gpu_mem_avail = 32 * 1024 * 1024;  // cpu needs a block of memory
 #endif
     ctg_cache.reserve(all_num_ctgs / rank_n());
+
+#ifdef USE_KMER_CACHE
+    kmer_cache.reserve(KLIGN_KMER_CACHE_SIZE);
+#endif
   }
 
   void clear() {
@@ -725,8 +728,12 @@ class KmerCtgDHT {
           ctg_subseq[i] = it->second[i + cstart];
         }
       } else {
+        auto prev_bucket_count = ctg_cache.bucket_count();
         it = ctg_cache.insert({ctg_loc.cid, string(ctg_loc.clen, ' ')}).first;
+        if (prev_bucket_count != ctg_cache.bucket_count())
+          WARN("resized ctg cache from ", prev_bucket_count, " to ", ctg_cache.bucket_count());
       }
+      bool fetched = false;
       if (!found) {
         fetch_ctg_seqs_timer.start();
         rget(ctg_loc.seq_gptr + cstart, seq_buf, overlap_len).wait();
@@ -736,28 +743,37 @@ class KmerCtgDHT {
         for (int i = 0; i < overlap_len; i++) {
           it->second[i + cstart] = ctg_subseq[i];
         }
+        fetched = true;
       } else {
         ctg_cache_hits++;
       }
       align_read(rname, ctg_loc.cid, read_subseq, ctg_subseq, rstart, rlen, cstart, ctg_loc.clen, orient, overlap_len,
                  read_group_id, aln_kernel_timer);
-      // now cache all the kmers from this ctg subseq
-      vector<Kmer<MAX_K>> kmers;
-      Kmer<MAX_K>::get_kmers(kmer_len, ctg_subseq, kmers);
-      for (int i = 0; i < kmers.size(); i++) {
-        auto &kmer = kmers[i];
-        Kmer<MAX_K> kmer_rc = kmer.revcomp();
-        int pos_in_ctg = cstart + i;
-        bool is_rc = false;
-        if (kmer_rc < kmer) {
-          kmer.swap(kmer_rc);
-          is_rc = true;
+      // now cache all the kmers from this ctg subseq but only if this ctg was fetched for the first time and we still have space
+      if (fetched && kmer_cache.size() < KLIGN_KMER_CACHE_SIZE - 1) {
+        vector<Kmer<MAX_K>> kmers;
+        Kmer<MAX_K>::get_kmers(kmer_len, ctg_subseq, kmers);
+        for (int i = 0; i < kmers.size(); i++) {
+          auto &kmer = kmers[i];
+          Kmer<MAX_K> kmer_rc = kmer.revcomp();
+          int pos_in_ctg = cstart + i;
+          bool is_rc = false;
+          if (kmer_rc < kmer) {
+            kmer.swap(kmer_rc);
+            is_rc = true;
+          }
+          if (pos_in_ctg > ctg_loc.clen - kmer_len)
+            DIE("pos in ctg is wrong: ", pos_in_ctg, " clen ", ctg_loc.clen, " rlen ", rseq.length(), " cstart ", cstart, " is_rc ",
+                ctg_loc.is_rc, " rstart ", rstart, " orient ", orient, " overlap ", overlap_len, " pos in ctg ", ctg_loc.pos_in_ctg,
+                " i ", i);
+          auto prev_bucket_count = kmer_cache.bucket_count();
+          cache_kmer({kmer, {ctg_loc.cid, ctg_loc.seq_gptr, ctg_loc.clen, pos_in_ctg, is_rc}});
+          if (prev_bucket_count != kmer_cache.bucket_count()) {
+            // this should never happen
+            DIE("kmer cache was resized from ", prev_bucket_count, " to ", kmer_cache.bucket_count());
+          }
+          if (kmer_cache.size() >= KLIGN_KMER_CACHE_SIZE - 1) break;
         }
-        if (pos_in_ctg > ctg_loc.clen - kmer_len)
-          DIE("pos in ctg is wrong: ", pos_in_ctg, " clen ", ctg_loc.clen, " rlen ", rseq.length(), " cstart ", cstart, " is_rc ",
-              ctg_loc.is_rc, " rstart ", rstart, " orient ", orient, " overlap ", overlap_len, " pos in ctg ", ctg_loc.pos_in_ctg,
-              " i ", i);
-        cache_kmer({kmer, {ctg_loc.cid, ctg_loc.seq_gptr, ctg_loc.clen, pos_in_ctg, is_rc}});
       }
       num_alns++;
     }
@@ -784,7 +800,7 @@ class KmerCtgDHT {
                  (double)all_ctg_bytes_fetched / (rank_n() * max_ctg_bytes_fetched), "\n");
   }
 
-  KmerAndCtgLoc<MAX_K> *find_cached_kmer(Kmer<MAX_K> kmer) {
+  CtgLoc *find_cached_kmer(Kmer<MAX_K> kmer) {
 #ifdef USE_KMER_CACHE
     kmer_lookups++;
     Kmer<MAX_K> kmer_rc = kmer.revcomp();
@@ -792,7 +808,6 @@ class KmerCtgDHT {
     auto it = kmer_cache.find(kmer);
     if (it == kmer_cache.end()) return nullptr;
     kmer_cache_hits++;
-    // return nullptr;
     return &it->second;
 #else
     return nullptr;
@@ -801,7 +816,7 @@ class KmerCtgDHT {
 
   void cache_kmer(const KmerAndCtgLoc<MAX_K> &kmer_ctg_loc) {
 #ifdef USE_KMER_CACHE
-    kmer_cache.insert({kmer_ctg_loc.kmer, kmer_ctg_loc});
+    kmer_cache.insert({kmer_ctg_loc.kmer, kmer_ctg_loc.ctg_loc});
 #endif
   }
 
@@ -809,11 +824,11 @@ class KmerCtgDHT {
 #ifdef USE_KMER_CACHE
     auto all_kmer_cache_hits = reduce_one(kmer_cache_hits, op_fast_add, 0).wait();
     auto all_lookups = reduce_one(kmer_lookups, op_fast_add, 0).wait();
-    SLOG("Hits on kmer cache: ", perc_str(all_kmer_cache_hits, all_lookups), "\n");
+    SLOG("Hits on kmer cache: ", perc_str(all_kmer_cache_hits, all_lookups), " cache size ", kmer_cache.size(), "\n");
 #endif
     auto all_ctg_cache_hits = reduce_one(ctg_cache_hits, op_fast_add, 0).wait();
     auto all_ctg_lookups = reduce_one(ctg_lookups, op_fast_add, 0).wait();
-    SLOG("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), "\n");
+    SLOG("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), " cache size ", ctg_cache.size(), "\n");
   }
 };
 
@@ -887,11 +902,11 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
                        IntermittentTimer &fetch_ctg_seqs_timer, IntermittentTimer &aln_kernel_timer, int64_t &num_excess_alns_reads,
                        int &read_group_id, int64_t &kmer_bytes_sent, int64_t &kmer_bytes_received) {
   auto process_kmer_ctg_loc = [](HASH_TABLE<Kmer<MAX_K>, vector<KmerToRead>> &kmer_read_map, int64_t &num_excess_alns_reads,
-                                 int64_t &kmer_bytes_received, const KmerAndCtgLoc<MAX_K> &kmer_ctg_loc) {
-    kmer_bytes_received += sizeof(kmer_ctg_loc);
+                                 int64_t &kmer_bytes_received, const Kmer<MAX_K> &kmer, const CtgLoc &ctg_loc) {
+    kmer_bytes_received += sizeof(ctg_loc) + sizeof(kmer);
     // get the reads that this kmer mapped to
-    auto kmer_read_map_it = kmer_read_map.find(kmer_ctg_loc.kmer);
-    if (kmer_read_map_it == kmer_read_map.end()) DIE("Could not find kmer ", kmer_ctg_loc.kmer);
+    auto kmer_read_map_it = kmer_read_map.find(kmer);
+    if (kmer_read_map_it == kmer_read_map.end()) DIE("Could not find kmer ", kmer);
     // this is a list of the reads
     auto &kmer_to_reads = kmer_read_map_it->second;
     // now add the ctg loc to all the reads
@@ -905,7 +920,7 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
         continue;
       }
       // this here ensures that we don't insert duplicate mappings
-      read_record->aligned_ctgs_map.insert({kmer_ctg_loc.ctg_loc.cid, {pos_in_read, read_is_rc, kmer_ctg_loc.ctg_loc}});
+      read_record->aligned_ctgs_map.insert({ctg_loc.cid, {pos_in_read, read_is_rc, ctg_loc}});
     }
   };
 
@@ -914,12 +929,12 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
   auto kmer_lists = new vector<Kmer<MAX_K>>[rank_n()];
   for (auto &elem : kmer_read_map) {
     auto kmer = elem.first;
-    auto *kmer_ctg_loc = kmer_ctg_dht.find_cached_kmer(kmer);
-    if (!kmer_ctg_loc) {
+    auto *ctg_loc = kmer_ctg_dht.find_cached_kmer(kmer);
+    if (!ctg_loc) {
       kmer_lists[kmer_ctg_dht.get_target_rank(kmer)].push_back(kmer);
     } else {
       progress();
-      process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, *kmer_ctg_loc);
+      process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, kmer, *ctg_loc);
     }
   }
   get_ctgs_timer.start();
@@ -936,7 +951,7 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
     auto fut_rpc_returned = fut_get_ctgs.then([&](const vector<KmerAndCtgLoc<MAX_K>> kmer_ctg_locs) {
       // iterate through the kmers, each one has an associated ctg location
       for (auto &kmer_ctg_loc : kmer_ctg_locs) {
-        process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, kmer_ctg_loc);
+        process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, kmer_ctg_loc.kmer, kmer_ctg_loc.ctg_loc);
         // kmer_ctg_dht.cache_kmer(kmer_ctg_loc);
       }
     });
