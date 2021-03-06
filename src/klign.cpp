@@ -480,7 +480,7 @@ class KmerCtgDHT {
 #else
     gpu_mem_avail = 32 * 1024 * 1024;  // cpu needs a block of memory
 #endif
-    ctg_cache.reserve(all_num_ctgs / rank_n());
+    ctg_cache.reserve(2 * all_num_ctgs / rank_n());
 
 #ifdef USE_KMER_CACHE
     kmer_cache.reserve(KLIGN_KMER_CACHE_SIZE);
@@ -731,7 +731,7 @@ class KmerCtgDHT {
         auto prev_bucket_count = ctg_cache.bucket_count();
         it = ctg_cache.insert({ctg_loc.cid, string(ctg_loc.clen, ' ')}).first;
         if (prev_bucket_count != ctg_cache.bucket_count())
-          WARN("resized ctg cache from ", prev_bucket_count, " to ", ctg_cache.bucket_count());
+          SWARN("resized ctg cache from ", prev_bucket_count, " to ", ctg_cache.bucket_count());
       }
       bool fetched = false;
       if (!found) {
