@@ -143,9 +143,8 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     Alns alns;
     stage_timers.alignments->start();
     BEGIN_GASNET_STATS("alignment");
-    double kernel_elapsed =
-        find_alignments<MAX_K>(kmer_len, packed_reads_list, max_kmer_store, options->max_rpcs_in_flight, ctgs, alns,
-                               KLIGN_SEED_SPACE, rlen_limit, options->use_minimizers, false, 0, options->ranks_per_gpu);
+    double kernel_elapsed = find_alignments<MAX_K>(kmer_len, packed_reads_list, max_kmer_store, options->max_rpcs_in_flight, ctgs,
+                                                   alns, KLIGN_SEED_SPACE, rlen_limit, false, 0, options->ranks_per_gpu);
     END_GASNET_STATS();
     stage_timers.kernel_alns->inc_elapsed(kernel_elapsed);
     stage_timers.alignments->stop();
@@ -169,8 +168,8 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
         }
         avg_num_reads = reduce_one(num_reads, op_fast_add, 0).wait() / rank_n();
         max_num_reads = reduce_one(num_reads, op_fast_max, 0).wait();
-        SLOG("After shuffle: avg reads per rank ", avg_num_reads, " max ", max_num_reads, " (load balance ",
-             (double)avg_num_reads / max_num_reads, ")\n");
+        SLOG_VERBOSE("After shuffle: avg reads per rank ", avg_num_reads, " max ", max_num_reads, " (load balance ",
+                     (double)avg_num_reads / max_num_reads, ")\n");
       }
     }
 #ifdef DEBUG
