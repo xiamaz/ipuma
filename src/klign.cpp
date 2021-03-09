@@ -375,9 +375,9 @@ class KmerCtgDHT {
     for (int i = 0; i < abd.kernel_alns.size(); i++) {
       // progress();
       Aln &aln = abd.kernel_alns[i];
-      aln.rstop = aln.rstart + aln_results.query_end[i];
+      aln.rstop = aln.rstart + aln_results.query_end[i] + 1;
       aln.rstart += aln_results.query_begin[i];
-      aln.cstop = aln.cstart + aln_results.ref_end[i];
+      aln.cstop = aln.cstart + aln_results.ref_end[i] + 1;
       aln.cstart += aln_results.ref_begin[i];
       if (aln.orient == '-') switch_orient(aln.rstart, aln.rstop, aln.rlen);
       aln.score1 = aln_results.top_scores[i];
@@ -733,7 +733,6 @@ class KmerCtgDHT {
         if (prev_bucket_count != ctg_cache.bucket_count())
           SWARN("resized ctg cache from ", prev_bucket_count, " to ", ctg_cache.bucket_count());
       }
-      bool fetched = false;
       if (!found) {
         fetch_ctg_seqs_timer.start();
         rget(ctg_loc.seq_gptr + cstart, seq_buf, overlap_len).wait();
@@ -743,14 +742,14 @@ class KmerCtgDHT {
         for (int i = 0; i < overlap_len; i++) {
           it->second[i + cstart] = ctg_subseq[i];
         }
-        fetched = true;
       } else {
         ctg_cache_hits++;
       }
       align_read(rname, ctg_loc.cid, read_subseq, ctg_subseq, rstart, rlen, cstart, ctg_loc.clen, orient, overlap_len,
                  read_group_id, aln_kernel_timer);
+#ifdef USE_KMER_CACHE
       // now cache all the kmers from this ctg subseq but only if this ctg was fetched for the first time and we still have space
-      if (fetched && kmer_cache.size() < KLIGN_KMER_CACHE_SIZE - 1) {
+      if (!found && kmer_cache.size() < KLIGN_KMER_CACHE_SIZE - 1) {
         vector<Kmer<MAX_K>> kmers;
         Kmer<MAX_K>::get_kmers(kmer_len, ctg_subseq, kmers);
         for (int i = 0; i < kmers.size(); i++) {
@@ -775,6 +774,7 @@ class KmerCtgDHT {
           if (kmer_cache.size() >= KLIGN_KMER_CACHE_SIZE - 1) break;
         }
       }
+#endif
       num_alns++;
     }
     delete[] seq_buf;
