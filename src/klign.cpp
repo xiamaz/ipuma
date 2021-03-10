@@ -933,13 +933,15 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
   auto kmer_lists = new vector<Kmer<MAX_K>>[rank_n()];
   for (auto &elem : kmer_read_map) {
     auto kmer = elem.first;
+#ifdef USE_KMER_CACHE
     auto *ctg_loc = kmer_ctg_dht.find_cached_kmer(kmer);
-    if (!ctg_loc) {
-      kmer_lists[kmer_ctg_dht.get_target_rank(kmer)].push_back(kmer);
-    } else {
+    if (ctg_loc) {
       progress();
       process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, kmer, *ctg_loc);
-    }
+      continue;
+    } 
+#endif
+    kmer_lists[kmer_ctg_dht.get_target_rank(kmer)].push_back(kmer);
   }
   get_ctgs_timer.start();
   future<> fut_serial_results = make_future();
