@@ -505,8 +505,8 @@ class KmerCtgDHT {
   int64_t size() const { return kmer_map->size(); }
 
   intrank_t get_target_rank(const Kmer<MAX_K> &kmer, const Kmer<MAX_K> *kmer_rc = nullptr) const {
-    // return kmer.minimizer_hash_fast(15, kmer_rc) % rank_n();
-    return std::hash<Kmer<MAX_K>>{}(kmer) % rank_n();
+    return kmer.minimizer_hash_fast(15, kmer_rc) % rank_n();
+    // return std::hash<Kmer<MAX_K>>{}(kmer) % rank_n();
   }
 
   int64_t get_num_kmers(bool all = false) {
