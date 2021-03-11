@@ -523,15 +523,16 @@ class KmerCtgDHT {
     return reduce_all(_num_dropped_seed_to_ctgs, op_fast_add).wait();
   }
 
-  void add_kmer(Kmer<MAX_K> kmer, CtgLoc &ctg_loc) {
-    Kmer<MAX_K> kmer_rc = kmer.revcomp();
+  void add_kmer(const Kmer<MAX_K> &_kmer, CtgLoc &ctg_loc) {
+    Kmer<MAX_K> kmer_rc = _kmer.revcomp();
+    const Kmer<MAX_K> *kmer = &_kmer;
     ctg_loc.is_rc = false;
-    if (kmer_rc < kmer) {
-      kmer.swap(kmer_rc);
+    if (kmer_rc < _kmer) {
+      kmer = &kmer_rc;
       ctg_loc.is_rc = true;
     }
-    KmerAndCtgLoc<MAX_K> kmer_and_ctg_loc = {kmer, ctg_loc};
-    kmer_store.update(get_target_rank(kmer, &kmer_rc), kmer_and_ctg_loc);
+    KmerAndCtgLoc<MAX_K> kmer_and_ctg_loc = {*kmer, ctg_loc};
+    kmer_store.update(get_target_rank(_kmer, &kmer_rc), kmer_and_ctg_loc);
   }
 
   void flush_add_kmers() {
@@ -754,7 +755,7 @@ class KmerCtgDHT {
     auto all_ctg_bytes_fetched = reduce_one(ctg_bytes_fetched, op_fast_add, 0).wait();
     auto max_ctg_bytes_fetched = reduce_one(ctg_bytes_fetched, op_fast_max, 0).wait();
     SLOG_VERBOSE("Contig bytes fetched ", get_size_str(all_ctg_bytes_fetched), " balance ",
-         (double)all_ctg_bytes_fetched / (rank_n() * max_ctg_bytes_fetched), "\n");
+                 (double)all_ctg_bytes_fetched / (rank_n() * max_ctg_bytes_fetched), "\n");
   }
 };
 
@@ -967,15 +968,15 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
       read_records.push_back(read_record);
       bool filled = false;
       for (int i = 0; i < (int)kmers.size(); i += seed_space) {
-        Kmer<MAX_K> kmer = kmers[i];
-        Kmer<MAX_K> kmer_rc = kmer.revcomp();
+        Kmer<MAX_K> *kmer = &kmers[i];
+        Kmer<MAX_K> kmer_rc = kmer->revcomp();
         bool is_rc = false;
-        if (kmer_rc < kmer) {
-          kmer = kmer_rc;
+        if (kmer_rc < *kmer) {
+          kmer = &kmer_rc;
           is_rc = true;
         }
-        auto it = kmer_read_map.find(kmer);
-        if (it == kmer_read_map.end()) it = kmer_read_map.insert({kmer, {}}).first;
+        auto it = kmer_read_map.find(*kmer);
+        if (it == kmer_read_map.end()) it = kmer_read_map.insert({*kmer, {}}).first;
         it->second.push_back({read_record, i, is_rc});
         if (kmer_read_map.size() >= KLIGN_CTG_FETCH_BUF_SIZE) filled = true;
       }

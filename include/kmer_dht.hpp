@@ -503,40 +503,41 @@ class KmerDHT {
   }
 
 #ifdef DEBUG
-  bool kmer_exists(Kmer<MAX_K> kmer) {
-    Kmer<MAX_K> kmer_rc = kmer.revcomp();
-    if (kmer_rc < kmer) kmer.swap(kmer_rc);
-    return rpc(
-               get_kmer_target_rank(kmer, &kmer_rc),
-               [](Kmer<MAX_K> kmer, dist_object<KmerMap> &kmers) -> bool {
+  bool kmer_exists(const Kmer<MAX_K> &_kmer) {
+    const Kmer<MAX_K> kmer_rc = _kmer.revcomp();
+    const Kmer<MAX_K> *kmer = (kmer_rc < _kmer) ? &kmer_rc : &_kmer;
+
+    return rpc(get_kmer_target_rank(*kmer, &kmer_rc),
+               [](const Kmer<MAX_K> kmer, dist_object<KmerMap> &kmers) -> bool {
                  const auto it = kmers->find(kmer);
                  if (it == kmers->end()) return false;
                  return true;
                },
-               kmer, kmers)
+               *kmer, kmers)
         .wait();
   }
 #endif
 
-  void add_kmer(Kmer<MAX_K> kmer, char left_ext, char right_ext, kmer_count_t count) {
+  void add_kmer(const Kmer<MAX_K> &_kmer, char left_ext, char right_ext, kmer_count_t count) {
     _num_kmers_counted++;
     if (!count) count = 1;
     // get the lexicographically smallest
-    Kmer<MAX_K> kmer_rc = kmer.revcomp();
-    if (kmer_rc < kmer) {
-      kmer.swap(kmer_rc);
+    const Kmer<MAX_K> kmer_rc = _kmer.revcomp();
+    const Kmer<MAX_K> *kmer = &_kmer;
+    if (kmer_rc < _kmer) {
+      kmer = &kmer_rc;
       swap(left_ext, right_ext);
       left_ext = comp_nucleotide(left_ext);
       right_ext = comp_nucleotide(right_ext);
     }
-    auto target_rank = get_kmer_target_rank(kmer, &kmer_rc);
+    auto target_rank = get_kmer_target_rank(*kmer, &kmer_rc);
     if (pass_type == BLOOM_SET_PASS || pass_type == CTG_BLOOM_SET_PASS) {
       if (count) {
-        kmer_store_bloom.update(target_rank, kmer);
-        bytes_sent += sizeof(kmer);
+        kmer_store_bloom.update(target_rank, *kmer);
+        bytes_sent += sizeof(*kmer);
       }
     } else {
-      KmerAndExt kmer_and_ext = {.kmer = kmer, .count = count, .left = left_ext, .right = right_ext};
+      KmerAndExt kmer_and_ext = {.kmer = *kmer, .count = count, .left = left_ext, .right = right_ext};
       if (target_rank == rank_me() && (pass_type == NO_BLOOM_PASS || pass_type == CTG_KMERS_PASS)) {
         _num_kmers_counted_locally++;
         update_count(kmer_and_ext, kmers, bloom_filter1);
