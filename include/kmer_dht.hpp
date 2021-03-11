@@ -490,6 +490,7 @@ class KmerDHT {
   double get_estimated_error_rate() { return estimated_error_rate; }
 
   upcxx::intrank_t get_kmer_target_rank(const Kmer<MAX_K> &kmer, const Kmer<MAX_K> *kmer_rc = nullptr) const {
+    assert(&kmer != kmer_rc && "Can be a palindrome, cannot be the same Kmer instance");
     if (use_minimizers)
       return kmer.minimizer_hash_fast(MINIMIZER_LEN, kmer_rc) % rank_n();
     else
@@ -507,7 +508,7 @@ class KmerDHT {
     const Kmer<MAX_K> kmer_rc = _kmer.revcomp();
     const Kmer<MAX_K> *kmer = (kmer_rc < _kmer) ? &kmer_rc : &_kmer;
 
-    return rpc(get_kmer_target_rank(*kmer, &kmer_rc),
+    return rpc(get_kmer_target_rank(_kmer, &kmer_rc),
                [](const Kmer<MAX_K> kmer, dist_object<KmerMap> &kmers) -> bool {
                  const auto it = kmers->find(kmer);
                  if (it == kmers->end()) return false;
@@ -530,7 +531,7 @@ class KmerDHT {
       left_ext = comp_nucleotide(left_ext);
       right_ext = comp_nucleotide(right_ext);
     }
-    auto target_rank = get_kmer_target_rank(*kmer, &kmer_rc);
+    auto target_rank = get_kmer_target_rank(_kmer, &kmer_rc);
     if (pass_type == BLOOM_SET_PASS || pass_type == CTG_BLOOM_SET_PASS) {
       if (count) {
         kmer_store_bloom.update(target_rank, *kmer);

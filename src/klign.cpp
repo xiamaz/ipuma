@@ -492,6 +492,7 @@ class KmerCtgDHT {
   int64_t size() const { return kmer_map->size(); }
 
   intrank_t get_target_rank(const Kmer<MAX_K> &kmer, const Kmer<MAX_K> *kmer_rc = nullptr) const {
+    assert(&kmer != kmer_rc && "Can be a palindrome but cannot be the same Kmer instance");
     if (use_minimizers)
       return kmer.minimizer_hash_fast(MINIMIZER_LEN, kmer_rc) % rank_n();
     else
