@@ -505,8 +505,16 @@ class KmerCtgDHT {
   int64_t size() const { return kmer_map->size(); }
 
   intrank_t get_target_rank(const Kmer<MAX_K> &kmer, const Kmer<MAX_K> *kmer_rc = nullptr) const {
+<<<<<<< HEAD
     return kmer.minimizer_hash_fast(15, kmer_rc) % rank_n();
     // return std::hash<Kmer<MAX_K>>{}(kmer) % rank_n();
+=======
+    assert(&kmer != kmer_rc && "Can be a palindrome but cannot be the same Kmer instance");
+    if (use_minimizers)
+      return kmer.minimizer_hash_fast(MINIMIZER_LEN, kmer_rc) % rank_n();
+    else
+      return std::hash<Kmer<MAX_K>>{}(kmer) % rank_n();
+>>>>>>> NoKmerSwaps
   }
 
   int64_t get_num_kmers(bool all = false) {
@@ -534,6 +542,7 @@ class KmerCtgDHT {
     return reduce_all(_num_dropped_seed_to_ctgs, op_fast_add).wait();
   }
 
+<<<<<<< HEAD
   void add_kmer(const Kmer<MAX_K> &kmer_fw, CtgLoc &ctg_loc) {
     Kmer<MAX_K> kmer_rc = kmer_fw.revcomp();
     ctg_loc.is_rc = false;
@@ -545,6 +554,18 @@ class KmerCtgDHT {
     assert(kmer_lc->is_least());
     KmerAndCtgLoc<MAX_K> kmer_and_ctg_loc = {*kmer_lc, ctg_loc};
     kmer_store.update(get_target_rank(kmer_fw, &kmer_rc), kmer_and_ctg_loc);
+=======
+  void add_kmer(const Kmer<MAX_K> &_kmer, CtgLoc &ctg_loc) {
+    Kmer<MAX_K> kmer_rc = _kmer.revcomp();
+    const Kmer<MAX_K> *kmer = &_kmer;
+    ctg_loc.is_rc = false;
+    if (kmer_rc < _kmer) {
+      kmer = &kmer_rc;
+      ctg_loc.is_rc = true;
+    }
+    KmerAndCtgLoc<MAX_K> kmer_and_ctg_loc = {*kmer, ctg_loc};
+    kmer_store.update(get_target_rank(_kmer, &kmer_rc), kmer_and_ctg_loc);
+>>>>>>> NoKmerSwaps
   }
 
   void flush_add_kmers() {
@@ -806,6 +827,7 @@ class KmerCtgDHT {
     auto max_ctg_bytes_fetched = reduce_one(ctg_bytes_fetched, op_fast_max, 0).wait();
     SLOG_VERBOSE("Contig bytes fetched ", get_size_str(all_ctg_bytes_fetched), " balance ",
                  (double)all_ctg_bytes_fetched / (rank_n() * max_ctg_bytes_fetched), "\n");
+<<<<<<< HEAD
   }
 
 #ifdef USE_KMER_CACHE
@@ -842,6 +864,8 @@ class KmerCtgDHT {
     auto all_ctg_cache_hits = reduce_one(ctg_cache_hits, op_fast_add, 0).wait();
     auto all_ctg_lookups = reduce_one(ctg_lookups, op_fast_add, 0).wait();
     SLOG("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), " cache size ", ctg_cache.size(), "\n");
+=======
+>>>>>>> NoKmerSwaps
   }
 };
 
@@ -1050,6 +1074,7 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
       read_records.push_back(read_record);
       bool filled = false;
       for (int i = 0; i < (int)kmers.size(); i += seed_space) {
+<<<<<<< HEAD
         const Kmer<MAX_K> &kmer_fw = kmers[i];
         const Kmer<MAX_K> kmer_rc = kmer_fw.revcomp();
         const Kmer<MAX_K> *kmer_lc = &kmer_fw;
@@ -1060,6 +1085,17 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
         }
         auto it = kmer_read_map.find(*kmer_lc);
         if (it == kmer_read_map.end()) it = kmer_read_map.insert({*kmer_lc, {}}).first;
+=======
+        Kmer<MAX_K> *kmer = &kmers[i];
+        Kmer<MAX_K> kmer_rc = kmer->revcomp();
+        bool is_rc = false;
+        if (kmer_rc < *kmer) {
+          kmer = &kmer_rc;
+          is_rc = true;
+        }
+        auto it = kmer_read_map.find(*kmer);
+        if (it == kmer_read_map.end()) it = kmer_read_map.insert({*kmer, {}}).first;
+>>>>>>> NoKmerSwaps
         it->second.push_back({read_record, i, is_rc});
         if (kmer_read_map.size() >= KLIGN_CTG_FETCH_BUF_SIZE) filled = true;
       }
