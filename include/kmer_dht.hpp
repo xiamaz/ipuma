@@ -504,11 +504,11 @@ class KmerDHT {
   }
 
 #ifdef DEBUG
-  bool kmer_exists(const Kmer<MAX_K> &_kmer) {
-    const Kmer<MAX_K> kmer_rc = _kmer.revcomp();
-    const Kmer<MAX_K> *kmer = (kmer_rc < _kmer) ? &kmer_rc : &_kmer;
+  bool kmer_exists(const Kmer<MAX_K> &kmer_fw) {
+    const Kmer<MAX_K> kmer_rc = kmer_fw.revcomp();
+    const Kmer<MAX_K> *kmer = (kmer_rc < kmer_fw) ? &kmer_rc : &kmer_fw;
 
-    return rpc(get_kmer_target_rank(_kmer, &kmer_rc),
+    return rpc(get_kmer_target_rank(kmer_fw, &kmer_rc),
                [](const Kmer<MAX_K> kmer, dist_object<KmerMap> &kmers) -> bool {
                  const auto it = kmers->find(kmer);
                  if (it == kmers->end()) return false;
@@ -519,19 +519,19 @@ class KmerDHT {
   }
 #endif
 
-  void add_kmer(const Kmer<MAX_K> &_kmer, char left_ext, char right_ext, kmer_count_t count) {
+  void add_kmer(const Kmer<MAX_K> &kmer_fw, char left_ext, char right_ext, kmer_count_t count) {
     _num_kmers_counted++;
     if (!count) count = 1;
     // get the lexicographically smallest
-    const Kmer<MAX_K> kmer_rc = _kmer.revcomp();
-    const Kmer<MAX_K> *kmer = &_kmer;
-    if (kmer_rc < _kmer) {
+    const Kmer<MAX_K> kmer_rc = kmer_fw.revcomp();
+    const Kmer<MAX_K> *kmer = &kmer_fw;
+    if (kmer_rc < kmer_fw) {
       kmer = &kmer_rc;
       swap(left_ext, right_ext);
       left_ext = comp_nucleotide(left_ext);
       right_ext = comp_nucleotide(right_ext);
     }
-    auto target_rank = get_kmer_target_rank(_kmer, &kmer_rc);
+    auto target_rank = get_kmer_target_rank(kmer_fw, &kmer_rc);
     if (pass_type == BLOOM_SET_PASS || pass_type == CTG_BLOOM_SET_PASS) {
       if (count) {
         kmer_store_bloom.update(target_rank, *kmer);
