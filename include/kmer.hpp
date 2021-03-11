@@ -207,6 +207,7 @@ class Kmer {
     }
     return false;
   }
+  bool operator<=(const Kmer &o) const { return (*this < o) | (*this == o); }
 
   bool operator==(const Kmer &o) const { return longs == o.longs; }
 
@@ -444,6 +445,8 @@ class Kmer {
     }
     return km;
   }
+
+  bool is_least() const { return *this <= revcomp(); }
 
   Kmer forward_base(const char b) const {
     Kmer km(*this);
