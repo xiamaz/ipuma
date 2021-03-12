@@ -136,12 +136,17 @@ class Kmer {
   static unsigned int get_MAX_K() { return MAX_K; }
 
   static void get_kmers(unsigned kmer_len, std::string seq, std::vector<Kmer> &kmers) {
+    // converts lowercases to upper case
+    if (seq.size() < Kmer::k) return;
+    for (auto &c : seq) c = toupper(c);  // this might be slow
+    get_kmers(kmer_len, std::string_view(seq.data(), seq.size()), kmers);
+  }
+  static void get_kmers(unsigned kmer_len, const std::string_view &seq, std::vector<Kmer> &kmers) {
     // only need rank 0 to check
     assert(Kmer::k > 0);
     assert(kmer_len == Kmer::k);
     kmers.clear();
     if (seq.size() < Kmer::k) return;
-    for (auto &c : seq) c = toupper(c);
     int bufsize = std::max((int)N_LONGS, (int)(seq.size() + 31) / 32) + N_LONGS;
     int lastLong = N_LONGS - 1;
     assert(lastLong >= 0 && lastLong < N_LONGS);
@@ -149,12 +154,13 @@ class Kmer {
     longs_t buf[bufsize];
     uint8_t *bufPtr = (uint8_t *)buf;
     memset(buf, 0, bufsize * 8);
-    const char *s = seq.c_str();
+    const char *s = seq.data();
     // calculate binary along entire sequence
     for (unsigned i = 0; i < seq.size(); ++i) {
       int j = i % 32;
       int l = i / 32;
       assert(*s != '\0');
+      assert(*s == 'A' || *s == 'C' || *s == 'G' || *s == 'T' || *s == 'N');  // N is acceptable for speed
       longs_t x = ((*s) & 4) >> 1;
       buf[l] |= ((x + ((x ^ (*s & 2)) >> 1)) << (2 * (31 - j)));
       s++;

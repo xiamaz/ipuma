@@ -84,7 +84,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       progbar.update();
       if (seq.length() < kmer_len) continue;
       // split into kmers
-      Kmer<MAX_K>::get_kmers(kmer_len, seq, kmers);
+      Kmer<MAX_K>::get_kmers(kmer_len, string_view(seq.data(), seq.size()), kmers);
 #ifdef KCOUNT_FILTER_BAD_QUAL_IN_READ
       size_t found_bad_qual_pos = seq.length();
       if (pass_type != BLOOM_SET_PASS) {
@@ -154,7 +154,7 @@ static void count_ctg_kmers(unsigned kmer_len, Contigs &ctgs, dist_object<KmerDH
     auto ctg = it;
     progbar.update();
     if (ctg->seq.length() >= kmer_len) {
-      Kmer<MAX_K>::get_kmers(kmer_len, ctg->seq, kmers);
+      Kmer<MAX_K>::get_kmers(kmer_len, string_view(ctg->seq.data(), ctg->seq.size()), kmers);
       if (kmers.size() != ctg->seq.length() - kmer_len + 1)
         DIE("kmers size mismatch ", kmers.size(), " != ", (ctg->seq.length() - kmer_len + 1), " '", ctg->seq, "'");
       for (int i = 1; i < (int)(ctg->seq.length() - kmer_len); i++) {
@@ -189,7 +189,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     auto ctg = it;
     progbar.update();
     if (ctg->seq.length() >= kmer_len + 2) {
-      Kmer<MAX_K>::get_kmers(kmer_len, ctg->seq, kmers);
+      Kmer<MAX_K>::get_kmers(kmer_len, string_view(ctg->seq.data(), ctg->seq.size()), kmers);
       if (kmers.size() != ctg->seq.length() - kmer_len + 1)
         DIE("kmers size mismatch ", kmers.size(), " != ", (ctg->seq.length() - kmer_len + 1), " '", ctg->seq, "'");
       for (int i = 1; i < (int)(ctg->seq.length() - kmer_len); i++) {
