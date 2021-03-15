@@ -992,6 +992,8 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
   for (auto read_record : read_records) {
     if (!KLIGN_MAX_ALNS_PER_READ || read_record->aligned_ctgs_map.size() < KLIGN_MAX_ALNS_PER_READ)
       good_read_records.push_back(read_record);
+    else 
+      delete read_record;
   }
   // compute alignments for each read
   for (auto read_record : good_read_records) {
