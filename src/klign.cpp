@@ -505,8 +505,7 @@ class KmerCtgDHT {
   void reserve(int64_t mysize) { kmer_map->reserve(mysize); }
   int64_t size() const { return kmer_map->size(); }
 
-  intrank_t get_target_rank(const Kmer<MAX_K> &kmer, const Kmer<MAX_K> *kmer_rc = nullptr) const {
-    //return kmer.minimizer_hash_fast(15, kmer_rc) % rank_n();
+  intrank_t get_target_rank(const Kmer<MAX_K> &kmer) const {
     return std::hash<Kmer<MAX_K>>{}(kmer) % rank_n();
   }
 
@@ -545,7 +544,7 @@ class KmerCtgDHT {
     }
     assert(kmer_lc->is_least());
     KmerAndCtgLoc<MAX_K> kmer_and_ctg_loc = {*kmer_lc, ctg_loc};
-    kmer_store.update(get_target_rank(kmer_fw, &kmer_rc), kmer_and_ctg_loc);
+    kmer_store.update(get_target_rank(*kmer_lc), kmer_and_ctg_loc);
   }
 
   void flush_add_kmers() {
@@ -954,7 +953,7 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
       continue;
     }
 #endif
-    kmer_lists[kmer_ctg_dht.get_target_rank(kmer_fw, &kmer_rc)].push_back(*kmer_lc);
+    kmer_lists[kmer_ctg_dht.get_target_rank(*kmer_lc)].push_back(*kmer_lc);
   }
   get_ctgs_timer.start();
   future<> fut_serial_results = make_future();
