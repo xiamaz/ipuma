@@ -159,6 +159,7 @@ class KmerCtgDHT {
   HASH_TABLE<cid_t, string> ctg_cache;
   int64_t ctg_cache_hits = 0;
   int64_t ctg_lookups = 0;
+  int64_t ctg_local_hits = 0;
 
   int get_cigar_length(const string &cigar) {
     // check that cigar string length is the same as the sequence, but only if the sequence is included
@@ -731,49 +732,78 @@ class KmerCtgDHT {
       assert(overlap_len <= 2 * rlen);
 
       string_view ctg_subseq;
-      bool found = false;
-      ctg_lookups++;
-      auto it = ctg_cache.find(ctg_loc.cid);
-      if (it != ctg_cache.end()) {
-        found = true;
-        ctg_subseq = string_view(it->second.data() + cstart, overlap_len);
-        for (int i = 0; i < overlap_len; i++) {
-          if (ctg_subseq[i] == ' ') {
-            found = false;
-            break;
-          }
-        }
+      string_view ctg_seq;
+      bool found = ctg_loc.seq_gptr.is_local();
+      if (found) {
+        // on same node already
+        ctg_seq = string_view(ctg_loc.seq_gptr.local(), ctg_loc.clen);
+        ctg_local_hits++;
       } else {
-        auto prev_bucket_count = ctg_cache.bucket_count();
-        it = ctg_cache.insert({ctg_loc.cid, string(ctg_loc.clen, ' ')}).first;
-        assert(it != ctg_cache.end());
-        if (prev_bucket_count != ctg_cache.bucket_count())
-          SWARN("resized ctg cache from ", prev_bucket_count, " to ", ctg_cache.bucket_count());
-      }
-      auto &ctg_seq = it->second;
-      if (!found) {
-        assert(ctg_seq.size() >= cstart + overlap_len);
-        assert(ctg_seq.size() == ctg_loc.clen);
-        // also get extra bases on either side of the contig for negligable extra overhead and likely less lookups
-        const int extra_bases = 64;
+        ctg_lookups++;
+        auto it = ctg_cache.find(ctg_loc.cid);
         auto get_start = cstart, get_len = overlap_len;
-        if (get_start > 0) {
-          get_start = std::max(0, cstart - extra_bases);
-          get_len += cstart - get_start;
+        if (it != ctg_cache.end()) {
+          found = true;
+          ctg_subseq = string_view(it->second.data() + cstart, overlap_len);
+          // find the first and last blank in the cached contig (if any)
+          for (int i = 0; i < overlap_len; i++) {
+            if (ctg_subseq[i] == ' ') {
+              found = false;
+              break;
+            }
+            get_start++;
+            get_len--;
+          }
+          if (!found) {
+            while (get_len > 0) {
+              if (ctg_subseq[get_start + get_len - 1] == ' ') {
+                break;
+              }
+              get_len--;
+            }
+          }
+        } else {
+          auto prev_bucket_count = ctg_cache.bucket_count();
+          it = ctg_cache.insert({ctg_loc.cid, string(ctg_loc.clen, ' ')}).first;
+          assert(it != ctg_cache.end());
+          if (prev_bucket_count != ctg_cache.bucket_count())
+            SWARN("resized ctg cache from ", prev_bucket_count, " to ", ctg_cache.bucket_count());
         }
-        if (get_start + get_len < ctg_loc.clen) {
-          auto new_stop = std::min(ctg_loc.clen, get_start + get_len + extra_bases);
-          get_len = new_stop - get_start;
+        ctg_seq = string_view(it->second.data(), it->second.size());
+        if (!found) {
+          assert(ctg_seq.size() >= cstart + overlap_len);
+          assert(ctg_seq.size() == ctg_loc.clen);
+
+          // also get extra bordering blank bases on either side of the contig for negligable extra overhead and likely less rgets
+          const int extra_bases = 64;
+          for (int i = 0; i < extra_bases; i++) {
+            if (get_start == 0) break;
+            if (ctg_seq[get_start] == ' ') {
+              get_start--;
+              get_len++;
+            } else
+              break;
+          }
+          for (int i = 0; i < extra_bases; i++) {
+            if (get_start + get_len >= ctg_seq.size()) break;
+            if (ctg_seq[get_start + get_len - 1] == ' ') {
+              get_len++;
+            } else
+              break;
+          }
+
+          string &ctg_str = it->second;  // the actual underlying string, not view
+          assert(get_start >= 0);
+          assert(get_start + get_len <= ctg_seq.size());
+          fetch_ctg_seqs_timer.start();
+          rget(ctg_loc.seq_gptr + get_start, ctg_str.data() + get_start, get_len).wait();
+          fetch_ctg_seqs_timer.stop();
+          ctg_bytes_fetched += get_len;
+        } else {
+          ctg_cache_hits++;
         }
-        assert(get_start + get_len <= ctg_seq.size());
-        fetch_ctg_seqs_timer.start();
-        rget(ctg_loc.seq_gptr + get_start, ctg_seq.data() + get_start, get_len).wait();
-        fetch_ctg_seqs_timer.stop();
-        ctg_bytes_fetched += get_len;
-        ctg_subseq = string_view(ctg_seq.data() + cstart, overlap_len);
-      } else {
-        ctg_cache_hits++;
       }
+      ctg_subseq = string_view(ctg_seq.data() + cstart, overlap_len);
 
       assert(pos_in_read + Kmer<MAX_K>::get_k() <= rseq_ptr.size() && "kmer fits in read");
       assert(ctg_loc.pos_in_ctg + Kmer<MAX_K>::get_k() <= ctg_seq.size() && "kmer fits in ctg");
@@ -867,9 +897,11 @@ class KmerCtgDHT {
       SLOG("Hits on kmer cache: ", perc_str(all_kmer_cache_hits, all_lookups), " cache size ", kmer_cache.size(), "\n");
     }
 #endif
+    auto all_ctg_local_hits = reduce_one(ctg_local_hits, op_fast_add, 0).wait();
     auto all_ctg_cache_hits = reduce_one(ctg_cache_hits, op_fast_add, 0).wait();
     auto all_ctg_lookups = reduce_one(ctg_lookups, op_fast_add, 0).wait();
     SLOG("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), " cache size ", ctg_cache.size(), "\n");
+    SLOG("Local contig hits bypassing cache: ", all_ctg_local_hits, "\n");
   }
 };
 
