@@ -250,9 +250,9 @@ class KmerCtgDHT {
   void align_read(const string &rname, int64_t cid, const string &rseq, const string &cseq, int rstart, int rlen, int cstart,
                   int clen, char orient, int overlap_len, int read_group_id, IntermittentTimer &aln_kernel_timer) {
     // still can do partial perfect alignment
-    if (perfect_align_read(rname, cid, rseq, cseq, rstart, rlen, cstart, clen, orient, overlap_len, read_group_id,
-                           aln_kernel_timer))
-      return;
+    //if (perfect_align_read(rname, cid, rseq, cseq, rstart, rlen, cstart, clen, orient, overlap_len, read_group_id,
+//                           aln_kernel_timer))
+//  return;
     max_clen = max((int64_t)cseq.size(), max_clen);
     max_rlen = max((int64_t)rseq.size(), max_rlen);
     int64_t num_alns = kernel_alns.size() + 1;
@@ -705,7 +705,7 @@ class KmerCtgDHT {
       progress();
       int pos_in_read = elem.second.pos_in_read;
       // always looking for the perfect alignment from the first kmer, i.e. beginning of the read
-      if (perfect_only && pos_in_read != 0) continue;
+      //if (perfect_only && pos_in_read != 0) continue;
       bool read_kmer_is_rc = elem.second.read_is_rc;
       CtgLoc ctg_loc = elem.second.ctg_loc;
       char orient = '+';
@@ -728,10 +728,8 @@ class KmerCtgDHT {
       int rstart = pos_in_read - left_of_kmer;
       int overlap_len = left_of_kmer + kmer_len + right_of_kmer;
 
-      if (perfect_only && overlap_len != rlen) continue;
-
-      // use the whole read, to account for possible indels
-      // string read_subseq = rseq_ptr->substr(0, rlen);
+      // multiple alignments are possible
+      if (perfect_only && overlap_len <= rlen - kmer_len) continue;
 
       assert(cstart >= 0 && cstart + overlap_len <= ctg_loc.clen);
       assert(overlap_len <= 2 * rlen);
