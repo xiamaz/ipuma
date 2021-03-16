@@ -915,9 +915,9 @@ class KmerCtgDHT {
 #endif
     auto all_ctg_local_hits = reduce_one(ctg_local_hits, op_fast_add, 0).wait();
     auto all_ctg_cache_hits = reduce_one(ctg_cache_hits, op_fast_add, 0).wait();
-    auto all_ctg_lookups = reduce_one(ctg_lookups, op_fast_add, 0).wait();
+    auto all_ctg_lookups = reduce_one(ctg_lookups + ctg_local_hits, op_fast_add, 0).wait();
     SLOG("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), " cache size ", ctg_cache.size(), "\n");
-    SLOG("Local contig hits bypassing cache: ", all_ctg_local_hits, "\n");
+    SLOG("Local contig hits bypassing cache: ", perc_str(ctg_local_hits, all_ctg_local_hits), "\n");
   }
 };
 
