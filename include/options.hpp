@@ -94,6 +94,7 @@ class Options {
   int dmin_thres = 2.0;
   bool checkpoint = true;
   bool checkpoint_merged = false;
+  bool klign_kmer_cache = false;
   bool post_assm_aln = false;
   bool post_assm_abundances = false;
   bool post_assm_only = false;

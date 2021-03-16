@@ -320,8 +320,8 @@ void Options::cleanup() {
 
 bool Options::load(int argc, char **argv) {
   // MHM2 version v0.1-a0decc6-master (Release) built on 2020-04-08T22:15:40 with g++
- string full_version_str = "MHM2 version " + string(MHM2_VERSION) + "-" + string(MHM2_BRANCH) + " with upcxx-utils " +
-                           string(UPCXX_UTILS_VERSION) + " built on " + string(MHM2_BUILD_DATE);
+  string full_version_str = "MHM2 version " + string(MHM2_VERSION) + "-" + string(MHM2_BRANCH) + " with upcxx-utils " +
+                            string(UPCXX_UTILS_VERSION) + " built on " + string(MHM2_BUILD_DATE);
   CLI::App app(full_version_str);
   // basic options - see user guide
   app.add_option("-r, --reads", reads_fnames,
@@ -362,6 +362,10 @@ bool Options::load(int argc, char **argv) {
       ->multi_option_policy();
   app.add_flag("--restart", restart,
                "Restart in previous directory where a run failed (must specify the previous directory with -o).")
+      ->capture_default_str();
+  app.add_flag("--klign-kmer-cache", klign_kmer_cache,
+               "Include a cache of kmer seed to contigs which helps avoid repeat lookups of the same kmer -- most useful after "
+               "shuffle-reads localization")
       ->capture_default_str();
   app.add_flag("--post-asm-align", post_assm_aln, "Align reads to final assembly")->capture_default_str();
   app.add_flag("--post-asm-abd", post_assm_abundances, "Compute and output abundances for final assembly (used by MetaBAT).")
