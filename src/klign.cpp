@@ -156,6 +156,7 @@ class KmerCtgDHT {
 
   bool use_kmer_cache;
 
+  IntermittentTimer fetch_ctg_seqs_timer;
   int64_t ctg_bytes_fetched = 0;
   HASH_TABLE<cid_t, string> ctg_cache;
   std::unordered_set<cid_t> local_ctgs;
@@ -453,7 +454,8 @@ class KmerCtgDHT {
       , aln_cpu_bypass_timer("klign.cpp:CPU_BSW-bypass")
       , alns(&alns)
       , kmer_len(kmer_len)
-      , use_kmer_cache(use_kmer_cache) {
+      , use_kmer_cache(use_kmer_cache)
+      , fetch_ctg_seqs_timer("klign.cpp:Fetch ctg seqs") {
     this->aln_scoring = aln_scoring;
     ssw_filter.report_cigar = compute_cigar;
     kmer_store.set_size("insert ctg seeds", max_store_size, max_rpcs_in_flight);
@@ -509,6 +511,7 @@ class KmerCtgDHT {
     if (kernel_alns.size() || !active_kernel_fut.ready())
       DIE("clear called with alignments in the buffer or active kernel - was flush_remaining called before destrutor?\n");
     clear_aln_bufs();
+    fetch_ctg_seqs_timer.print_out();
     aln_cpu_bypass_timer.print_out();
     local_kmer_map_t().swap(*kmer_map);  // release all memory
     kmer_store.clear();
@@ -696,10 +699,9 @@ class KmerCtgDHT {
 #endif
 
   void compute_alns_for_read(HASH_TABLE<cid_t, ReadAndCtgLoc> *aligned_ctgs_map, const string &rname, const string &rseq_fw,
-                             int read_group_id, IntermittentTimer &fetch_ctg_seqs_timer, IntermittentTimer &aln_kernel_timer) {
+                             int read_group_id, IntermittentTimer &aln_kernel_timer) {
     int rlen = rseq_fw.length();
     string rseq_rc;
-
     for (auto &elem : *aligned_ctgs_map) {
       progress();
       int pos_in_read = elem.second.pos_in_read;
@@ -989,8 +991,8 @@ struct KmerToRead {
 template <int MAX_K>
 static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, vector<KmerToRead>> &kmer_read_map,
                        vector<ReadRecord *> &read_records, IntermittentTimer &compute_alns_timer, IntermittentTimer &get_ctgs_timer,
-                       IntermittentTimer &fetch_ctg_seqs_timer, IntermittentTimer &aln_kernel_timer, int64_t &num_excess_alns_reads,
-                       int &read_group_id, int64_t &kmer_bytes_sent, int64_t &kmer_bytes_received) {
+                       IntermittentTimer &aln_kernel_timer, int64_t &num_excess_alns_reads, int &read_group_id,
+                       int64_t &kmer_bytes_sent, int64_t &kmer_bytes_received) {
   auto process_kmer_ctg_loc = [](HASH_TABLE<Kmer<MAX_K>, vector<KmerToRead>> &kmer_read_map, int64_t &num_excess_alns_reads,
                                  int64_t &kmer_bytes_received, const Kmer<MAX_K> &kmer, const CtgLoc &ctg_loc) {
     assert(kmer.is_least());
@@ -1077,7 +1079,7 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
     if (read_record->aligned_ctgs_map.size()) {
       num_reads_aligned++;
       kmer_ctg_dht.compute_alns_for_read(&read_record->aligned_ctgs_map, read_record->id, read_record->seq, read_group_id,
-                                         fetch_ctg_seqs_timer, aln_kernel_timer);
+                                         aln_kernel_timer);
     }
     delete read_record;
   }
@@ -1096,7 +1098,6 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
   int64_t num_reads_aligned = 0, num_excess_alns_reads = 0;
   IntermittentTimer compute_alns_timer(__FILENAME__ + string(":") + "Compute alns");
   IntermittentTimer get_ctgs_timer(__FILENAME__ + string(":") + "Get ctgs with kmer");
-  IntermittentTimer fetch_ctg_seqs_timer(__FILENAME__ + string(":") + "Fetch ctg seqs");
 #ifdef ENABLE_GPUS
   IntermittentTimer aln_kernel_timer(__FILENAME__ + string(":") +
                                      ((compute_cigar && kmer_ctg_dht.get_gpu_mem_avail()) ? "SSW" : "GPU_BSW"));
@@ -1144,15 +1145,15 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
       }
       if (filled) {
         num_reads_aligned +=
-            align_kmers(kmer_ctg_dht, kmer_read_map, read_records, compute_alns_timer, get_ctgs_timer, fetch_ctg_seqs_timer,
-                        aln_kernel_timer, num_excess_alns_reads, read_group_id, kmer_bytes_sent, kmer_bytes_received);
+            align_kmers(kmer_ctg_dht, kmer_read_map, read_records, compute_alns_timer, get_ctgs_timer, aln_kernel_timer,
+                        num_excess_alns_reads, read_group_id, kmer_bytes_sent, kmer_bytes_received);
       }
       num_reads++;
     }
     if (read_records.size()) {
       num_reads_aligned +=
-          align_kmers(kmer_ctg_dht, kmer_read_map, read_records, compute_alns_timer, get_ctgs_timer, fetch_ctg_seqs_timer,
-                      aln_kernel_timer, num_excess_alns_reads, read_group_id, kmer_bytes_sent, kmer_bytes_received);
+          align_kmers(kmer_ctg_dht, kmer_read_map, read_records, compute_alns_timer, get_ctgs_timer, aln_kernel_timer,
+                      num_excess_alns_reads, read_group_id, kmer_bytes_sent, kmer_bytes_received);
     }
     assert(kmer_read_map.empty());
     kmer_ctg_dht.flush_remaining(aln_kernel_timer, read_group_id);
@@ -1194,7 +1195,6 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
   kmer_ctg_dht.log_ctg_bytes_fetched();
 
   get_ctgs_timer.done_all();
-  fetch_ctg_seqs_timer.done_all();
   compute_alns_timer.done_all();
   double aln_kernel_secs = aln_kernel_timer.get_elapsed();
   aln_kernel_timer.done_all();

@@ -571,6 +571,8 @@ bool Options::load(int argc, char **argv) {
 #ifdef DEBUG
   SWARN("Running low-performance debug mode");
 #endif
+  if (!post_assm_only & klign_kmer_cache & !shuffle_reads)
+    SWARN("klign-kmer-cache option selected but shuffle-reads is not, performance may suffer");
   if (!upcxx::rank_me()) {
     // write out configuration file for restarts
     ofstream ofs(config_file);
