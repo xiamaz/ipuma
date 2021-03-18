@@ -125,6 +125,12 @@ class Kmer {
     set_kmer(s);
   }
 
+  static const Kmer get_invalid() {
+    Kmer invalid;
+    invalid.longs.fill(0xFFFFFFFFFFFFFFFF);  // all bits set (i.e. poly T with no zero masking)
+    return invalid;
+  }
+
   void swap(Kmer &other) { std::swap(longs, other.longs); }
 
   static void set_k(unsigned int k) { Kmer::k = k; }

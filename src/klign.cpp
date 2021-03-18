@@ -55,6 +55,7 @@
 #include "klign.hpp"
 #include "kmer.hpp"
 #include "ssw.hpp"
+#include "upcxx_utils/fixed_size_cache.hpp"
 #include "upcxx_utils/limit_outstanding.hpp"
 #include "upcxx_utils/log.hpp"
 #include "upcxx_utils/progress_bar.hpp"
@@ -82,13 +83,15 @@ using std::string_view;
 
 using cid_t = int64_t;
 
+using upcxx_utils::FixedSizeCache;
+
 struct CtgLoc {
   cid_t cid;
   global_ptr<char> seq_gptr;
   int clen;
   int depth;
   int pos_in_ctg;
-  bool is_rc;  // FIXME pack with bitfields this bool likely adds 8 bytes!
+  bool is_rc;
 };
 
 struct ReadAndCtgLoc {
@@ -149,7 +152,8 @@ class KmerCtgDHT {
   Alns *alns;
 
 #ifdef USE_KMER_CACHE
-  HASH_TABLE<Kmer<MAX_K>, CtgLoc> kmer_cache;
+  using kmer_cache_t = FixedSizeCache<Kmer<MAX_K>, CtgLoc>;
+  kmer_cache_t kmer_cache;
   int64_t kmer_cache_hits = 0;
   int64_t kmer_lookups = 0;
 #endif
@@ -158,7 +162,8 @@ class KmerCtgDHT {
 
   IntermittentTimer fetch_ctg_seqs_timer;
   int64_t ctg_bytes_fetched = 0;
-  HASH_TABLE<cid_t, string> ctg_cache;
+  using ctg_cache_t = FixedSizeCache<cid_t, string>;
+  ctg_cache_t ctg_cache;
   std::unordered_set<cid_t> local_ctgs;
   int64_t ctg_cache_hits = 0;
   int64_t ctg_lookups = 0;
@@ -500,10 +505,14 @@ class KmerCtgDHT {
 #else
     gpu_mem_avail = 32 * 1024 * 1024;  // cpu needs a block of memory
 #endif
-    ctg_cache.reserve(2 * all_num_ctgs / rank_n());
+    ctg_cache.set_invalid_key(std::numeric_limits<cid_t>::max());
+    ctg_cache.reserve(all_num_ctgs / rank_n());
 
 #ifdef USE_KMER_CACHE
-    if (use_kmer_cache) kmer_cache.reserve(KLIGN_KMER_CACHE_SIZE);
+    if (use_kmer_cache) {
+      kmer_cache.set_invalid_key(Kmer<MAX_K>::get_invalid());
+      kmer_cache.reserve((10 * ONE_MB + max_store_size * 2) / sizeof(typename kmer_cache_t::value_type));
+    }
 #endif
   }
 
@@ -514,6 +523,7 @@ class KmerCtgDHT {
     fetch_ctg_seqs_timer.print_out();
     aln_cpu_bypass_timer.print_out();
     local_kmer_map_t().swap(*kmer_map);  // release all memory
+    ctg_cache.clear();
     kmer_store.clear();
   }
 
@@ -651,6 +661,7 @@ class KmerCtgDHT {
   }
 
   future<vector<KmerAndCtgLoc<MAX_K>>> get_ctgs_with_kmers(int target_rank, vector<Kmer<MAX_K>> &kmers) {
+    DBG_VERBOSE("Sending request for ", kmers.size(), " to ", target_rank, "\n");
     return rpc(target_rank,
                [](vector<Kmer<MAX_K>> kmers, kmer_map_t &kmer_map) {
                  vector<KmerAndCtgLoc<MAX_K>> kmer_ctg_locs;
@@ -664,6 +675,8 @@ class KmerCtgDHT {
                    // now add it
                    kmer_ctg_locs.push_back({kmer, it->second.second});
                  }
+                 DBG_VERBOSE("processed get_ctgs_with_kmers ", kmers.size(), " ", get_size_str(kmers.size() * sizeof(Kmer<MAX_K>)),
+                             ", returning ", kmer_ctg_locs.size(), " ", get_size_str(kmer_ctg_locs.size() * sizeof(KmerAndCtgLoc<MAX_K>), "\n");
                  return kmer_ctg_locs;
                },
                kmers, kmer_map);
@@ -702,6 +715,7 @@ class KmerCtgDHT {
                              int read_group_id, IntermittentTimer &aln_kernel_timer) {
     int rlen = rseq_fw.length();
     string rseq_rc;
+    string tmp_ctg;
     for (auto &elem : *aligned_ctgs_map) {
       progress();
       int pos_in_read = elem.second.pos_in_read;
@@ -780,13 +794,20 @@ class KmerCtgDHT {
             }
           }
         } else {
-          auto prev_bucket_count = ctg_cache.bucket_count();
-          it = ctg_cache.insert({ctg_loc.cid, string(ctg_loc.clen, ' ')}).first;
-          assert(it != ctg_cache.end());
-          if (prev_bucket_count != ctg_cache.bucket_count())
-            SWARN("resized ctg cache from ", prev_bucket_count, " to ", ctg_cache.bucket_count());
-          string &ctg_str = it->second;  // the actual underlying string, not view
-          ctg_seq = string_view(ctg_str.data(), ctg_str.size());
+          auto itpair = ctg_cache.insert({ctg_loc.cid, string(ctg_loc.clen, ' ')});
+          if (itpair.second) {
+            // successful insert
+            it = itpair.first;
+            assert(it != ctg_cache.end());
+            string &ctg_str = it->second;  // the actual underlying string, not view
+            ctg_seq = string_view(ctg_str.data(), ctg_str.size());
+          } else {
+            // use the temporary buffer...
+            assert(found == false);
+            WARN("FIXME using temporary buffer for invalid cid: ", ctg_loc.cid, "\n");
+            tmp_ctg = string(ctg_loc.clen, ' ');
+            ctg_seq = string_view(tmp_ctg.data(), tmp_ctg.size());
+          }
         }
         if (!found) {
           assert(ctg_seq.size() >= cstart + overlap_len);
@@ -809,11 +830,11 @@ class KmerCtgDHT {
               break;
           }
 
-          string &ctg_str = it->second;  // the actual underlying string, not view
           assert(get_start >= 0);
           assert(get_start + get_len <= ctg_seq.size());
           fetch_ctg_seqs_timer.start();
-          rget(ctg_loc.seq_gptr + get_start, ctg_str.data() + get_start, get_len).wait();
+          // write directly to the cached string in active scope (represented by the string view, so okay to const_cast)
+          rget(ctg_loc.seq_gptr + get_start, const_cast<char *>(ctg_seq.data()) + get_start, get_len).wait();
           fetch_ctg_seqs_timer.stop();
           ctg_bytes_fetched += get_len;
         } else {
@@ -830,8 +851,9 @@ class KmerCtgDHT {
       align_read(rname, ctg_loc.cid, read_subseq, ctg_subseq, rstart, rlen, cstart, ctg_loc.clen, orient, overlap_len,
                  read_group_id, aln_kernel_timer);
 #ifdef USE_KMER_CACHE
-      // now cache all the kmers from this ctg subseq but only if this ctg was fetched for the first time and we still have space
-      if (use_kmer_cache && !found && kmer_cache.size() + ctg_subseq.size() < KLIGN_KMER_CACHE_SIZE - 1000 && ctg_loc.depth > 2) {
+      // now cache all the kmers from this ctg subseq but only if this ctg was fetched for the first time and the contig has some
+      // depth
+      if (use_kmer_cache && !found && ctg_loc.depth > 2) {
         vector<Kmer<MAX_K>> kmers;
         Kmer<MAX_K>::get_kmers(kmer_len, ctg_subseq, kmers);
         for (int i = 0; i < kmers.size(); i++) {
@@ -849,14 +871,8 @@ class KmerCtgDHT {
             DIE("pos in ctg is wrong: ", pos_in_ctg, " clen ", ctg_loc.clen, " rlen ", rseq_ptr.length(), " cstart ", cstart,
                 " is_rc ", ctg_loc.is_rc, " rstart ", rstart, " orient ", orient, " overlap ", overlap_len, " pos in ctg ",
                 ctg_loc.pos_in_ctg, " i ", i);
-          auto prev_bucket_count = kmer_cache.bucket_count();
           // if kmer was already in the cache, don't cache any more
           if (!cache_kmer({*kmer_lc, {ctg_loc.cid, ctg_loc.seq_gptr, ctg_loc.clen, ctg_loc.depth, pos_in_ctg, is_rc}})) break;
-          if (prev_bucket_count != kmer_cache.bucket_count()) {
-            // this should never happen
-            WARN("kmer cache was resized from ", prev_bucket_count, " to ", kmer_cache.bucket_count());
-          }
-          if (kmer_cache.size() >= KLIGN_KMER_CACHE_SIZE - 1000) break;
         }
       }
 #endif
