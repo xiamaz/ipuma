@@ -676,7 +676,8 @@ class KmerCtgDHT {
                    kmer_ctg_locs.push_back({kmer, it->second.second});
                  }
                  DBG_VERBOSE("processed get_ctgs_with_kmers ", kmers.size(), " ", get_size_str(kmers.size() * sizeof(Kmer<MAX_K>)),
-                             ", returning ", kmer_ctg_locs.size(), " ", get_size_str(kmer_ctg_locs.size() * sizeof(KmerAndCtgLoc<MAX_K>), "\n");
+                             ", returning ", kmer_ctg_locs.size(), " ",
+                             get_size_str(kmer_ctg_locs.size() * sizeof(KmerAndCtgLoc<MAX_K>)), "\n");
                  return kmer_ctg_locs;
                },
                kmers, kmer_map);
