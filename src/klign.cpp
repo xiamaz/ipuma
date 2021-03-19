@@ -89,7 +89,7 @@ struct CtgLoc {
   cid_t cid;
   global_ptr<char> seq_gptr;
   int clen;
-  int depth;
+  float depth;
   int pos_in_ctg;
   bool is_rc;
 };
@@ -506,12 +506,12 @@ class KmerCtgDHT {
     gpu_mem_avail = 32 * 1024 * 1024;  // cpu needs a block of memory
 #endif
     ctg_cache.set_invalid_key(std::numeric_limits<cid_t>::max());
-    ctg_cache.reserve(all_num_ctgs / rank_n());
+    ctg_cache.reserve(2 * all_num_ctgs / rank_n());
 
 #ifdef USE_KMER_CACHE
     if (use_kmer_cache) {
       kmer_cache.set_invalid_key(Kmer<MAX_K>::get_invalid());
-      kmer_cache.reserve((10 * ONE_MB + max_store_size * 2) / sizeof(typename kmer_cache_t::value_type));
+      kmer_cache.reserve_max_memory(8 * ONE_MB + max_store_size * 2);
     }
 #endif
   }
@@ -921,6 +921,7 @@ class KmerCtgDHT {
 
   bool cache_kmer(const KmerAndCtgLoc<MAX_K> &kmer_ctg_loc) {
     if (!use_kmer_cache) return false;
+    assert(kmer_ctg_loc.kmer.is_least());
     return kmer_cache.insert({kmer_ctg_loc.kmer, kmer_ctg_loc.ctg_loc}).second;
   }
 #endif
@@ -930,14 +931,16 @@ class KmerCtgDHT {
     if (use_kmer_cache) {
       auto all_kmer_cache_hits = reduce_one(kmer_cache_hits, op_fast_add, 0).wait();
       auto all_lookups = reduce_one(kmer_lookups, op_fast_add, 0).wait();
-      SLOG("Hits on kmer cache: ", perc_str(all_kmer_cache_hits, all_lookups), " cache size ", kmer_cache.size(), "\n");
+      SLOG("Hits on kmer cache: ", perc_str(all_kmer_cache_hits, all_lookups), " cache size ", kmer_cache.size(), " of ",
+           kmer_cache.capacity(), " clobberings ", kmer_cache.get_clobberings(), "\n");
     }
 #endif
     auto all_ctg_local_hits = reduce_one(ctg_local_hits, op_fast_add, 0).wait();
     auto all_ctg_cache_hits = reduce_one(ctg_cache_hits, op_fast_add, 0).wait();
     auto all_ctg_lookups = reduce_one(ctg_lookups + ctg_local_hits, op_fast_add, 0).wait();
-    SLOG("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), " cache size ", ctg_cache.size(), "\n");
-    SLOG("Local contig hits bypassing cache: ", perc_str(ctg_local_hits, all_ctg_local_hits), "\n");
+    SLOG("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), " cache size ", ctg_cache.size(), " of ",
+         ctg_cache.capacity(), " clobberings ", ctg_cache.get_clobberings(), "\n");
+    SLOG("Local contig hits bypassing cache: ", perc_str(all_ctg_local_hits, all_ctg_lookups), "\n");
   }
 };
 
@@ -964,7 +967,7 @@ static void build_alignment_index(KmerCtgDHT<MAX_K> &kmer_ctg_dht, Contigs &ctgs
     if (ctg->seq.length() < min_ctg_len) continue;
     global_ptr<char> seq_gptr = allocate<char>(ctg->seq.length() + 1);
     strcpy(seq_gptr.local(), ctg->seq.c_str());
-    CtgLoc ctg_loc = {.cid = ctg->id, .seq_gptr = seq_gptr, .clen = (int)ctg->seq.length(), .depth = (int)ctg->depth};
+    CtgLoc ctg_loc = {.cid = ctg->id, .seq_gptr = seq_gptr, .clen = (int)ctg->seq.length(), .depth = (float)ctg->depth};
     Kmer<MAX_K>::get_kmers(kmer_ctg_dht.kmer_len, string_view(ctg->seq.data(), ctg->seq.size()), kmers);
     num_kmers += kmers.size();
     for (unsigned i = 0; i < kmers.size(); i++) {
