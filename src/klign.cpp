@@ -107,6 +107,25 @@ struct KmerAndCtgLoc {
   UPCXX_SERIALIZED_FIELDS(kmer, ctg_loc);
 };
 
+struct ReadRecord {
+  string id;
+  string seq;
+  string quals;
+
+  HASH_TABLE<cid_t, ReadAndCtgLoc> aligned_ctgs_map;
+
+  ReadRecord(const string &id, const string &seq, const string &quals)
+      : id(id)
+      , seq(seq)
+      , quals(quals) {}
+};
+
+struct KmerToRead {
+  ReadRecord *read_record;
+  int pos_in_read;
+  bool is_rc;
+};
+
 // global variables to avoid passing dist objs to rpcs
 static int64_t _num_dropped_seed_to_ctgs = 0;
 
@@ -158,6 +177,11 @@ class KmerCtgDHT {
   int64_t kmer_lookups = 0;
 #endif
 
+ public:
+  size_t kmer_seed_lookups = 0;
+  size_t unique_kmer_seed_lookups = 0;
+
+ private:
   bool use_kmer_cache;
 
   IntermittentTimer fetch_ctg_seqs_timer;
@@ -520,10 +544,15 @@ class KmerCtgDHT {
     if (kernel_alns.size() || !active_kernel_fut.ready())
       DIE("clear called with alignments in the buffer or active kernel - was flush_remaining called before destrutor?\n");
     clear_aln_bufs();
+    LOG("aggregated kmer seed lookups ", perc_str(unique_kmer_seed_lookups, kmer_seed_lookups), ", total ", kmer_seed_lookups,
+        " approx ", get_size_str(unique_kmer_seed_lookups * sizeof(Kmer<MAX_K>) + kmer_seed_lookups * sizeof(KmerToRead)), "\n");
     fetch_ctg_seqs_timer.print_out();
     aln_cpu_bypass_timer.print_out();
     local_kmer_map_t().swap(*kmer_map);  // release all memory
-    ctg_cache.clear();
+    ctg_cache.resize(0);
+#ifdef USE_KMER_CACHE
+    if (use_kmer_cache) kmer_cache.resize(0);
+#endif
     kmer_store.clear();
   }
 
@@ -989,25 +1018,6 @@ static void build_alignment_index(KmerCtgDHT<MAX_K> &kmer_ctg_dht, Contigs &ctgs
                  (100.0 * num_dropped_seed_to_ctgs / tot_num_kmers), "%)\n");
 }
 
-struct ReadRecord {
-  string id;
-  string seq;
-  string quals;
-
-  HASH_TABLE<cid_t, ReadAndCtgLoc> aligned_ctgs_map;
-
-  ReadRecord(const string &id, const string &seq, const string &quals)
-      : id(id)
-      , seq(seq)
-      , quals(quals) {}
-};
-
-struct KmerToRead {
-  ReadRecord *read_record;
-  int pos_in_read;
-  bool is_rc;
-};
-
 template <int MAX_K>
 static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, vector<KmerToRead>> &kmer_read_map,
                        vector<ReadRecord *> &read_records, IntermittentTimer &compute_alns_timer, IntermittentTimer &get_ctgs_timer,
@@ -1159,10 +1169,16 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
           is_rc = true;
         }
         auto it = kmer_read_map.find(*kmer_lc);
-        if (it == kmer_read_map.end()) it = kmer_read_map.insert({*kmer_lc, {}}).first;
+        if (it == kmer_read_map.end()) {
+          auto pairit = kmer_read_map.insert({*kmer_lc, {}});
+          it = pairit.first;
+          assert(pairit.second);
+          kmer_ctg_dht.unique_kmer_seed_lookups++;
+        }
+        kmer_ctg_dht.kmer_seed_lookups++;
         it->second.push_back({read_record, i, is_rc});
-        if (kmer_read_map.size() >= KLIGN_CTG_FETCH_BUF_SIZE) filled = true;
       }
+      if (kmer_read_map.size() + kmers.size() * 2 >= KLIGN_CTG_FETCH_BUF_SIZE) filled = true;
       if (filled) {
         num_reads_aligned +=
             align_kmers(kmer_ctg_dht, kmer_read_map, read_records, compute_alns_timer, get_ctgs_timer, aln_kernel_timer,
