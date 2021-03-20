@@ -544,8 +544,9 @@ class KmerCtgDHT {
     if (kernel_alns.size() || !active_kernel_fut.ready())
       DIE("clear called with alignments in the buffer or active kernel - was flush_remaining called before destrutor?\n");
     clear_aln_bufs();
-    LOG("aggregated kmer seed lookups ", perc_str(unique_kmer_seed_lookups, kmer_seed_lookups), ", total ", kmer_seed_lookups,
-        " approx ", get_size_str(unique_kmer_seed_lookups * sizeof(Kmer<MAX_K>) + kmer_seed_lookups * sizeof(KmerToRead)), "\n");
+    LOG("aggregated kmer seed lookups ", perc_str(kmer_seed_lookups - unique_kmer_seed_lookups, kmer_seed_lookups), ", total ",
+        kmer_seed_lookups, " approx ",
+        get_size_str(unique_kmer_seed_lookups * sizeof(Kmer<MAX_K>) + kmer_seed_lookups * sizeof(KmerToRead)), "\n");
     fetch_ctg_seqs_timer.print_out();
     aln_cpu_bypass_timer.print_out();
     local_kmer_map_t().swap(*kmer_map);  // release all memory
