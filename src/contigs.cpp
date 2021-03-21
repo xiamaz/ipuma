@@ -70,6 +70,7 @@ using upcxx::barrier;
 using upcxx::dist_object;
 using upcxx::op_fast_add;
 using upcxx::op_fast_max;
+using upcxx::promise;
 using upcxx::rank_me;
 using upcxx::rank_n;
 using upcxx::reduce_one;
