@@ -69,6 +69,7 @@ enum class Dirn { LEFT, RIGHT, NONE };
 
 enum class WalkStatus { RUNNING = '-', DEADEND = 'X', FORK = 'F', CONFLICT = 'O', REPEAT = 'R', VISITED = 'V' };
 
+struct FragElem;
 struct FragElem {
   global_ptr<FragElem> left_gptr, right_gptr;
   bool left_is_rc, right_is_rc;
@@ -145,10 +146,6 @@ static string gptr_str(global_ptr<FragElem> gptr) {
   if (!gptr) return string(10, '0');
   ostringstream oss;
   oss << setw(11);
-<<<<<<< HEAD
-  //oss << gptr.raw_ptr_;
-=======
->>>>>>> master
   oss << gptr;
   string s = oss.str();
   s.erase(0, s.length() - 6);
@@ -321,7 +318,8 @@ static void construct_frags(unsigned kmer_len, dist_object<KmerDHT<MAX_K>> &kmer
     int64_t sum_depths = 0;
     global_ptr<FragElem> frag_elem_gptr = new_<FragElem>();
     auto left_gptr = traverse_dirn(kmer_dht, kmer, frag_elem_gptr, Dirn::LEFT, uutig, sum_depths, walk_term_stats, use_minimizers);
-    auto right_gptr = traverse_dirn(kmer_dht, kmer, frag_elem_gptr, Dirn::RIGHT, uutig, sum_depths, walk_term_stats, use_minimizers);
+    auto right_gptr =
+        traverse_dirn(kmer_dht, kmer, frag_elem_gptr, Dirn::RIGHT, uutig, sum_depths, walk_term_stats, use_minimizers);
     FragElem *frag_elem = frag_elem_gptr.local();
     frag_elem->frag_seq = new_array<char>(uutig.length() + 1);
     strcpy(frag_elem->frag_seq.local(), uutig.c_str());
@@ -608,7 +606,7 @@ void traverse_debruijn_graph(unsigned kmer_len, dist_object<KmerDHT<MAX_K>> &kme
 #endif
 }
 
-#define TDG_K(KMER_LEN)                                                 \
+#define TDG_K(KMER_LEN)                                                                                                            \
   template void traverse_debruijn_graph<KMER_LEN>(unsigned kmer_len, dist_object<KmerDHT<KMER_LEN>> &kmer_dht, Contigs &my_uutigs, \
                                                   bool use_minimizers)
 
