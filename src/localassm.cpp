@@ -66,13 +66,12 @@ struct CtgInfo {
   int64_t cid;
   char orient;
   char side;
-//#if UPCXX_VERSION <= 20201100L
-  char pad[6];  // FIXME necessary in upcxx <= 2020.10 see upcxx Issue #427
+#if UPCXX_VERSION < 20210300L
+  char pad[6];  // necessary in upcxx < 2021.03 see upcxx Issue #427
   UPCXX_SERIALIZED_FIELDS(cid, orient, side, pad);
-//#else
-//#error "Not fixed in any version yet"
-//  UPCXX_SERIALIZED_FIELDS(cid, orient, side);
-//#endif
+#else
+  UPCXX_SERIALIZED_FIELDS(cid, orient, side);
+#endif
 };
 struct ReadCtgInfo {
   string read_id;
@@ -102,9 +101,9 @@ class ReadsToCtgsDHT {
       else
         it->second.push_back(std::move(read_ctg_info.ctg_info));
     });
-    int est_update_size = sizeof(ReadCtgInfo) + 13; // read_id 
+    int est_update_size = sizeof(ReadCtgInfo) + 13;  // read_id
     int64_t mem_to_use = 0.05 * get_free_mem() / local_team().rank_n();
-    auto max_store_bytes = max(mem_to_use, (int64_t)est_update_size * 100);  
+    auto max_store_bytes = max(mem_to_use, (int64_t)est_update_size * 100);
     rtc_store.set_size("ReadsToContigs", max_store_bytes);
   }
 
@@ -126,43 +125,42 @@ class ReadsToCtgsDHT {
   int64_t get_num_mappings() { return reduce_one(reads_to_ctgs_map->size(), op_fast_add, 0).wait(); }
 
   vector<CtgInfo> get_ctgs(string &read_id) {
-    return upcxx::rpc(
-               get_target_rank(read_id),
-               [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, string read_id) -> vector<CtgInfo> {
-                 const auto it = reads_to_ctgs_map->find(read_id);
-                 if (it == reads_to_ctgs_map->end()) return {};
-                 return it->second;
-               },
-               reads_to_ctgs_map, read_id)
+    return upcxx::rpc(get_target_rank(read_id),
+                      [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, string read_id) -> vector<CtgInfo> {
+                        const auto it = reads_to_ctgs_map->find(read_id);
+                        if (it == reads_to_ctgs_map->end()) return {};
+                        return it->second;
+                      },
+                      reads_to_ctgs_map, read_id)
         .wait();
   }
 
   future<vector<vector<CtgInfo>>> get_ctgs(intrank_t target_rank, vector<string> &read_ids) {
     DBG_VERBOSE("Sending get_ctgs ", read_ids.size(), " to ", target_rank, "\n");
-    return upcxx::rpc(
-        target_rank,
-        [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, intrank_t source_rank,
-           view<string> read_ids) -> vector<vector<CtgInfo>> {
-          DBG_VERBOSE("Received request for ", read_ids.size(), " reads from ", source_rank, "\n");
-          size_t bytes = 0, nonempty = 0;
-          vector<vector<CtgInfo>> results(read_ids.size());
-          size_t i = 0;
-          for (const auto &read_id : read_ids) {
-            assert(get_target_rank(read_id) == rank_me());
-            const auto it = reads_to_ctgs_map->find(read_id);
-            assert(i < results.size());
-            assert(results[i].empty());
-            if (it != reads_to_ctgs_map->end()) {
-              nonempty++;
-              bytes += it->second.size() * sizeof(CtgInfo);
-              results[i] = it->second;
-            }
-            i++;
-          }
-          DBG_VERBOSE("Returning ", results.size(), " results nonempty=", nonempty, " bytes=", bytes, " to ", source_rank, "\n");
-          return results;
-        },
-        reads_to_ctgs_map, rank_me(), make_view(read_ids.begin(), read_ids.end()));
+    return upcxx::rpc(target_rank,
+                      [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, intrank_t source_rank,
+                         view<string> read_ids) -> vector<vector<CtgInfo>> {
+                        DBG_VERBOSE("Received request for ", read_ids.size(), " reads from ", source_rank, "\n");
+                        size_t bytes = 0, nonempty = 0;
+                        vector<vector<CtgInfo>> results(read_ids.size());
+                        size_t i = 0;
+                        for (const auto &read_id : read_ids) {
+                          assert(get_target_rank(read_id) == rank_me());
+                          const auto it = reads_to_ctgs_map->find(read_id);
+                          assert(i < results.size());
+                          assert(results[i].empty());
+                          if (it != reads_to_ctgs_map->end()) {
+                            nonempty++;
+                            bytes += it->second.size() * sizeof(CtgInfo);
+                            results[i] = it->second;
+                          }
+                          i++;
+                        }
+                        DBG_VERBOSE("Returning ", results.size(), " results nonempty=", nonempty, " bytes=", bytes, " to ",
+                                    source_rank, "\n");
+                        return results;
+                      },
+                      reads_to_ctgs_map, rank_me(), make_view(read_ids.begin(), read_ids.end()));
   }
 };
 
@@ -191,15 +189,14 @@ struct CtgData {
 struct CtgReadData {
   int64_t cid;
   char side;
-//#if UPCXX_VERSION <= 20201100L
-  char pad[7];  // FIXME necessary in upcxx <= 2020.10 see upcxx Issue #427
+#if UPCXX_VERSION < 20210300L
+  char pad[7];  // necessary in upcxx <= 2021.03 see upcxx Issue #427
   ReadSeq read_seq;
   UPCXX_SERIALIZED_FIELDS(cid, side, pad, read_seq);
-//#else
-//#error "Not fixed in any version yet"
-//  ReadSeq read_seq;
-//  UPCXX_SERIALIZED_FIELDS(cid, side, read_seq);
-//#endif
+#else
+  ReadSeq read_seq;
+  UPCXX_SERIALIZED_FIELDS(cid, side, read_seq);
+#endif
 };
 
 class CtgsWithReadsDHT {
@@ -231,11 +228,11 @@ class CtgsWithReadsDHT {
       it = ctgs_map->insert(it, std::move(record));
       DBG_VERBOSE("Added contig cid=", it->first, ": ", it->second.seq, " depth=", it->second.depth, "\n");
     });
-    // with contig sequence 
+    // with contig sequence
     int est_update_size = sizeof(CtgData) + 400;
     // approx 10% of free memory
     int64_t mem_to_use = 0.05 * get_free_mem() / local_team().rank_n();
-    auto max_store_bytes = max(mem_to_use, (int64_t)est_update_size * 100);  
+    auto max_store_bytes = max(mem_to_use, (int64_t)est_update_size * 100);
     ctg_store.set_size("CtgsWithReads add ctg", max_store_bytes);
     ctg_read_store.set_update_func([&ctgs_map = this->ctgs_map](CtgReadData &&ctg_read_data) {
       const auto it = ctgs_map->find(ctg_read_data.cid);

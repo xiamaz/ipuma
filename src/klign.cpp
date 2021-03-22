@@ -49,6 +49,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <thread>
 #include <upcxx/upcxx.hpp>
 
 #include "klign.hpp"
