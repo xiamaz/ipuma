@@ -112,8 +112,7 @@ string Aln::to_string() const {
   ostringstream os;
   os << read_id << "\t" << rstart + 1 << "\t" << rstop << "\t" << rlen << "\t"
      << "Contig" << cid << "\t" << cstart + 1 << "\t" << cstop << "\t" << clen << "\t" << (orient == '+' ? "Plus" : "Minus") << "\t"
-     << score1 << "\t" << score2 << "\tmismatch=" << mismatches << "\tident=" << (int)identity << "\trg=" << (int)read_group_id
-     << "\torient=" << orient;
+     << score1 << "\t" << score2;
   ;
   return os.str();
 }
@@ -153,7 +152,6 @@ void Alns::add_aln(Aln &aln) {
     }
   }
 #endif
-  DBG("Adding aln ", aln.to_string(), "\n");
   if (!aln.is_valid()) DIE("Invalid alignment: ", aln.to_string());
   assert(aln.is_valid());
   alns.push_back(aln);
