@@ -45,6 +45,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cstdlib>
 #include <iostream>
 #include <regex>
 #include <sstream>
@@ -294,6 +295,15 @@ double Options::setup_log_file() {
   return t_elapsed.count();
 }
 
+string Options::get_job_id() {
+  static const char *env_ids[] = {"SLURM_JOBID", "LSB_JOBID", "JOB_ID", "COBALT_JOBID", "LOAD_STEP_ID", "PBS_JOBID"};
+  for (auto env : env_ids) {
+    auto env_p = std::getenv(env);
+    if (env_p) return string(env_p);
+  }
+  return std::to_string(getpid());
+}
+
 Options::Options() {
   char buf[32];
   if (!upcxx::rank_me()) {
@@ -303,7 +313,7 @@ Options::Options() {
   upcxx::broadcast(buf, sizeof(buf), 0, world()).wait();
   setup_time = string(buf);
   output_dir = string("mhm2-run-<reads_fname[0]>-n") + to_string(upcxx::rank_n()) + "-N" +
-               to_string(upcxx::rank_n() / upcxx::local_team().rank_n()) + "-" + setup_time;
+               to_string(upcxx::rank_n() / upcxx::local_team().rank_n()) + "-" + setup_time + "-" + get_job_id();
 }
 Options::~Options() {
   flush_logger();
@@ -469,7 +479,7 @@ bool Options::load(int argc, char **argv) {
     auto spos = first_read_fname.find_first_of(':');
     if (spos != string::npos) first_read_fname = first_read_fname.substr(0, spos);
     output_dir = "mhm2-run-" + first_read_fname + "-n" + to_string(upcxx::rank_n()) + "-N" +
-                 to_string(upcxx::rank_n() / upcxx::local_team().rank_n()) + "-" + setup_time;
+                 to_string(upcxx::rank_n() / upcxx::local_team().rank_n()) + "-" + setup_time + "-" + get_job_id();
     output_dir_opt->default_val(output_dir);
   }
 
