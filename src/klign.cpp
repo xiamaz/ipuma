@@ -136,6 +136,7 @@ class KmerCtgDHT {
   using local_kmer_map_t = HASH_TABLE<Kmer<MAX_K>, pair<bool, CtgLoc>>;
   using kmer_map_t = dist_object<local_kmer_map_t>;
   kmer_map_t kmer_map;
+  vector<global_ptr<char>> global_ctg_seqs;
 
 #ifndef FLAT_AGGR_STORE
   ThreeTierAggrStore<KmerAndCtgLoc<MAX_K>, kmer_map_t &> kmer_store;
@@ -471,6 +472,7 @@ class KmerCtgDHT {
              bool compute_cigar, int all_num_ctgs, bool use_kmer_cache, int ranks_per_gpu)
       : kmer_map({})
       , kmer_store(kmer_map)
+      , global_ctg_seqs({})
       , num_alns(0)
       , num_perfect_alns(0)
       , num_overlaps(0)
@@ -549,6 +551,7 @@ class KmerCtgDHT {
         get_size_str(unique_kmer_seed_lookups * sizeof(Kmer<MAX_K>) + kmer_seed_lookups * sizeof(KmerToRead)), "\n");
     fetch_ctg_seqs_timer.print_out();
     aln_cpu_bypass_timer.print_out();
+    for (auto &gptr : global_ctg_seqs) upcxx::deallocate(gptr);
     local_kmer_map_t().swap(*kmer_map);  // release all memory
     ctg_cache.resize(0);
 #ifdef USE_KMER_CACHE
@@ -558,6 +561,14 @@ class KmerCtgDHT {
   }
 
   ~KmerCtgDHT() { clear(); }
+
+  void reserve_ctg_seqs(size_t sz) { global_ctg_seqs.reserve(sz); }
+  global_ptr<char> add_ctg_seq(string seq) {
+    auto seq_gptr = upcxx::allocate<char>(seq.length() + 1);
+    global_ctg_seqs.push_back(seq_gptr);  // remember to dealloc!
+    strcpy(seq_gptr.local(), seq.c_str());
+    return seq_gptr;
+  }
 
   void reserve(int64_t mysize) { kmer_map->reserve(mysize); }
   int64_t size() const { return kmer_map->size(); }
@@ -990,13 +1001,13 @@ static void build_alignment_index(KmerCtgDHT<MAX_K> &kmer_ctg_dht, Contigs &ctgs
   est_num_kmers = upcxx::reduce_all(est_num_kmers, upcxx::op_fast_add).wait();
   auto my_reserve = 1.2 * est_num_kmers / rank_n() + 2000;  // 120% to keep the map fast
   kmer_ctg_dht.reserve(my_reserve);
+  kmer_ctg_dht.reserve_ctg_seqs(ctgs.size());
   vector<Kmer<MAX_K>> kmers;
   for (auto it = ctgs.begin(); it != ctgs.end(); ++it) {
     auto ctg = it;
     progbar.update();
     if (ctg->seq.length() < min_ctg_len) continue;
-    global_ptr<char> seq_gptr = allocate<char>(ctg->seq.length() + 1);
-    strcpy(seq_gptr.local(), ctg->seq.c_str());
+    global_ptr<char> seq_gptr = kmer_ctg_dht.add_ctg_seq(ctg->seq);
     CtgLoc ctg_loc = {.cid = ctg->id, .seq_gptr = seq_gptr, .clen = (int)ctg->seq.length(), .depth = (float)ctg->depth};
     Kmer<MAX_K>::get_kmers(kmer_ctg_dht.kmer_len, string_view(ctg->seq.data(), ctg->seq.size()), kmers);
     num_kmers += kmers.size();

@@ -237,6 +237,7 @@ int main(int argc, char **argv) {
       max_kmer_len = options->kmer_lens.back();
       for (auto kmer_len : options->kmer_lens) {
         auto max_k = (kmer_len / 32 + 1) * 32;
+        LOG(upcxx_utils::GasNetVars::getUsedShmMsg(), "\n");
 
 #define CONTIG_K(KMER_LEN)                                                                                                         \
   case KMER_LEN:                                                                                                                   \
@@ -291,6 +292,7 @@ int main(int argc, char **argv) {
       for (unsigned i = 0; i < options->scaff_kmer_lens.size(); ++i) {
         auto scaff_kmer_len = options->scaff_kmer_lens[i];
         auto max_k = (scaff_kmer_len / 32 + 1) * 32;
+        LOG(upcxx_utils::GasNetVars::getUsedShmMsg(), "\n");
 
 #define SCAFFOLD_K(KMER_LEN)                                                                                                \
   case KMER_LEN:                                                                                                            \
