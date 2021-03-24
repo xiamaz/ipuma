@@ -77,6 +77,8 @@ class Options {
 
   bool find_restart(string stage_type, int k);
 
+  static string get_job_id();
+
  public:
   vector<string> reads_fnames;
   vector<string> paired_fnames;
