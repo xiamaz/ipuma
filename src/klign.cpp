@@ -139,9 +139,9 @@ class KmerCtgDHT {
   vector<global_ptr<char>> global_ctg_seqs;
 
 #ifndef FLAT_AGGR_STORE
-  ThreeTierAggrStore<KmerAndCtgLoc<MAX_K>, kmer_map_t &> kmer_store;
+  ThreeTierAggrStore<KmerAndCtgLoc<MAX_K>> kmer_store;
 #else
-  FlatAggrStore<KmerAndCtgLoc<MAX_K>, kmer_map_t &> kmer_store;
+  FlatAggrStore<KmerAndCtgLoc<MAX_K>> kmer_store;
 #endif
 
   int64_t num_alns;
@@ -471,7 +471,7 @@ class KmerCtgDHT {
   KmerCtgDHT(int kmer_len, int max_store_size, int max_rpcs_in_flight, Alns &alns, AlnScoring &aln_scoring, int rlen_limit,
              bool compute_cigar, int all_num_ctgs, bool use_kmer_cache, int ranks_per_gpu)
       : kmer_map({})
-      , kmer_store(kmer_map)
+      , kmer_store()
       , global_ctg_seqs({})
       , num_alns(0)
       , num_perfect_alns(0)
@@ -490,7 +490,7 @@ class KmerCtgDHT {
     this->aln_scoring = aln_scoring;
     ssw_filter.report_cigar = compute_cigar;
     kmer_store.set_size("insert ctg seeds", max_store_size, max_rpcs_in_flight);
-    kmer_store.set_update_func([](KmerAndCtgLoc<MAX_K> kmer_and_ctg_loc, kmer_map_t &kmer_map) {
+    kmer_store.set_update_func([&kmer_map = this->kmer_map](KmerAndCtgLoc<MAX_K> kmer_and_ctg_loc) {
       CtgLoc ctg_loc = kmer_and_ctg_loc.ctg_loc;
       const auto it = kmer_map->find(kmer_and_ctg_loc.kmer);
       if (it == kmer_map->end()) {
