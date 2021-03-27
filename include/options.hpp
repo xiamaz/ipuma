@@ -104,6 +104,7 @@ class Options {
   bool show_progress = false;
   string pin_by = "core";
   int ranks_per_gpu = 0;  // autodetect
+  int max_worker_threads = 3;
   string ctgs_fname;
 #ifdef USE_KMER_DEPTHS
   string kmer_depths_fname;

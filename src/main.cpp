@@ -132,8 +132,9 @@ int main(int argc, char **argv) {
     }
     if (status != 0) SWARN("Could not get/set rlimits for NOFILE\n");
   }
-  const int num_threads = 3;  // reserve up to 3 threads in the singleton thread pool TODO make an option
+  const int num_threads = options->max_worker_threads;  // reserve up to threads in the singleton thread pool.
   upcxx_utils::ThreadPool::get_single_pool(num_threads);
+  // FIXME if (!options->max_worker_threads) upcxx_utils::FASRPCCounts::use_worker_thread() = false;
   SLOG_VERBOSE("Allowing up to ", num_threads, " extra threads in the thread pool\n");
 
   if (!upcxx::rank_me()) {
