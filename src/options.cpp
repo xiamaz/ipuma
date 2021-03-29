@@ -301,7 +301,9 @@ string Options::get_job_id() {
     auto env_p = std::getenv(env);
     if (env_p) return string(env_p);
   }
-  return std::to_string(getpid());
+  // no job, broadcast the pid of rank 0
+  auto pid = upcxx::broadcast(getpid(), 0, upcxx::world()).wait();
+  return std::to_string(pid);
 }
 
 Options::Options() {
