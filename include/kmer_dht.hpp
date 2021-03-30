@@ -564,13 +564,8 @@ class KmerDHT {
       }
     } else {
       KmerAndExt kmer_and_ext = {.kmer = *kmer, .count = count, .left = left_ext, .right = right_ext};
-      if (target_rank == rank_me() && (pass_type == NO_BLOOM_PASS || pass_type == CTG_KMERS_PASS)) {
-        _num_kmers_counted_locally++;
-        update_count(kmer_and_ext, kmers, bloom_filter1);
-      } else {
-        kmer_store.update(target_rank, kmer_and_ext);
-        bytes_sent += sizeof(kmer_and_ext);
-      }
+      kmer_store.update(target_rank, kmer_and_ext);
+      bytes_sent += sizeof(kmer_and_ext);
     }
   }
 
