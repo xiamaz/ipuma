@@ -66,11 +66,10 @@ struct CtgInfo {
   int64_t cid;
   char orient;
   char side;
-#if UPCXX_VERSION <= 20201100L
+#if UPCXX_VERSION < 20210300L
   char pad[6];  // FIXME necessary in upcxx <= 2020.10 see upcxx Issue #427
   UPCXX_SERIALIZED_FIELDS(cid, orient, side, pad);
 #else
-#error "Not fixed in any version yet"
   UPCXX_SERIALIZED_FIELDS(cid, orient, side);
 #endif
 };
@@ -191,12 +190,11 @@ struct CtgData {
 struct CtgReadData {
   int64_t cid;
   char side;
-#if UPCXX_VERSION <= 20201100L
+#if UPCXX_VERSION < 20210300L
   char pad[7];  // FIXME necessary in upcxx <= 2020.10 see upcxx Issue #427
   ReadSeq read_seq;
   UPCXX_SERIALIZED_FIELDS(cid, side, pad, read_seq);
 #else
-#error "Not fixed in any version yet"
   ReadSeq read_seq;
   UPCXX_SERIALIZED_FIELDS(cid, side, read_seq);
 #endif
@@ -257,7 +255,11 @@ class CtgsWithReadsDHT {
   }
 
   void add_read(int64_t cid, char side, const ReadSeq read_seq) {
+#if UPCXX_VERSION < 20210300L
     CtgReadData ctg_read_data = {.cid = cid, .side = side, .pad = {}, .read_seq = read_seq};
+#else
+    CtgReadData ctg_read_data = {.cid = cid, .side = side, .read_seq = read_seq};
+#endif    
     add_read(ctg_read_data);
   }
   void add_read(const CtgReadData &ctg_read_data) { ctg_read_store.update(get_target_rank(ctg_read_data.cid), ctg_read_data); }
@@ -454,9 +456,17 @@ static void process_reads(unsigned kmer_len, vector<PackedReads *> &packed_reads
                   reverse(quals_rc.begin(), quals_rc.end());
                   was_revcomp = true;
                 }
+#if UPCXX_VERSION < 20210300L
                 ctgs_to_add.push_back({ctg.cid, ctg.side, {}, {id, seq_rc, quals_rc}});
+#else
+                ctgs_to_add.push_back({ctg.cid, ctg.side, {id, seq_rc, quals_rc}});
+#endif
               } else {
+#if UPCXX_VERSION < 20210300L
                 ctgs_to_add.push_back({ctg.cid, ctg.side, {}, {id, seq, quals}});
+#else
+                ctgs_to_add.push_back({ctg.cid, ctg.side, {id, seq, quals}});
+#endif
               }
             }
           }
