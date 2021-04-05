@@ -147,7 +147,8 @@ dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_to_read
   for (auto &[cid, read_ids] : *cid_to_reads_map) {
     progress();
     for (auto read_id : read_ids) {
-      rpc(get_target_rank(read_id),
+      rpc(
+          get_target_rank(read_id),
           [](dist_object<read_to_target_map_t> &read_to_target_map, int64_t read_id, int target) {
             read_to_target_map->insert({read_id, target});
           },
@@ -185,7 +186,8 @@ dist_object<vector<PackedRead>> move_reads_to_targets(vector<PackedReads *> &pac
       auto &packed_read1 = (*packed_reads)[i];
       auto &packed_read2 = (*packed_reads)[i + 1];
       auto read_id = abs(packed_read1.get_id());
-      auto fut = rpc(get_target_rank(read_id),
+      auto fut = rpc(
+                     get_target_rank(read_id),
                      [](dist_object<read_to_target_map_t> &read_to_target_map, int64_t read_id) -> int {
                        const auto it = read_to_target_map->find(read_id);
                        if (it == read_to_target_map->end()) return -1;

@@ -49,7 +49,7 @@ add_definitions(-DKCOUNT_BLOOM_FP=0.05)
 add_definitions(-DKCOUNT_NO_BLOOM_ADJUSTMENT_FACTOR=0.2)
 add_definitions(-DKCOUNT_KMER_CACHE_FRACTION=0.2)
 add_definitions(-DKCOUNT_KMER_CACHE_MAX_LOAD=0.8)
-# how many bytes for sequences (reads or ctgs) gathered at one time for processing on GPU. 
+# how many bytes for sequences (reads or ctgs) gathered at one time for processing on GPU.
 # Must be big enough for expected max ctg length
 add_definitions(-DKCOUNT_GPU_SEQ_BLOCK_SIZE=5242880)
 
@@ -75,6 +75,8 @@ add_definitions(-DKLIGN_SEED_SPACE=8)
 add_definitions(-DKLIGN_UNALIGNED_THRES=1)
 # the block size of alignments to be dispatched to the GPU
 add_definitions(-DKLIGN_GPU_BLOCK_SIZE=20000)
+add_definitions(-DKLIGN_KMER_CACHE_SIZE=10000000)
+# add_definitions(-DUSE_KMER_CACHE)
 
 # controls depth matching in cgraph
 add_definitions(-DCGRAPH_DEPTH_DIFF_THRES=0.1)

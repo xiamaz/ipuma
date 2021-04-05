@@ -3,18 +3,11 @@
 #include <chrono>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
-#include "utils.hpp"
+#include <array>
 
-#define cudaErrchk(ans) \
-  { gpuAssert((ans), __FILE__, __LINE__); }
-
-static void gpuAssert(cudaError_t code, const char* file, int line, bool abort = true) {
-  if (code != cudaSuccess) {
-    std::ostringstream os;
-    os << "GPU assert " << cudaGetErrorString(code) << " " << file << ":" << line << "\n";
-    throw std::runtime_error(os.str());
-  }
-}
+#include "gpu_utils.hpp"
+#include "upcxx_utils/colors.h"
+#include "gpu_common.hpp"
 
 size_t gpu_utils::get_avail_gpu_mem_per_rank(int totRanks, int num_devices) {
   if (num_devices == 0) num_devices = get_num_node_gpus();
@@ -33,6 +26,12 @@ size_t gpu_utils::get_tot_gpu_mem() {
   cudaDeviceProp prop;
   cudaErrchk(cudaGetDeviceProperties(&prop, 0));
   return prop.totalGlobalMem;
+}
+
+size_t gpu_utils::get_free_gpu_mem() {
+  size_t free_mem, tot_mem;
+  cudaErrchk(cudaMemGetInfo(&free_mem, &tot_mem));
+  return free_mem;
 }
 
 int gpu_utils::get_num_node_gpus() {
@@ -74,7 +73,7 @@ std::string gpu_utils::get_gpu_device_description() {
   for (int i = 0; i < num_devs; ++i) {
     cudaErrchk(cudaGetDeviceProperties(&prop, i));
 
-    os << "GPU Device number: " << i << "\n";
+    os << KLMAGENTA << "GPU Device number: " << i << "\n";
     os << "  Device name: " << prop.name << "\n";
     os << "  PCI device ID: " << prop.pciDeviceID << "\n";
     os << "  Compute capability: " << prop.major << "." << prop.minor << "\n";
@@ -98,7 +97,7 @@ std::string gpu_utils::get_gpu_device_description() {
 
     os << "  Shared Memory Per Block: " << prop.sharedMemPerBlock << " bytes\n";
     os << "  Registers Per Block: " << prop.regsPerBlock << " 32-bit\n";
-    os << "  Warp size: " << prop.warpSize << "\n\n";
+    os << "  Warp size: " << prop.warpSize << KNORM << "\n\n";
   }
   return os.str();
 }

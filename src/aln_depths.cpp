@@ -317,6 +317,7 @@ void compute_aln_depths(const string &fname, Contigs &ctgs, Alns &alns, int kmer
       }
       *sh_of << "\n";
     }
+    ctg.depth = rg_avg_vars[num_read_groups].avg;
     upcxx::progress();
   }
   barrier();

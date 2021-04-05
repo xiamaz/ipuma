@@ -1,5 +1,3 @@
-#pragma once
-
 /*
  HipMer v 2.0, Copyright (c) 2020, The Regents of the University of California,
  through Lawrence Berkeley National Laboratory (subject to receipt of any required
@@ -42,79 +40,38 @@
  form.
 */
 
-#include <iostream>
-#include <sstream>
-#include <string>
+#pragma once
+
 #include <vector>
 
-#include "version.h"
+namespace kcount_gpu {
 
-using std::cout;
-using std::endl;
-using std::string;
-using std::vector;
+struct HashTableDriverState;
 
-class Options {
-  vector<string> splitter(string in_pattern, string &content);
+class HashTableGPUDriver {
+  // stores CUDA specific variables, etc
+  HashTableDriverState *dstate = nullptr;
 
-  template <typename T>
-  string vec_to_str(const vector<T> &vec, const string &delimiter = ",") {
-    std::ostringstream oss;
-    for (auto elem : vec) {
-      oss << elem;
-      if (elem != vec.back()) oss << delimiter;
-    }
-    return oss.str();
-  }
-
-  bool extract_previous_lens(vector<unsigned> &lens, unsigned k);
-
-  void get_restart_options();
-
-  double setup_output_dir();
-
-  double setup_log_file();
-
-  bool find_restart(string stage_type, int k);
+  int upcxx_rank_me;
+  int upcxx_rank_n;
+  int kmer_len;
+  int num_kmer_longs;
+  double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
+  int num_ht_slots;
+  // packed kmers, can be 1 or more uint64_t in length per kmer
+  uint64_t *dev_kmers;
+  // extension and kmer counts. Each kmer has 9 entries, left ACGT, right ACGT and total count
+  uint16_t *dev_counts;
+  // used by locks to protect hash table inserts
+  unsigned char *dev_mutexes;
 
  public:
-  vector<string> reads_fnames;
-  vector<string> paired_fnames;
-  vector<string> unpaired_fnames;
-  vector<unsigned> kmer_lens = {};
-  int max_kmer_len = 0;
-  int prev_kmer_len = 0;
-  vector<unsigned> scaff_kmer_lens = {};
-  int qual_offset = 33;
-  bool verbose = false;
-  int max_kmer_store_mb = 0;  // per rank - default to use 1% of node memory
-  int max_rpcs_in_flight = 100;
-  bool use_heavy_hitters = false;  // only enable when files are localized
-  bool force_bloom = false;
-  int dmin_thres = 2.0;
-  bool checkpoint = true;
-  bool checkpoint_merged = false;
-  bool post_assm_aln = false;
-  bool post_assm_abundances = false;
-  bool post_assm_only = false;
-  bool dump_gfa = false;
-  bool show_progress = false;
-  string pin_by = "core";
-  int ranks_per_gpu = 0;  // autodetect
-  string ctgs_fname;
-  vector<int> insert_size = {0, 0};
-  int min_ctg_print_len = 500;
-  int break_scaff_Ns = 10;
-  string output_dir;
-  string setup_time;
-  bool restart = false;
-  bool shuffle_reads = false;
-  bool dump_kmers = false;
+  HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int num_ht_slots, double &init_time);
+  ~HashTableGPUDriver();
 
-  Options();
-  ~Options();
+  int get_num_ht_slots();
 
-  void cleanup();
-
-  bool load(int argc, char **argv);
+  void insert_kmer(uint64_t *kmer, uint16_t kmer_count, char left, char right) {}
 };
+
+}  // namespace kcount_gpu
