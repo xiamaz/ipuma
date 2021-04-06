@@ -542,7 +542,6 @@ class KmerCtgDHT {
       kmer_lc = &kmer_rc;
       ctg_loc.is_rc = true;
     }
-    assert(kmer_lc->is_least());
     KmerAndCtgLoc<MAX_K> kmer_and_ctg_loc = {*kmer_lc, ctg_loc};
     kmer_store.update(get_target_rank(*kmer_lc), kmer_and_ctg_loc);
   }
@@ -638,7 +637,6 @@ class KmerCtgDHT {
                  vector<KmerAndCtgLoc<MAX_K>> kmer_ctg_locs;
                  kmer_ctg_locs.reserve(kmers.size());
                  for (auto &kmer : kmers) {
-                   assert(kmer.is_least());
                    const auto it = kmer_map->find(kmer);
                    if (it == kmer_map->end()) continue;
                    // skip conflicts
@@ -767,7 +765,6 @@ class KmerCtgDHT {
             kmer_lc = &kmer_rc;
             is_rc = true;
           }
-          assert(kmer_lc->is_least());
           if (pos_in_ctg > ctg_loc.clen - kmer_len)
             DIE("pos in ctg is wrong: ", pos_in_ctg, " clen ", ctg_loc.clen, " rlen ", rseq.length(), " cstart ", cstart, " is_rc ",
                 ctg_loc.is_rc, " rstart ", rstart, " orient ", orient, " overlap ", overlap_len, " pos in ctg ", ctg_loc.pos_in_ctg,
@@ -810,7 +807,6 @@ class KmerCtgDHT {
 
 #ifdef USE_KMER_CACHE
   CtgLoc *find_cached_kmer_lc(const Kmer<MAX_K> &kmer_lc) {
-    assert(kmer_lc.is_least());
     kmer_lookups++;
     auto it = kmer_cache.find(kmer_lc);
     if (it == kmer_cache.end()) return nullptr;
@@ -916,7 +912,6 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
                        int &read_group_id, int64_t &kmer_bytes_sent, int64_t &kmer_bytes_received) {
   auto process_kmer_ctg_loc = [](HASH_TABLE<Kmer<MAX_K>, vector<KmerToRead>> &kmer_read_map, int64_t &num_excess_alns_reads,
                                  int64_t &kmer_bytes_received, const Kmer<MAX_K> &kmer, const CtgLoc &ctg_loc) {
-    assert(kmer.is_least());
     kmer_bytes_received += sizeof(ctg_loc) + sizeof(Kmer<MAX_K>);
     // get the reads that this kmer mapped to
     auto kmer_read_map_it = kmer_read_map.find(kmer);
