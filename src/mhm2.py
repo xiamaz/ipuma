@@ -420,8 +420,9 @@ def main():
     #argparser.add_argument("--procs-per-node", default=0, help="Processes to spawn per node (default auto-detect cores)")
     argparser.add_argument("--procs", default=0, type=int, help="Total numer of processes")
     argparser.add_argument("--trace-dir", default=None, help="Output directory for stacktrace")
-    argparser.add_argument("--stats-dir", default=None, help="Output directory for stacktrace")
-    argparser.add_argument("--preproc", default=None, help="Comma separated preprocesses and options like (valgrind,--leak-check=full) or options to upcxx-run before binary")
+    argparser.add_argument("--stats-dir", default=None, help="Output directory for GASNet communication statistics")
+    argparser.add_argument("--preproc", default=None,
+        help="Comma separated preprocesses and options like (valgrind,--leak-check=full) or options to upcxx-run before binary")
     argparser.add_argument("--binary", default="mhm2", help="File name for UPC++ binary (default mhm2)")
 
     options, unknown_options = argparser.parse_known_args()
