@@ -80,7 +80,7 @@ def get_hdw_cores_per_node():
         import psutil
         cores = psutil.cpu_count(logical=False)
         print("Found %d cpus from psutil" % cores)
-    except (NameError, ImportError):
+    except (NameError, ImportError, TypeError):
         #print("Could not get cpus from psutil")
         pass
     # always trust lscpu, not psutil
