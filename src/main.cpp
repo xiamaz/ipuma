@@ -175,9 +175,9 @@ int main(int argc, char **argv) {
       [&gpu_startup_duration, &num_gpus, &gpu_mem]() { gpu_utils::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
   detect_gpu_fut = detect_gpu_fut.then([&gpu_startup_duration, &num_gpus, &gpu_mem]() {
     if (num_gpus > 0) {
-      SLOG(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
-           get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
-      SLOG(gpu_utils::get_gpu_device_description());
+      SLOG_VERBOSE(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
+                   get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
+      SLOG_VERBOSE(gpu_utils::get_gpu_device_description());
     } else {
       SWARN("Compiled for GPUs but no GPUs available...");
     }
@@ -240,7 +240,7 @@ int main(int argc, char **argv) {
       detect_gpu_fut.wait();
     }
     int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
-    SLOG(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
+    SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
 #endif
 
     // contigging loops
