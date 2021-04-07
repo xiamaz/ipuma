@@ -145,7 +145,6 @@ static string gptr_str(global_ptr<FragElem> gptr) {
   if (!gptr) return string(10, '0');
   ostringstream oss;
   oss << setw(11);
-  //oss << gptr.raw_ptr_;
   oss << gptr;
   string s = oss.str();
   s.erase(0, s.length() - 6);

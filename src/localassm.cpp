@@ -63,8 +63,16 @@ struct CtgInfo {
   int64_t cid;
   char orient;
   char side;
+  CtgInfo()
+      : cid{}
+      , orient{}
+      , side{} {}
+  CtgInfo(int64_t _cid, char _orient, char _side)
+      : cid(_cid)
+      , orient(_orient)
+      , side(_side) {}
 #if UPCXX_VERSION < 20210300L
-  char pad[6];  // FIXME necessary in upcxx <= 2020.10 see upcxx Issue #427
+  char pad[6];  // necessary in upcxx < 2021.03 see upcxx Issue #427
   UPCXX_SERIALIZED_FIELDS(cid, orient, side, pad);
 #else
   UPCXX_SERIALIZED_FIELDS(cid, orient, side);
@@ -122,43 +130,42 @@ class ReadsToCtgsDHT {
   int64_t get_num_mappings() { return reduce_one(reads_to_ctgs_map->size(), op_fast_add, 0).wait(); }
 
   vector<CtgInfo> get_ctgs(string &read_id) {
-    return upcxx::rpc(
-               get_target_rank(read_id),
-               [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, string read_id) -> vector<CtgInfo> {
-                 const auto it = reads_to_ctgs_map->find(read_id);
-                 if (it == reads_to_ctgs_map->end()) return {};
-                 return it->second;
-               },
-               reads_to_ctgs_map, read_id)
+    return upcxx::rpc(get_target_rank(read_id),
+                      [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, string read_id) -> vector<CtgInfo> {
+                        const auto it = reads_to_ctgs_map->find(read_id);
+                        if (it == reads_to_ctgs_map->end()) return {};
+                        return it->second;
+                      },
+                      reads_to_ctgs_map, read_id)
         .wait();
   }
 
   future<vector<vector<CtgInfo>>> get_ctgs(intrank_t target_rank, vector<string> &read_ids) {
     DBG_VERBOSE("Sending get_ctgs ", read_ids.size(), " to ", target_rank, "\n");
-    return upcxx::rpc(
-        target_rank,
-        [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, intrank_t source_rank,
-           view<string> read_ids) -> vector<vector<CtgInfo>> {
-          DBG_VERBOSE("Received request for ", read_ids.size(), " reads from ", source_rank, "\n");
-          size_t bytes = 0, nonempty = 0;
-          vector<vector<CtgInfo>> results(read_ids.size());
-          size_t i = 0;
-          for (const auto &read_id : read_ids) {
-            assert(get_target_rank(read_id) == rank_me());
-            const auto it = reads_to_ctgs_map->find(read_id);
-            assert(i < results.size());
-            assert(results[i].empty());
-            if (it != reads_to_ctgs_map->end()) {
-              nonempty++;
-              bytes += it->second.size() * sizeof(CtgInfo);
-              results[i] = it->second;
-            }
-            i++;
-          }
-          DBG_VERBOSE("Returning ", results.size(), " results nonempty=", nonempty, " bytes=", bytes, " to ", source_rank, "\n");
-          return results;
-        },
-        reads_to_ctgs_map, rank_me(), make_view(read_ids.begin(), read_ids.end()));
+    return upcxx::rpc(target_rank,
+                      [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, intrank_t source_rank,
+                         view<string> read_ids) -> vector<vector<CtgInfo>> {
+                        DBG_VERBOSE("Received request for ", read_ids.size(), " reads from ", source_rank, "\n");
+                        size_t bytes = 0, nonempty = 0;
+                        vector<vector<CtgInfo>> results(read_ids.size());
+                        size_t i = 0;
+                        for (const auto &read_id : read_ids) {
+                          assert(get_target_rank(read_id) == rank_me());
+                          const auto it = reads_to_ctgs_map->find(read_id);
+                          assert(i < results.size());
+                          assert(results[i].empty());
+                          if (it != reads_to_ctgs_map->end()) {
+                            nonempty++;
+                            bytes += it->second.size() * sizeof(CtgInfo);
+                            results[i] = it->second;
+                          }
+                          i++;
+                        }
+                        DBG_VERBOSE("Returning ", results.size(), " results nonempty=", nonempty, " bytes=", bytes, " to ",
+                                    source_rank, "\n");
+                        return results;
+                      },
+                      reads_to_ctgs_map, rank_me(), make_view(read_ids.begin(), read_ids.end()));
   }
 };
 
@@ -185,14 +192,24 @@ struct CtgData {
 };
 
 struct CtgReadData {
+  CtgReadData()
+      : cid{}
+      , side{}
+      , read_seq{} {}
+  CtgReadData(int64_t _cid, char _side, const ReadSeq _read_seq)
+      : cid(_cid)
+      , side(_side)
+      , read_seq(_read_seq) {}
   int64_t cid;
   char side;
 #if UPCXX_VERSION < 20210300L
-  char pad[7];  // FIXME necessary in upcxx <= 2020.10 see upcxx Issue #427
+  char pad[7];  // necessary in upcxx <= 2021.03 see upcxx Issue #427
   ReadSeq read_seq;
+
   UPCXX_SERIALIZED_FIELDS(cid, side, pad, read_seq);
 #else
   ReadSeq read_seq;
+
   UPCXX_SERIALIZED_FIELDS(cid, side, read_seq);
 #endif
 };
@@ -252,11 +269,7 @@ class CtgsWithReadsDHT {
   }
 
   void add_read(int64_t cid, char side, const ReadSeq read_seq) {
-#if UPCXX_VERSION < 20210300L
-    CtgReadData ctg_read_data = {.cid = cid, .side = side, .pad = {}, .read_seq = read_seq};
-#else
-    CtgReadData ctg_read_data = {.cid = cid, .side = side, .read_seq = read_seq};
-#endif    
+    CtgReadData ctg_read_data(cid, side, read_seq);
     add_read(ctg_read_data);
   }
   void add_read(const CtgReadData &ctg_read_data) { ctg_read_store.update(get_target_rank(ctg_read_data.cid), ctg_read_data); }
@@ -453,17 +466,9 @@ static void process_reads(unsigned kmer_len, vector<PackedReads *> &packed_reads
                   reverse(quals_rc.begin(), quals_rc.end());
                   was_revcomp = true;
                 }
-#if UPCXX_VERSION < 20210300L
-                ctgs_to_add.push_back({ctg.cid, ctg.side, {}, {id, seq_rc, quals_rc}});
-#else
-                ctgs_to_add.push_back({ctg.cid, ctg.side, {id, seq_rc, quals_rc}});
-#endif
+                ctgs_to_add.push_back(CtgReadData(ctg.cid, ctg.side, {id, seq_rc, quals_rc}));
               } else {
-#if UPCXX_VERSION < 20210300L
-                ctgs_to_add.push_back({ctg.cid, ctg.side, {}, {id, seq, quals}});
-#else
-                ctgs_to_add.push_back({ctg.cid, ctg.side, {id, seq, quals}});
-#endif
+                ctgs_to_add.push_back(CtgReadData(ctg.cid, ctg.side, {id, seq, quals}));
               }
             }
           }
