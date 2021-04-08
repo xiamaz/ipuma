@@ -129,6 +129,7 @@ if(ENABLE_CUDA)
     add_subdirectory(adept-sw)
     include_directories("kcount-gpu")
     add_subdirectory(kcount-gpu)
+    
     # include the library that combines them all for proper linking
     add_subdirectory(mhm2-gpu)
 
