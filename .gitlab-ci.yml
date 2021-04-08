@@ -124,14 +124,13 @@ Cori:validation:
     - export ARCTIC=/global/cscratch1/sd/regan/GitlabCIData/
     - export OPTS="-r ${ARCTIC}/arctic_sample_0.fq -v --checkpoint=yes"
     - export GASNET_BACKTRACE=1
-
     - echo "Submitting job on 3 nodes - on 2 nodes roughly RWDI=400s, DBG --kmer-lens 63 =456s  ...REL=170s"
     - knl_job=$(sbatch --parsable --job-name="CImhv-${CI_COMMIT_SHORT_SHA}" --account=mp215 -C knl --nodes=3 --qos=debug --time=30:00 --wrap="${RWDI}/mhm2.py $OPTS -o ${RUN_PREFIX}/rwdi && ${DBG}/mhm2.py ${OPTS} --kmer-lens 63 -o ${RUN_PREFIX}/dbg && echo Good")
-    - echo "KNL JOB: ${knl_job}"
+    - echo "KNL JOB ${knl_job}"
     - echo "Submitting build on cori gpu"
     - module load cgpu
     - gpu_job=$(sbatch -C gpu -q interactive -t 30 -c 8 -G 1 -A m342 --wrap="source ${MHM2_SOURCE}/contrib/environments/cori-gpu/gnu ; mkdir -p build-cori-gpu && cd build-cori-gpu && cmake \$MHM2_CMAKE_EXTRAS -DCMAKE_INSTALL_PREFIX=install ${MHM2_SOURCE} && make VERBOSE=1 -j 8 all install && srun test/test_mhm2")
-    - echo "GPU Build job: ${gpu_job}"
+    - echo "GPU Build job $gpu_job"
     - module rm cgpu
     - echo "Waiting for knl job $knl_job"
     - date
