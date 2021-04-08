@@ -118,17 +118,25 @@ add_executable(mhm2 main.cpp ${MHM2_TARGET_OBJECTS})
 set(MHM2_LINK_LIBRARIES Threads::Threads SSW_LIBRARY ${ZLIB_LIBRARIES} MHM2_VERSION_LIB)
 
 if(ENABLE_CUDA)
+
     include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
+    # include the gpu directories
+    set_property(TARGET mhm2 PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF) # just to be sure. It should be off in parent dir
     include_directories("gpu-utils")
     add_subdirectory(gpu-utils)
     include_directories("adept-sw")
     add_subdirectory(adept-sw)
     include_directories("kcount-gpu")
     add_subdirectory(kcount-gpu)
-    set_property(TARGET mhm2 PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF) # just to be sure. It should be off in parent dir
-    set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} GPU_UTILS_LIBRARY_static)
-    set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} ADEPT_SW_LIBRARY_static)
-    set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} KCOUNT_GPU_LIBRARY_static)
+    # include the library that combines them all for proper linking
+    add_subdirectory(mhm2-gpu)
+
+    if (MHM2_GPU_STATIC)
+      set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} MHM2_GPU_LIBRARY_static)
+    else()
+      set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} MHM2_GPU_LIBRARY_shared)
+    endif()
     target_link_libraries(mhm2
         ${MHM2_LINK_LIBRARIES}
         ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
