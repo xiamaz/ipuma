@@ -131,7 +131,7 @@ Cori:validation:
     - module load cgpu
     - mkdir -p ${SCRATCH}/src
     - rsync -a --exclude '.git*' ${MHM2_SOURCE}/ ${SCRATCH}/src/
-    - gpu_job=$(source ${MHM2_SOURCE}/contrib/environments/cori-gpu/gnu.sh ; sbatch --parseable -C gpu -t 30 -c 5 -G 1 -A m342 --wrap="mkdir -p build-cori-gpu && cd build-cori-gpu && cmake \$MHM2_CMAKE_EXTRAS -DCMAKE_INSTALL_PREFIX=install ${SCRATCH}/src && make VERBOSE=1 -j 10 all install && srun test/test_mhm2")
+    - gpu_job=$(source ${MHM2_SOURCE}/contrib/environments/cori-gpu/gnu.sh ; sbatch --parsable -C gpu -t 30 -c 5 -G 1 -A m342 --wrap="mkdir -p build-cori-gpu && cd build-cori-gpu && cmake \$MHM2_CMAKE_EXTRAS -DCMAKE_INSTALL_PREFIX=install ${SCRATCH}/src && make VERBOSE=1 -j 10 all install && srun test/test_mhm2")
     - echo "GPU Build job $gpu_job"
     - module rm cgpu
     - echo "Waiting for knl job $knl_job"
