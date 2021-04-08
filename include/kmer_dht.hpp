@@ -66,6 +66,8 @@
 
 enum PASS_TYPE { BLOOM_SET_PASS, BLOOM_COUNT_PASS, NO_BLOOM_PASS, CTG_BLOOM_SET_PASS, CTG_KMERS_PASS };
 
+using kcount_gpu::HashTableGPUDriver;
+
 using ext_count_t = uint16_t;
 using kmer_count_t = uint16_t;
 
@@ -166,9 +168,14 @@ class KmerDHT {
   upcxx::dist_object<BloomFilter> bloom_filter1;
   // the second bloom filer stores only kmers that are above the repeat depth, and is used for correctly sizing the kmer hash table
   upcxx::dist_object<BloomFilter> bloom_filter2;
+#ifdef ENABLE_GPUS
+  dist_object<HashTableGPUDriver<MAX_K>> gpu_driver;
+#endif
 #ifndef FLAT_AGGR_STORE
   upcxx_utils::ThreeTierAggrStore<Kmer<MAX_K>, dist_object<BloomFilter> &, dist_object<BloomFilter> &> kmer_store_bloom;
-  upcxx_utils::ThreeTierAggrStore<KmerAndExt, dist_object<KmerMap> &, dist_object<BloomFilter> &> kmer_store;
+  upcxx_utils::ThreeTierAggrStore<KmerAndExt, dist_object<KmerMap> &, dist_object<BloomFilter> &,
+                                  dist_object<HashTableGPUDriver<MAX_K>> &>
+      kmer_store;
 #else
   upcxx_utils::FlatAggrStore<Kmer<MAX_K>, dist_object<BloomFilter> &, dist_object<BloomFilter> &> kmer_store_bloom;
   upcxx_utils::FlatAggrStore<KmerAndExt, dist_object<KmerMap> &, dist_object<BloomFilter> &> kmer_store;
@@ -184,24 +191,20 @@ class KmerDHT {
   bool use_bloom;
   int64_t bytes_sent = 0;
   int minimizer_len = 15;
-#ifdef ENABLE_GPUS
-  kcount_gpu::HashTableGPUDriver *gpu_driver;
-#endif
 
-  static void update_bloom_set(Kmer<MAX_K> kmer, upcxx::dist_object<BloomFilter> &bloom_filter1,
-                               upcxx::dist_object<BloomFilter> &bloom_filter2);
+  static void update_bloom_set(Kmer<MAX_K> kmer, dist_object<BloomFilter> &bloom_filter1, dist_object<BloomFilter> &bloom_filter2);
 
-  static void update_ctg_bloom_set(Kmer<MAX_K> kmer, upcxx::dist_object<BloomFilter> &bloom_filter1,
-                                   upcxx::dist_object<BloomFilter> &bloom_filter2);
+  static void update_ctg_bloom_set(Kmer<MAX_K> kmer, dist_object<BloomFilter> &bloom_filter1,
+                                   dist_object<BloomFilter> &bloom_filter2);
 
-  static void update_bloom_count(KmerAndExt kmer_and_ext, upcxx::dist_object<KmerMap> &kmers,
-                                 upcxx::dist_object<BloomFilter> &bloom_filter);
+  static void update_bloom_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers, dist_object<BloomFilter> &bloom_filter,
+                                 dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver);
 
-  static void update_count(KmerAndExt kmer_and_ext, upcxx::dist_object<KmerMap> &kmers,
-                           upcxx::dist_object<BloomFilter> &bloom_filter);
+  static void update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers, dist_object<BloomFilter> &bloom_filter,
+                           dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver);
 
-  static void update_ctg_kmers_count(KmerAndExt kmer_and_ext, upcxx::dist_object<KmerMap> &kmers,
-                                     upcxx::dist_object<BloomFilter> &bloom_filter);
+  static void update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers, dist_object<BloomFilter> &bloom_filter,
+                                     dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver);
 
  public:
   KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool force_bloom, bool useHHSS);

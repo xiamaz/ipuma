@@ -89,20 +89,20 @@ void KmerDHT<MAX_K>::update_ctg_bloom_set(Kmer<MAX_K> kmer, dist_object<BloomFil
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::update_bloom_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
-                                        dist_object<BloomFilter> &bloom_filter) {
+                                        dist_object<BloomFilter> &bloom_filter,
+                                        dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver) {
   // if the kmer is not found in the bloom filter, skip it
   if (!bloom_filter->possibly_contains(kmer_and_ext.kmer.get_bytes())) return;
-  update_count(kmer_and_ext, kmers, bloom_filter);
+  update_count(kmer_and_ext, kmers, bloom_filter, gpu_driver);
 }
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers, dist_object<BloomFilter> &bloom_filter) {
+void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers, dist_object<BloomFilter> &bloom_filter,
+                                  dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver) {
 #ifdef ENABLE_GPUS
   // FIXME: buffer hash table entries, and when full, copy across to
-  // gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right);
-#endif
-
-  //#else
+  gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right);
+#else
   // find it - if it isn't found then insert it, otherwise increment the counts
   const auto it = kmers->find(kmer_and_ext.kmer);
   if (it == kmers->end()) {
@@ -129,12 +129,13 @@ void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> 
     kmer_count->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
     kmer_count->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
   }
-  //#endif
+#endif
 }
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
-                                            dist_object<BloomFilter> &bloom_filter) {
+                                            dist_object<BloomFilter> &bloom_filter,
+                                            dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver) {
   // insert a new kmer derived from the previous round's contigs
   const auto it = kmers->find(kmer_and_ext.kmer);
   bool insert = false;
@@ -196,8 +197,9 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     : kmers({})
     , bloom_filter1({})
     , bloom_filter2({})
+    , gpu_driver({})
     , kmer_store_bloom(bloom_filter1, bloom_filter2)
-    , kmer_store(kmers, bloom_filter2)
+    , kmer_store(kmers, bloom_filter2, gpu_driver)
     , max_kmer_store_bytes(max_kmer_store_bytes)
     , initial_kmer_dht_reservation(0)
     , my_num_kmers(my_num_kmers)
@@ -284,11 +286,9 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
       // don't use up all the memory
       // gpu_avail_mem *= 0.9;
       double init_time;
-      gpu_driver = new kcount_gpu::HashTableGPUDriver(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), Kmer<MAX_K>::get_N_LONGS(),
-                                                      gpu_avail_mem, init_time);
+      gpu_driver->init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), gpu_avail_mem, init_time);
       SLOG(KLMAGENTA, "Initialized hash table GPU driver in ", std::fixed, std::setprecision(3), init_time, " s", KNORM, "\n");
-      auto num_ht_slots = gpu_driver->get_num_ht_slots();
-      SLOG(KLMAGENTA, "GPU hash table has ", num_ht_slots, " slots/rank", KNORM, "\n");
+      // SLOG(KLMAGENTA, "GPU hash table has ", gpu_driver->get_num_entries(), " entries/rank in buffer", KNORM, "\n");
       auto gpu_free_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n();
       SLOG(KLMAGENTA, "After initializing GPU hash table, there is ", get_size_str(gpu_free_mem),
            " memory available per rank, with ", get_size_str(bytes_for_pnp), " reserved for parse and pack" KNORM, "\n");
@@ -315,9 +315,6 @@ void KmerDHT<MAX_K>::clear_stores() {
 template <int MAX_K>
 KmerDHT<MAX_K>::~KmerDHT() {
   clear();
-#ifdef ENABLE_GPUS
-  delete gpu_driver;
-#endif
 }
 
 template <int MAX_K>
@@ -465,7 +462,7 @@ void KmerDHT<MAX_K>::add_kmer(Kmer<MAX_K> kmer, char left_ext, char right_ext, k
     KmerAndExt kmer_and_ext = {.kmer = kmer, .count = count, .left = left_ext, .right = right_ext};
     if (target_rank == rank_me() && (pass_type == NO_BLOOM_PASS || pass_type == CTG_KMERS_PASS)) {
       _num_kmers_counted_locally++;
-      update_count(kmer_and_ext, kmers, bloom_filter1);
+      update_count(kmer_and_ext, kmers, bloom_filter1, gpu_driver);
     } else {
       kmer_store.update(target_rank, kmer_and_ext);
       bytes_sent += sizeof(kmer_and_ext);
@@ -481,8 +478,25 @@ void KmerDHT<MAX_K>::flush_updates() {
   else
     kmer_store.flush_updates();
 #ifdef ENABLE_GPUS
-    // FIXME: call gpus to process any outstanding buffered local updates
-    // FIXME: copy from gpu to cpu and insert in cpu unordered_map
+  // make sure every rank has finished
+  barrier();
+  // FIXME: call gpus to process any outstanding buffered local updates
+  // FIXME: copy from gpu to cpu and insert in cpu unordered_map
+  // In this first attempt, we'll update from the GPU once only, which means we'll be limited to the GPU memory
+  /*
+  gpu_driver->finish_hash_table();
+  for (int i = 0; i < gpu_driver->ht_size; i++) {
+    auto kmer = gpu_driver->get_kmer(i);
+    auto kmer_exts = gpu_driver->get_kmer_exts(i);
+    KmerCounts kmer_counts = {.left_exts = kmer_exts.left_exts,
+                              .right_exts = kmer_exts.right_exts,
+                              .uutig_frag = nullptr,
+                              .count = kmer_exts.count,
+                              .left = 'X',
+                              .right = 'X',
+                              .from_ctg = false};
+    kmers->insert({kmer, kmer_counts});
+  }*/
 #endif
   auto avg_kmers_processed = reduce_one(_num_kmers_counted, op_fast_add, 0).wait() / rank_n();
   auto max_kmers_processed = reduce_one(_num_kmers_counted, op_fast_max, 0).wait();

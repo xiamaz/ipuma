@@ -505,9 +505,7 @@ class KmerCtgDHT {
   void reserve(int64_t mysize) { kmer_map->reserve(mysize); }
   int64_t size() const { return kmer_map->size(); }
 
-  intrank_t get_target_rank(const Kmer<MAX_K> &kmer) const {
-    return std::hash<Kmer<MAX_K>>{}(kmer) % rank_n();
-  }
+  intrank_t get_target_rank(const Kmer<MAX_K> &kmer) const { return std::hash<Kmer<MAX_K>>{}(kmer) % rank_n(); }
 
   int64_t get_num_kmers(bool all = false) {
     if (!all) return reduce_one(kmer_map->size(), op_fast_add, 0).wait();
@@ -632,21 +630,22 @@ class KmerCtgDHT {
   }
 
   future<vector<KmerAndCtgLoc<MAX_K>>> get_ctgs_with_kmers(int target_rank, vector<Kmer<MAX_K>> &kmers) {
-    return rpc(target_rank,
-               [](vector<Kmer<MAX_K>> kmers, kmer_map_t &kmer_map) {
-                 vector<KmerAndCtgLoc<MAX_K>> kmer_ctg_locs;
-                 kmer_ctg_locs.reserve(kmers.size());
-                 for (auto &kmer : kmers) {
-                   const auto it = kmer_map->find(kmer);
-                   if (it == kmer_map->end()) continue;
-                   // skip conflicts
-                   if (it->second.first) continue;
-                   // now add it
-                   kmer_ctg_locs.push_back({kmer, it->second.second});
-                 }
-                 return kmer_ctg_locs;
-               },
-               kmers, kmer_map);
+    return rpc(
+        target_rank,
+        [](vector<Kmer<MAX_K>> kmers, kmer_map_t &kmer_map) {
+          vector<KmerAndCtgLoc<MAX_K>> kmer_ctg_locs;
+          kmer_ctg_locs.reserve(kmers.size());
+          for (auto &kmer : kmers) {
+            const auto it = kmer_map->find(kmer);
+            if (it == kmer_map->end()) continue;
+            // skip conflicts
+            if (it->second.first) continue;
+            // now add it
+            kmer_ctg_locs.push_back({kmer, it->second.second});
+          }
+          return kmer_ctg_locs;
+        },
+        kmers, kmer_map);
   }
 
 #ifdef DEBUG
@@ -832,12 +831,12 @@ class KmerCtgDHT {
     if (!first_ctg_round) {
       auto all_kmer_cache_hits = reduce_one(kmer_cache_hits, op_fast_add, 0).wait();
       auto all_lookups = reduce_one(kmer_lookups, op_fast_add, 0).wait();
-      SLOG("Hits on kmer cache: ", perc_str(all_kmer_cache_hits, all_lookups), " cache size ", kmer_cache.size(), "\n");
+      SLOG_VERBOSE("Hits on kmer cache: ", perc_str(all_kmer_cache_hits, all_lookups), " cache size ", kmer_cache.size(), "\n");
     }
 #endif
     auto all_ctg_cache_hits = reduce_one(ctg_cache_hits, op_fast_add, 0).wait();
     auto all_ctg_lookups = reduce_one(ctg_lookups, op_fast_add, 0).wait();
-    SLOG("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), " cache size ", ctg_cache.size(), "\n");
+    SLOG_VERBOSE("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), " cache size ", ctg_cache.size(), "\n");
   }
 };
 
@@ -986,7 +985,7 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
   for (auto read_record : read_records) {
     if (!KLIGN_MAX_ALNS_PER_READ || read_record->aligned_ctgs_map.size() < KLIGN_MAX_ALNS_PER_READ)
       good_read_records.push_back(read_record);
-    else 
+    else
       delete read_record;
   }
   // compute alignments for each read

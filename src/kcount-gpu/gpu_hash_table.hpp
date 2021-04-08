@@ -43,35 +43,60 @@
 #pragma once
 
 #include <vector>
+#include <array>
+#include <unordered_map>
+
+#include "hash_funcs.h"
 
 namespace kcount_gpu {
 
-struct HashTableDriverState;
+template <int N_LONGS>
+struct KmerArray {
+  std::array<uint64_t, N_LONGS> data;
+};
 
+template <int MAX_K>
 class HashTableGPUDriver {
-  // stores CUDA specific variables, etc
+  struct HashTableDriverState;
+  // stores CUDA specific variables
   HashTableDriverState *dstate = nullptr;
+
+  static const int N_LONGS = (MAX_K + 31) / 32;
 
   int upcxx_rank_me;
   int upcxx_rank_n;
   int kmer_len;
-  int num_kmer_longs;
+  int num_entries = 0;
   double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
-  int num_ht_slots;
   // packed kmers, can be 1 or more uint64_t in length per kmer
-  uint64_t *dev_kmers;
-  // extension and kmer counts. Each kmer has 9 entries, left ACGT, right ACGT and total count
-  uint16_t *dev_counts;
-  // used by locks to protect hash table inserts
-  unsigned char *dev_mutexes;
+  uint64_t *dev_kmers = nullptr;
+  // extension and kmer counts. Each uint32_t has packed into it the uint16_t count, and a byte each for left and right extensions
+  uint32_t *dev_counts = nullptr;
+  uint64_t *host_kmers = nullptr;
+  uint8_t *host_counts = nullptr;
+
+  std::unordered_map<KmerArray<N_LONGS>, std::array<uint16_t, 9>> tmp_ht;
 
  public:
-  HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int num_ht_slots, double &init_time);
+  HashTableGPUDriver();
   ~HashTableGPUDriver();
 
-  int get_num_ht_slots();
+  void init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int gpu_avail_mem, double &init_time);
 
-  void insert_kmer(uint64_t *kmer, uint16_t kmer_count, char left, char right) {}
+  int get_num_entries();
+
+  void insert_kmer(const uint64_t *kmer, uint16_t kmer_count, char left, char right);
 };
 
 }  // namespace kcount_gpu
+
+namespace std {
+
+template <int N_LONGS>
+struct hash<kcount_gpu::KmerArray<N_LONGS>> {
+  size_t operator()(kcount_gpu::KmerArray<N_LONGS> const &kmer_array) const {
+    return MurmurHash3_x64_64(reinterpret_cast<const void *>(kmer_array.data), N_LONGS * sizeof(uint64_t));
+  }
+};
+
+}  // namespace std
