@@ -99,7 +99,7 @@ Kmer<MAX_K>::Kmer(const Kmer<MAX_K> &o) {
 }
 
 template <int MAX_K>
-Kmer<MAX_K>::Kmer(longs_t *other_longs) {
+Kmer<MAX_K>::Kmer(const longs_t *other_longs) {
   assert(Kmer::k > 0);
   memcpy(&(longs[0]), other_longs, N_LONGS * sizeof(longs_t));
 }

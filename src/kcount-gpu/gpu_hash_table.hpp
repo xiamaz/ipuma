@@ -50,28 +50,33 @@
 
 namespace kcount_gpu {
 
+using KmerCountsArray = std::array<uint16_t, 9>;
+
 template <int MAX_K>
-struct KmerArray {
+class KmerArray {
   static const int N_LONGS = (MAX_K + 31) / 32;
   std::array<uint64_t, N_LONGS> data;
 
+ public:
   KmerArray(const uint64_t *x);
 
+  const uint64_t *to_array() const { return data.data(); }
+
   bool operator==(const KmerArray &o) const;
+
+  size_t hash() const;
 };
 
 template <int MAX_K>
 class HashTableGPUDriver {
+  static const int N_LONGS = (MAX_K + 31) / 32;
   struct HashTableDriverState;
   // stores CUDA specific variables
   HashTableDriverState *dstate = nullptr;
 
-  static const int N_LONGS = (MAX_K + 31) / 32;
-
   int upcxx_rank_me;
   int upcxx_rank_n;
   int kmer_len;
-  int num_entries = 0;
   double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
   // packed kmers, can be 1 or more uint64_t in length per kmer
   uint64_t *dev_kmers = nullptr;
@@ -79,8 +84,14 @@ class HashTableGPUDriver {
   uint32_t *dev_counts = nullptr;
   uint64_t *host_kmers = nullptr;
   uint8_t *host_counts = nullptr;
+  int num_entries = 0;
+  std::vector<uint64_t> output_kmers;
+  std::vector<uint16_t> output_kmer_counts;
+  size_t output_index = 0;
 
-  std::unordered_map<KmerArray<MAX_K>, std::array<uint16_t, 9>> tmp_ht;
+  std::unordered_map<KmerArray<MAX_K>, KmerCountsArray> tmp_ht;
+
+  void insert_kmer_block();
 
  public:
   HashTableGPUDriver();
@@ -93,6 +104,8 @@ class HashTableGPUDriver {
   void insert_kmer(const uint64_t *kmer, uint16_t kmer_count, char left, char right);
 
   void done_inserts();
+
+  std::pair<uint64_t *, uint16_t *> get_next_entry();
 };
 
 }  // namespace kcount_gpu
@@ -103,9 +116,7 @@ template <int MAX_K>
 struct hash<kcount_gpu::KmerArray<MAX_K>> {
   static const int N_LONGS = (MAX_K + 31) / 32;
 
-  size_t operator()(kcount_gpu::KmerArray<MAX_K> const &kmer_array) const {
-    return MurmurHash3_x64_64(reinterpret_cast<const void *>(kmer_array.data.data()), N_LONGS * sizeof(uint64_t));
-  }
+  size_t operator()(kcount_gpu::KmerArray<MAX_K> const &kmer_array) const { return kmer_array.hash(); }
 };
 
 }  // namespace std

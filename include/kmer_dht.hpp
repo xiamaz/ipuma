@@ -62,14 +62,20 @@
 #ifdef ENABLE_GPUS
 #include "gpu-utils/gpu_utils.hpp"
 #include "kcount-gpu/gpu_hash_table.hpp"
+#else
+// fake it out
+namespace kcount_gpu {
+template <int MAX_K>
+struct HashTableGPUDriver {};
+}  // namespace kcount_gpu
 #endif
 
 enum PASS_TYPE { BLOOM_SET_PASS, BLOOM_COUNT_PASS, NO_BLOOM_PASS, CTG_BLOOM_SET_PASS, CTG_KMERS_PASS };
 
-using kcount_gpu::HashTableGPUDriver;
-
 using ext_count_t = uint16_t;
 using kmer_count_t = uint16_t;
+
+using kcount_gpu::HashTableGPUDriver;
 
 // global variables to avoid passing dist objs to rpcs
 inline double _dynamic_min_depth = 0;
@@ -80,6 +86,13 @@ struct ExtCounts {
   ext_count_t count_C;
   ext_count_t count_G;
   ext_count_t count_T;
+
+  void set(uint16_t *counts) {
+    count_A = counts[0];
+    count_C = counts[1];
+    count_G = counts[2];
+    count_T = counts[3];
+  }
 
   std::array<std::pair<char, int>, 4> get_sorted() {
     std::array<std::pair<char, int>, 4> counts = {std::make_pair('A', (int)count_A), std::make_pair('C', (int)count_C),
@@ -129,6 +142,12 @@ struct ExtCounts {
     if (runner_up_count >= dmin_dyn) return 'F';
     return sorted_counts[0].first;
   }
+
+  string to_string() {
+    ostringstream os;
+    os << count_A << "," << count_C << "," << count_G << "," << count_T;
+    return os.str();
+  }
 };
 
 struct FragElem;
@@ -168,18 +187,12 @@ class KmerDHT {
   upcxx::dist_object<BloomFilter> bloom_filter1;
   // the second bloom filer stores only kmers that are above the repeat depth, and is used for correctly sizing the kmer hash table
   upcxx::dist_object<BloomFilter> bloom_filter2;
-#ifdef ENABLE_GPUS
   dist_object<HashTableGPUDriver<MAX_K>> gpu_driver;
-#endif
-#ifndef FLAT_AGGR_STORE
+
   upcxx_utils::ThreeTierAggrStore<Kmer<MAX_K>, dist_object<BloomFilter> &, dist_object<BloomFilter> &> kmer_store_bloom;
   upcxx_utils::ThreeTierAggrStore<KmerAndExt, dist_object<KmerMap> &, dist_object<BloomFilter> &,
                                   dist_object<HashTableGPUDriver<MAX_K>> &>
       kmer_store;
-#else
-  upcxx_utils::FlatAggrStore<Kmer<MAX_K>, dist_object<BloomFilter> &, dist_object<BloomFilter> &> kmer_store_bloom;
-  upcxx_utils::FlatAggrStore<KmerAndExt, dist_object<KmerMap> &, dist_object<BloomFilter> &> kmer_store;
-#endif
   int64_t max_kmer_store_bytes;
   int64_t initial_kmer_dht_reservation;
   int64_t my_num_kmers;
@@ -255,7 +268,7 @@ class KmerDHT {
   // KMERCHARS LR N
   // where L is left extension and R is right extension, one char, either X, F or A, C, G, T
   // where N is the count of the kmer frequency
-  void dump_kmers(int k);
+  void dump_kmers();
 
   typename KmerMap::iterator local_kmers_begin();
 

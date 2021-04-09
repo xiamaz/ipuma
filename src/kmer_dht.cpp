@@ -102,7 +102,7 @@ void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> 
 #ifdef ENABLE_GPUS
   // FIXME: buffer hash table entries, and when full, copy across to
   gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right);
-  //#else
+#else
   // find it - if it isn't found then insert it, otherwise increment the counts
   const auto it = kmers->find(kmer_and_ext.kmer);
   if (it == kmers->end()) {
@@ -480,25 +480,27 @@ void KmerDHT<MAX_K>::flush_updates() {
 #ifdef ENABLE_GPUS
   // make sure every rank has finished
   barrier();
-  // FIXME: call gpus to process any outstanding buffered local updates
-  // FIXME: copy from gpu to cpu and insert in cpu unordered_map
-  // In this first attempt, we'll update from the GPU once only, which means we'll be limited to the GPU memory
+  // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
   gpu_driver->done_inserts();
-  WARN("Found ", kmers->size(), " unique kmers\n");
-  /*
-  for (int i = 0; i < gpu_driver->ht_size; i++) {
-    auto kmer = gpu_driver->get_kmer(i);
-    auto kmer_exts = gpu_driver->get_kmer_exts(i);
-    KmerCounts kmer_counts = {.left_exts = kmer_exts.left_exts,
-                              .right_exts = kmer_exts.right_exts,
+  while (true) {
+    auto next_entry = gpu_driver->get_next_entry();
+    if (!next_entry.first) break;
+    Kmer<MAX_K> kmer(next_entry.first);
+    auto counts_array = next_entry.second;
+    ExtCounts left_exts = {0}, right_exts = {0};
+    left_exts.set(counts_array + 1);
+    right_exts.set(counts_array + 5);
+    KmerCounts kmer_counts = {.left_exts = left_exts,
+                              .right_exts = right_exts,
                               .uutig_frag = nullptr,
-                              .count = kmer_exts.count,
+                              .count = counts_array[0],
                               .left = 'X',
                               .right = 'X',
                               .from_ctg = false};
     kmers->insert({kmer, kmer_counts});
-  }*/
+  }
 #endif
+  SWARN("Found ", kmers->size(), " unique kmers\n");
   auto avg_kmers_processed = reduce_one(_num_kmers_counted, op_fast_add, 0).wait() / rank_n();
   auto max_kmers_processed = reduce_one(_num_kmers_counted, op_fast_max, 0).wait();
   auto avg_local_kmers = reduce_one(_num_kmers_counted_locally, op_fast_add, 0).wait() / rank_n();
@@ -544,8 +546,9 @@ void KmerDHT<MAX_K>::compute_kmer_exts() {
 // where L is left extension and R is right extension, one char, either X, F or A, C, G, T
 // where N is the count of the kmer frequency
 template <int MAX_K>
-void KmerDHT<MAX_K>::dump_kmers(int k) {
+void KmerDHT<MAX_K>::dump_kmers() {
   BarrierTimer timer(__FILEFUNC__);
+  int k = Kmer<MAX_K>::get_k();
   string dump_fname = "kmers-" + to_string(k) + ".txt.gz";
   get_rank_path(dump_fname, rank_me());
   zstr::ofstream dump_file(dump_fname);
@@ -553,7 +556,9 @@ void KmerDHT<MAX_K>::dump_kmers(int k) {
   ProgressBar progbar(kmers->size(), "Dumping kmers to " + dump_fname);
   int64_t i = 0;
   for (auto &elem : *kmers) {
-    out_buf << elem.first << " " << elem.second.count << " " << elem.second.left << " " << elem.second.right << endl;
+    out_buf << elem.first << " " << elem.second.count << " " << elem.second.left << " " << elem.second.right;
+    out_buf << " " << elem.second.left_exts.to_string() << " " << elem.second.right_exts.to_string();
+    out_buf << endl;
     i++;
     if (!(i % 1000)) {
       dump_file << out_buf.str();

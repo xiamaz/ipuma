@@ -72,7 +72,7 @@ class Kmer {
 
   Kmer(const Kmer &o);
 
-  Kmer(longs_t *other_longs);
+  Kmer(const longs_t *other_longs);
 
   explicit Kmer(const char *s);
 

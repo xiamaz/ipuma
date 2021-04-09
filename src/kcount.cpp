@@ -423,7 +423,7 @@ void analyze_kmers(unsigned kmer_len, unsigned prev_kmer_len, int qual_offset, v
     barrier();
   }
   kmer_dht->compute_kmer_exts();
-  if (dump_kmers) kmer_dht->dump_kmers(kmer_len);
+  if (dump_kmers) kmer_dht->dump_kmers();
   barrier();
   kmer_dht->clear_stores();
   auto [bytes_sent, max_bytes_sent] = kmer_dht->get_bytes_sent();

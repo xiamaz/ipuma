@@ -111,11 +111,7 @@ class KmerCtgDHT {
   using kmer_map_t = dist_object<local_kmer_map_t>;
   kmer_map_t kmer_map;
 
-#ifndef FLAT_AGGR_STORE
   ThreeTierAggrStore<KmerAndCtgLoc<MAX_K>, kmer_map_t &> kmer_store;
-#else
-  FlatAggrStore<KmerAndCtgLoc<MAX_K>, kmer_map_t &> kmer_store;
-#endif
 
   int64_t num_alns;
   int64_t num_perfect_alns;

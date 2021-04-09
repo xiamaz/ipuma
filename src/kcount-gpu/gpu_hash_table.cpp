@@ -72,12 +72,17 @@ static size_t get_nearest_pow2(size_t val) {
 
 template <int MAX_K>
 KmerArray<MAX_K>::KmerArray(const uint64_t *x) {
-  memcpy(data.data(), x, N_LONGS);
+  memcpy(data.data(), x, N_LONGS * sizeof(uint64_t));
 }
 
 template <int MAX_K>
 bool KmerArray<MAX_K>::operator==(const KmerArray<MAX_K> &o) const {
   return data == o.data;
+}
+
+template <int MAX_K>
+size_t KmerArray<MAX_K>::hash() const {
+  return MurmurHash3_x64_64(reinterpret_cast<const void *>(data.data()), N_LONGS * sizeof(uint64_t));
 }
 
 template <int MAX_K>
@@ -120,8 +125,6 @@ template <int MAX_K>
 HashTableGPUDriver<MAX_K>::~HashTableGPUDriver() {
   cudaFree(dev_kmers);
   cudaFree(dev_counts);
-  if (host_kmers) delete[] host_kmers;
-  if (host_counts) delete[] host_counts;
   if (dstate) delete dstate;
 }
 
@@ -135,13 +138,31 @@ static uint16_t inc_ext_count_with_limit(int count1, int count2) {
   return std::min(count1, (int)numeric_limits<uint16_t>::max());
 }
 
-static void inc_ext_count(array<uint16_t, 9> &kmer_counts, char ext, int count, bool is_left) {
+static void inc_ext_count(KmerCountsArray &kmer_counts, char ext, int count, bool is_left) {
   int start_pos = (is_left ? 1 : 5);
   switch (ext) {
     case 'A': kmer_counts[start_pos] = inc_ext_count_with_limit(kmer_counts[start_pos], count); break;
     case 'C': kmer_counts[start_pos + 1] = inc_ext_count_with_limit(kmer_counts[start_pos + 1], count); break;
     case 'G': kmer_counts[start_pos + 2] = inc_ext_count_with_limit(kmer_counts[start_pos + 2], count); break;
     case 'T': kmer_counts[start_pos + 3] = inc_ext_count_with_limit(kmer_counts[start_pos + 3], count); break;
+  }
+}
+
+template <int MAX_K>
+void HashTableGPUDriver<MAX_K>::insert_kmer_block() {
+  for (int i = 0; i < num_entries; i++) {
+    KmerArray<MAX_K> kmer(host_kmers + i * N_LONGS);
+    uint16_t kmer_count;
+    memcpy(&kmer_count, host_counts + i * 4, 2);
+    char left_ext = host_counts[i * 4 + 2];
+    char right_ext = host_counts[i * 4 + 3];
+    // find it - if it isn't found then insert it, otherwise increment the counts
+    auto it = tmp_ht.find(kmer);
+    if (it == tmp_ht.end()) it = tmp_ht.insert({kmer, {0}}).first;
+    KmerCountsArray &kmer_counts = it->second;
+    kmer_counts[0] = inc_ext_count_with_limit(kmer_counts[0], kmer_count);
+    inc_ext_count(kmer_counts, left_ext, kmer_count, true);
+    inc_ext_count(kmer_counts, right_ext, kmer_count, false);
   }
 }
 
@@ -153,52 +174,48 @@ void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, uint16_t kmer_
   host_counts[num_entries * 4 + 3] = right;
   num_entries++;
   if (num_entries == KCOUNT_GPU_HASHTABLE_BLOCK_SIZE) {
-    if (!upcxx_rank_me) cout << "inserting " << num_entries << " kmers into the GPU ht\n";
-    for (int i = 0; i < num_entries; i++) {
-      KmerArray<MAX_K> kmer(host_kmers + i * N_LONGS);
-      uint16_t kmer_count;
-      memcpy(&kmer_count, host_counts + i * 4, 2);
-      char left_ext = host_counts[i * 4 + 2];
-      char right_ext = host_counts[i * 4 + 3];
-      // std::unordered_map<KmerArray<N_LONGS>, std::array<uint16_t, 9>> tmp_ht;
-      // find it - if it isn't found then insert it, otherwise increment the counts
-      auto it = tmp_ht.find(kmer);
-      if (it == tmp_ht.end()) it = tmp_ht.insert({kmer, {0}}).first;
-      array<uint16_t, 9> &kmer_counts = it->second;
-      kmer_counts[0] = inc_ext_count_with_limit(kmer_counts[0], kmer_count);
-      inc_ext_count(kmer_counts, left_ext, kmer_count, true);
-      inc_ext_count(kmer_counts, right_ext, kmer_count, false);
-    }
+    insert_kmer_block();
     // cp to dev and run kernel
     num_entries = 0;
   }
 }
 
+// FIXME: this should return a vector of kmers and their counts for inserting into the CPU hash table
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::done_inserts() {
   if (num_entries) {
-    if (!upcxx_rank_me) cout << "inserting " << num_entries << " kmers into the GPU ht\n";
-    for (int i = 0; i < num_entries; i++) {
-      KmerArray<MAX_K> kmer(host_kmers + i * N_LONGS);
-      uint16_t kmer_count;
-      memcpy(&kmer_count, host_counts + i * 4, 2);
-      char left_ext = host_counts[i * 4 + 2];
-      char right_ext = host_counts[i * 4 + 3];
-      // std::unordered_map<KmerArray<N_LONGS>, std::array<uint16_t, 9>> tmp_ht;
-      // find it - if it isn't found then insert it, otherwise increment the counts
-      auto it = tmp_ht.find(kmer);
-      if (it == tmp_ht.end()) it = tmp_ht.insert({kmer, {0}}).first;
-      array<uint16_t, 9> &kmer_counts = it->second;
-      kmer_counts[0] = inc_ext_count_with_limit(kmer_counts[0], kmer_count);
-      inc_ext_count(kmer_counts, left_ext, kmer_count, true);
-      inc_ext_count(kmer_counts, right_ext, kmer_count, false);
-    }
-    // cp to dev and run kernel
+    insert_kmer_block();
     num_entries = 0;
   }
-  ostringstream os;
-  os << "(GPU) Rank " << upcxx_rank_me << " found " << tmp_ht.size() << " unique kmers\n";
-  cout << os.str() << flush;
+
+  if (!upcxx_rank_me) {
+    ostringstream os;
+    os << "On GPU, rank " << upcxx_rank_me << " found " << tmp_ht.size() << " unique kmers\n";
+    cout << os.str() << flush;
+  }
+  // delete these to make space before returning the hash table entries
+  if (host_kmers) delete[] host_kmers;
+  if (host_counts) delete[] host_counts;
+  // now copy the gpu hash table values across to the host
+  output_kmers.resize(tmp_ht.size() * N_LONGS);
+  output_kmer_counts.resize(tmp_ht.size() * 9);
+  int i = 0;
+  for (auto it : tmp_ht) {
+    const KmerArray<MAX_K> &kmer = it.first;
+    memcpy(output_kmers.data() + i * N_LONGS, kmer.to_array(), N_LONGS * sizeof(uint64_t));
+    memcpy(output_kmer_counts.data() + i * 9, it.second.data(), sizeof(uint16_t) * 9);
+    i++;
+  }
+  output_index = 0;
+  tmp_ht.clear();
+  std::unordered_map<KmerArray<MAX_K>, KmerCountsArray>().swap(tmp_ht);
+}
+
+template <int MAX_K>
+pair<uint64_t *, uint16_t *> HashTableGPUDriver<MAX_K>::get_next_entry() {
+  if (output_index == output_kmers.size()) return {nullptr, nullptr};
+  output_index++;
+  return {output_kmers.data() + (output_index - 1) * N_LONGS, output_kmer_counts.data() + (output_index - 1) * 9};
 }
 
 template class kcount_gpu::HashTableGPUDriver<32>;
