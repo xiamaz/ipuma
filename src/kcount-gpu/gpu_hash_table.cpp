@@ -44,6 +44,7 @@
 #include <sstream>
 #include <chrono>
 #include <tuple>
+#include <cmath>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
 
@@ -60,14 +61,8 @@ struct kcount_gpu::HashTableDriverState {
 
 static size_t get_nearest_pow2(size_t val) {
   if (val < 1) return 0;
-  size_t res = 1;
-  // Try all powers starting from 2^1
-  for (int i = 0; i < 8*sizeof(size_t); i++) {
-    size_t cur = res;
-    res <<= 1;
-    if (res > val) return cur;
-  }
-  return res;
+  int p = (int) std::log2(val);
+  return ((size_t)1) << p; 
 }
 
 kcount_gpu::HashTableGPUDriver::HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs,
