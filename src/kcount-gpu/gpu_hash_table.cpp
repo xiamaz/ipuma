@@ -59,11 +59,15 @@ struct kcount_gpu::HashTableDriverState {
 };
 
 static size_t get_nearest_pow2(size_t val) {
-  for (size_t i = val; i >= 1; i--) {
-    // If i is a power of 2
-    if ((i & (i - 1)) == 0) return i;
+  if (val < 1) return 0;
+  size_t res = 1;
+  // Try all powers starting from 2^1
+  for (int i = 0; i < 8*sizeof(size_t); i++) {
+    size_t cur = res;
+    res <<= 1;
+    if (res > val) return cur;
   }
-  return 0;
+  return res;
 }
 
 kcount_gpu::HashTableGPUDriver::HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs,
