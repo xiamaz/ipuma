@@ -50,9 +50,14 @@
 
 namespace kcount_gpu {
 
-template <int N_LONGS>
+template <int MAX_K>
 struct KmerArray {
+  static const int N_LONGS = (MAX_K + 31) / 32;
   std::array<uint64_t, N_LONGS> data;
+
+  KmerArray(const uint64_t *x);
+
+  bool operator==(const KmerArray &o) const;
 };
 
 template <int MAX_K>
@@ -75,7 +80,7 @@ class HashTableGPUDriver {
   uint64_t *host_kmers = nullptr;
   uint8_t *host_counts = nullptr;
 
-  std::unordered_map<KmerArray<N_LONGS>, std::array<uint16_t, 9>> tmp_ht;
+  std::unordered_map<KmerArray<MAX_K>, std::array<uint16_t, 9>> tmp_ht;
 
  public:
   HashTableGPUDriver();
@@ -86,16 +91,20 @@ class HashTableGPUDriver {
   int get_num_entries();
 
   void insert_kmer(const uint64_t *kmer, uint16_t kmer_count, char left, char right);
+
+  void done_inserts();
 };
 
 }  // namespace kcount_gpu
 
 namespace std {
 
-template <int N_LONGS>
-struct hash<kcount_gpu::KmerArray<N_LONGS>> {
-  size_t operator()(kcount_gpu::KmerArray<N_LONGS> const &kmer_array) const {
-    return MurmurHash3_x64_64(reinterpret_cast<const void *>(kmer_array.data), N_LONGS * sizeof(uint64_t));
+template <int MAX_K>
+struct hash<kcount_gpu::KmerArray<MAX_K>> {
+  static const int N_LONGS = (MAX_K + 31) / 32;
+
+  size_t operator()(kcount_gpu::KmerArray<MAX_K> const &kmer_array) const {
+    return MurmurHash3_x64_64(reinterpret_cast<const void *>(kmer_array.data.data()), N_LONGS * sizeof(uint64_t));
   }
 };
 

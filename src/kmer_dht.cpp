@@ -102,7 +102,7 @@ void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> 
 #ifdef ENABLE_GPUS
   // FIXME: buffer hash table entries, and when full, copy across to
   gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right);
-#else
+  //#else
   // find it - if it isn't found then insert it, otherwise increment the counts
   const auto it = kmers->find(kmer_and_ext.kmer);
   if (it == kmers->end()) {
@@ -483,8 +483,9 @@ void KmerDHT<MAX_K>::flush_updates() {
   // FIXME: call gpus to process any outstanding buffered local updates
   // FIXME: copy from gpu to cpu and insert in cpu unordered_map
   // In this first attempt, we'll update from the GPU once only, which means we'll be limited to the GPU memory
+  gpu_driver->done_inserts();
+  WARN("Found ", kmers->size(), " unique kmers\n");
   /*
-  gpu_driver->finish_hash_table();
   for (int i = 0; i < gpu_driver->ht_size; i++) {
     auto kmer = gpu_driver->get_kmer(i);
     auto kmer_exts = gpu_driver->get_kmer_exts(i);
