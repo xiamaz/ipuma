@@ -16,6 +16,7 @@ module load craype
 module load craype-x86-skylake
 
 module load cuda
+module rm cmake
 module load cmake/3.18.2
 module load git
 module load upcxx-gpu
