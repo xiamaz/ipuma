@@ -124,9 +124,14 @@ Cori:validation:
     - export ARCTIC=/global/cscratch1/sd/regan/GitlabCIData/
     - export OPTS="-r ${ARCTIC}/arctic_sample_0.fq -v --checkpoint=yes"
     - export GASNET_BACKTRACE=1
-
     - echo "Submitting job on 3 nodes - on 2 nodes roughly RWDI=400s, DBG --kmer-lens 63 =456s  ...REL=170s"
     - knl_job=$(sbatch --parsable --job-name="CImhv-${CI_COMMIT_SHORT_SHA}" --account=mp215 -C knl --nodes=3 --qos=debug --time=30:00 --wrap="${RWDI}/mhm2.py $OPTS -o ${RUN_PREFIX}/rwdi && ${DBG}/mhm2.py ${OPTS} --kmer-lens 63 -o ${RUN_PREFIX}/dbg && echo Good")
+    - echo "KNL JOB ${knl_job}"
+    - echo "Submitting build on cori gpu"
+    - mkdir -p ${SCRATCH}/src
+    - rsync -a --exclude '.git*' ${MHM2_SOURCE}/ ${SCRATCH}/src/
+    - gpu_job=$(module load cgpu; sbatch --parsable -C gpu -t 30 -c 5 -G 1 -A m342 --wrap="source ${SCRATCH}/src/contrib/environments/cori-gpu/gnu.sh ; mkdir -p build-cori-gpu && cd build-cori-gpu && cmake \$MHM2_CMAKE_EXTRAS -DCMAKE_INSTALL_PREFIX=install ${SCRATCH}/src && make VERBOSE=1 -j 10 all install && srun install/bin/mhm2_test")
+    - echo "GPU Build job $gpu_job"
     - echo "Waiting for knl job $knl_job"
     - date
     - while /bin/true ; do sleep 120 ; date ; sacct=$(sacct -j $knl_job -o state -X -n 2>/dev/null || true) ; if [ -n "${sacct}" -a -z "$(echo "${sacct}" | grep ING)" ] ; then break ; fi ; done
@@ -140,6 +145,15 @@ Cori:validation:
     - ${RWDI}/check_asm_quality.py --asm-dir ${RUN_PREFIX}/rwdi --expected-quals ${RWDI}/../share/good-arctic-sample0.txt --refs ${ARCTIC}/arcticsynth-refs.fa || FAILED="${FAILED} Did not pass check_asm_quality.py on rwdi"
     - if [ ! -f ${RUN_PREFIX}/dbg/final_assembly.fasta ] ; then FAILED="${FAILED} Did not find final_assembly.fasta on dbg" ; fi
     - ${RWDI}/check_asm_quality.py --asm-dir ${RUN_PREFIX}/dbg --expected-quals ${RWDI}/../share/good-arctic-sample0-k63.txt --refs ${ARCTIC}/arcticsynth-refs.fa || echo "WARN Did not pass check_asm_quality.py on dbg with reduced workflow k63"
+    - echo "Waiting for gpu job ${gpu_job}"
+    - module load cgpu
+    - date
+    - while /bin/true ; do sleep 120 ; date ; sacct=$(sacct -j $gpu_job -o state -X -n 2>/dev/null || true) ; if [ -n "${sacct}" -a -z "$(echo "${sacct}" | grep ING)" ] ; then break ; fi ; done
+    - echo "sacct $sacct"
+    - sacct=$(sacct -j $gpu_job -X -n)
+    - cat slurm-${gpu_job}.out
+    - wasgood=$(echo "${sacct}" | grep -v '0:0' || true)
+    - if [ -z "$wasgood" ] ; then  true ; else FAILED="${FAILED} -- gpu job ${gpu_job} failed somehow - ${wasgood}"; fi
     - if [ -z "$FAILED" ] ; then  true ; else echo "Something failed somehow - ${FAILED}"; false ; fi
     - echo "Completed"
 

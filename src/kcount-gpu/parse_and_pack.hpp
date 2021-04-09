@@ -42,48 +42,39 @@
 
 #pragma once
 
-#include <chrono>
-#include <cmath>
-#include <string>
 #include <vector>
 
-#define NSTREAMS 2
+namespace kcount_gpu {
 
-#ifndef KLIGN_GPU_BLOCK_SIZE
-#define KLIGN_GPU_BLOCK_SIZE 20000
-#endif
+struct ParseAndPackDriverState;
 
-namespace adept_sw {
+class ParseAndPackGPUDriver {
+  // this opaque data type stores CUDA specific variables
+  ParseAndPackDriverState *dstate = nullptr;
 
-// for storing the alignment results
-struct AlignmentResults {
-  short *ref_begin = nullptr;
-  short *query_begin = nullptr;
-  short *ref_end = nullptr;
-  short *query_end = nullptr;
-  short *top_scores = nullptr;
-};
-
-struct DriverState;
-
-class GPUDriver {
-  DriverState *driver_state = nullptr;
-  AlignmentResults alignments;
+  int upcxx_rank_me;
+  int upcxx_rank_n;
+  int max_kmers;
+  int kmer_len;
+  int num_kmer_longs;
+  int minimizer_len;
+  double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
+  char *dev_seqs;
+  uint64_t *dev_kmers;
+  int *dev_kmer_targets;
+  char *dev_is_rcs;
 
  public:
-  ~GPUDriver();
+  std::vector<uint64_t> host_kmers;
+  std::vector<int> host_kmer_targets;
+  std::vector<char> host_is_rcs;
 
-  // returns the time to execute
-  double init(int upcxx_rank_me, int upcxx_rank_n, short match_score, short mismatch_score, short gap_opening_score,
-              short gap_extending_score, int rlen_limit);
-  void run_kernel_forwards(std::vector<std::string> &reads, std::vector<std::string> &contigs, unsigned maxReadSize,
-                           unsigned maxContigSize);
-  void run_kernel_backwards(std::vector<std::string> &reads, std::vector<std::string> &contigs, unsigned maxReadSize,
-                            unsigned maxContigSize);
+  ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int minimizer_len,
+                        double &init_time);
+  ~ParseAndPackGPUDriver();
+  bool process_seq_block(const std::string &seqs, int64_t &num_Ns);
+  std::tuple<double, double, double, double> get_elapsed_times();
   bool kernel_is_done();
-  void kernel_block();
-
-  AlignmentResults &get_aln_results() { return alignments; }
 };
 
-}  // namespace adept_sw
+}  // namespace kcount_gpu

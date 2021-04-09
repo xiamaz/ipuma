@@ -42,48 +42,47 @@
 
 #pragma once
 
+#include <iostream>
 #include <chrono>
-#include <cmath>
-#include <string>
-#include <vector>
+#include <cuda_runtime_api.h>
+#include <cuda.h>
 
-#define NSTREAMS 2
+#include "upcxx_utils/colors.h"
+#include "gpu_common.hpp"
 
-#ifndef KLIGN_GPU_BLOCK_SIZE
-#define KLIGN_GPU_BLOCK_SIZE 20000
-#endif
+// Functions that are common to all cuda code; not to be used by upcxx code
 
-namespace adept_sw {
+#define cudaErrchk(ans) \
+  { gpu_utils::gpu_die((ans), __FILE__, __LINE__); }
 
-// for storing the alignment results
-struct AlignmentResults {
-  short *ref_begin = nullptr;
-  short *query_begin = nullptr;
-  short *ref_end = nullptr;
-  short *query_end = nullptr;
-  short *top_scores = nullptr;
-};
+namespace gpu_utils {
 
-struct DriverState;
+inline void gpu_die(cudaError_t code, const char *file, int line, bool abort = true) {
+  if (code != cudaSuccess) {
+    std::cerr << KLRED << "<" << file << ":" << line << "> ERROR:" << KNORM << cudaGetErrorString(code) << "\n";
+    std::abort();
+    // do not throw exceptions -- does not work properly within progress() throw std::runtime_error(outstr);
+  }
+}
 
-class GPUDriver {
-  DriverState *driver_state = nullptr;
-  AlignmentResults alignments;
+using timepoint_t = std::chrono::time_point<std::chrono::high_resolution_clock>;
+
+class QuickTimer {
+  timepoint_t t;
+  double secs = 0;
 
  public:
-  ~GPUDriver();
+  QuickTimer()
+      : secs(0) {}
 
-  // returns the time to execute
-  double init(int upcxx_rank_me, int upcxx_rank_n, short match_score, short mismatch_score, short gap_opening_score,
-              short gap_extending_score, int rlen_limit);
-  void run_kernel_forwards(std::vector<std::string> &reads, std::vector<std::string> &contigs, unsigned maxReadSize,
-                           unsigned maxContigSize);
-  void run_kernel_backwards(std::vector<std::string> &reads, std::vector<std::string> &contigs, unsigned maxReadSize,
-                            unsigned maxContigSize);
-  bool kernel_is_done();
-  void kernel_block();
+  void start() { t = std::chrono::high_resolution_clock::now(); }
 
-  AlignmentResults &get_aln_results() { return alignments; }
+  void stop() {
+    std::chrono::duration<double> t_elapsed = std::chrono::high_resolution_clock::now() - t;
+    secs += t_elapsed.count();
+  }
+
+  double get_elapsed() { return secs; }
 };
 
-}  // namespace adept_sw
+}  // namespace gpu_utils

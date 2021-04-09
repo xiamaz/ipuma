@@ -42,48 +42,36 @@
 
 #pragma once
 
-#include <chrono>
-#include <cmath>
-#include <string>
 #include <vector>
 
-#define NSTREAMS 2
+namespace kcount_gpu {
 
-#ifndef KLIGN_GPU_BLOCK_SIZE
-#define KLIGN_GPU_BLOCK_SIZE 20000
-#endif
+struct HashTableDriverState;
 
-namespace adept_sw {
+class HashTableGPUDriver {
+  // stores CUDA specific variables, etc
+  HashTableDriverState *dstate = nullptr;
 
-// for storing the alignment results
-struct AlignmentResults {
-  short *ref_begin = nullptr;
-  short *query_begin = nullptr;
-  short *ref_end = nullptr;
-  short *query_end = nullptr;
-  short *top_scores = nullptr;
-};
-
-struct DriverState;
-
-class GPUDriver {
-  DriverState *driver_state = nullptr;
-  AlignmentResults alignments;
+  int upcxx_rank_me;
+  int upcxx_rank_n;
+  int kmer_len;
+  int num_kmer_longs;
+  double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
+  int num_ht_slots;
+  // packed kmers, can be 1 or more uint64_t in length per kmer
+  uint64_t *dev_kmers;
+  // extension and kmer counts. Each kmer has 9 entries, left ACGT, right ACGT and total count
+  uint16_t *dev_counts;
+  // used by locks to protect hash table inserts
+  unsigned char *dev_mutexes;
 
  public:
-  ~GPUDriver();
+  HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int num_ht_slots, double &init_time);
+  ~HashTableGPUDriver();
 
-  // returns the time to execute
-  double init(int upcxx_rank_me, int upcxx_rank_n, short match_score, short mismatch_score, short gap_opening_score,
-              short gap_extending_score, int rlen_limit);
-  void run_kernel_forwards(std::vector<std::string> &reads, std::vector<std::string> &contigs, unsigned maxReadSize,
-                           unsigned maxContigSize);
-  void run_kernel_backwards(std::vector<std::string> &reads, std::vector<std::string> &contigs, unsigned maxReadSize,
-                            unsigned maxContigSize);
-  bool kernel_is_done();
-  void kernel_block();
+  int get_num_ht_slots();
 
-  AlignmentResults &get_aln_results() { return alignments; }
+  void insert_kmer(uint64_t *kmer, uint16_t kmer_count, char left, char right) {}
 };
 
-}  // namespace adept_sw
+}  // namespace kcount_gpu

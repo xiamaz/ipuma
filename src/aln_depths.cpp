@@ -106,46 +106,48 @@ class CtgsDepths {
   int64_t get_num_ctgs() { return upcxx::reduce_one(ctgs_depths->size(), upcxx::op_fast_add, 0).wait(); }
 
   void add_new_ctg(int64_t cid, int num_read_groups, int clen) {
-    upcxx::rpc(get_target_rank(cid),
-               [](ctgs_depths_map_t &ctgs_depths, int64_t cid, int num_read_groups, int clen) {
-                 CtgBaseDepths newctg(cid, num_read_groups, clen);
-                 ctgs_depths->insert({cid, std::move(newctg)});
-               },
-               ctgs_depths, cid, num_read_groups, clen)
+    upcxx::rpc(
+        get_target_rank(cid),
+        [](ctgs_depths_map_t &ctgs_depths, int64_t cid, int num_read_groups, int clen) {
+          CtgBaseDepths newctg(cid, num_read_groups, clen);
+          ctgs_depths->insert({cid, std::move(newctg)});
+        },
+        ctgs_depths, cid, num_read_groups, clen)
         .wait();
   }
 
   void update_ctg_aln_depth(int64_t cid, int read_group_id, int aln_start, int aln_stop, int aln_merge_start, int aln_merge_stop) {
     if (aln_start >= aln_stop) return;
-    upcxx::rpc(get_target_rank(cid),
-               [](ctgs_depths_map_t &ctgs_depths, int64_t cid, int read_group_id, int aln_start, int aln_stop, int aln_merge_start,
-                  int aln_merge_stop) {
-                 const auto it = ctgs_depths->find(cid);
-                 if (it == ctgs_depths->end()) DIE("could not fetch vertex ", cid, "\n");
-                 CtgBaseDepths::read_group_base_count_t &rg_ctg = it->second.read_group_base_counts;
-                 assert(read_group_id < rg_ctg.size());
-                 auto &ctg_base_counts = rg_ctg[read_group_id];
-                 //DBG_VERBOSE("cid=", cid, " counting aln_start=", aln_start, " aln_stop=", aln_stop, " read_group_id=", read_group_id,
-                 //    " contig.size()=", ctg_base_counts.size(), "\n");
-                 assert(aln_start >= 0 && "Align start >= 0");
-                 assert(aln_stop <= ctg_base_counts.size() && "Align stop <= contig.size()");
-                 for (int i = aln_start; i < aln_stop; i++) {
-                   ctg_base_counts[i]++;
-                 }
-                 // disabled by default -- counts are "better" if this does not happen
-                 // instead, count *insert coverage* not *read coverage*
-                 // insert coverage should be closer to a Poisson distribution
+    upcxx::rpc(
+        get_target_rank(cid),
+        [](ctgs_depths_map_t &ctgs_depths, int64_t cid, int read_group_id, int aln_start, int aln_stop, int aln_merge_start,
+           int aln_merge_stop) {
+          const auto it = ctgs_depths->find(cid);
+          if (it == ctgs_depths->end()) DIE("could not fetch vertex ", cid, "\n");
+          CtgBaseDepths::read_group_base_count_t &rg_ctg = it->second.read_group_base_counts;
+          assert(read_group_id < rg_ctg.size());
+          auto &ctg_base_counts = rg_ctg[read_group_id];
+          // DBG_VERBOSE("cid=", cid, " counting aln_start=", aln_start, " aln_stop=", aln_stop, " read_group_id=", read_group_id,
+          //    " contig.size()=", ctg_base_counts.size(), "\n");
+          assert(aln_start >= 0 && "Align start >= 0");
+          assert(aln_stop <= ctg_base_counts.size() && "Align stop <= contig.size()");
+          for (int i = aln_start; i < aln_stop; i++) {
+            ctg_base_counts[i]++;
+          }
+          // disabled by default -- counts are "better" if this does not happen
+          // instead, count *insert coverage* not *read coverage*
+          // insert coverage should be closer to a Poisson distribution
 
-                 // this is the merged region in a merged read - will be counted double
-                 if (aln_merge_start != -1 && aln_merge_stop != -1) {
-                   assert(aln_merge_start >= 0 && "merge start >= 0");
-                   assert(aln_merge_stop <= ctg_base_counts.size() && "merge_stop <= size");
-                   for (int i = aln_merge_start; i < aln_merge_stop; i++) {
-                     ctg_base_counts[i]++;
-                   }
-                 }
-               },
-               ctgs_depths, cid, read_group_id, aln_start, aln_stop, aln_merge_start, aln_merge_stop)
+          // this is the merged region in a merged read - will be counted double
+          if (aln_merge_start != -1 && aln_merge_stop != -1) {
+            assert(aln_merge_start >= 0 && "merge start >= 0");
+            assert(aln_merge_stop <= ctg_base_counts.size() && "merge_stop <= size");
+            for (int i = aln_merge_start; i < aln_merge_stop; i++) {
+              ctg_base_counts[i]++;
+            }
+          }
+        },
+        ctgs_depths, cid, read_group_id, aln_start, aln_stop, aln_merge_start, aln_merge_stop)
         .wait();
   }
 
@@ -168,52 +170,53 @@ class CtgsDepths {
   vector<AvgVar<float>> get_depth(int64_t cid) {
     auto target_rank = get_target_rank(cid);
     // DBG_VERBOSE("Sending rpc to ", target_rank, " for cid=", cid, "\n");
-    return upcxx::rpc(target_rank,
-                      [](ctgs_depths_map_t &ctgs_depths, int64_t cid, int edge_base_len) -> vector<AvgVar<float>> {
-                        const auto it = ctgs_depths->find(cid);
-                        if (it == ctgs_depths->end()) DIE("could not fetch vertex ", cid, "\n");
-                        CtgBaseDepths::read_group_base_count_t &rg_ctg = it->second.read_group_base_counts;
-                        int num_read_groups = rg_ctg.size();
-                        vector<AvgVar<double>> stats;  // calculate in double, send in float
-                        stats.resize(num_read_groups + 1);
-                        auto &avg_depth = stats[num_read_groups].avg;
-                        auto &variance = stats[num_read_groups].var;
-                        size_t clen = rg_ctg[0].size() - 2 * edge_base_len;
-                        if (clen <= 0) clen = 1;
-                        for (int rg = 0; rg < num_read_groups; rg++) {
-                          auto &ctg_base_depths = rg_ctg[rg];
-                          for (int i = edge_base_len; i < (int)ctg_base_depths.size() - edge_base_len; i++) {
-                            avg_depth += ctg_base_depths[i];
-                            stats[rg].avg += ctg_base_depths[i];
-                          }
-                          stats[rg].avg /= clen;
-                        }
-                        avg_depth /= clen;
-                        for (int rg = 0; rg < num_read_groups; rg++) {
-                          auto &ctg_base_depths = rg_ctg[rg];
-                          for (int i = edge_base_len; i < (int)ctg_base_depths.size() - edge_base_len; i++) {
-                            variance += pow((double)ctg_base_depths[i] - avg_depth, 2.0);
-                            stats[rg].var += pow((double)ctg_base_depths[i] - stats[rg].avg, 2.0);
-                          }
-                          stats[rg].var /= clen;
-                        }
-                        variance /= clen;
-                        // if (avg_depth < 2) avg_depth = 2;
-                        vector<AvgVar<float>> ret_vector;
-                        ret_vector.resize(num_read_groups + 1);
-                        for (int i = 0; i < num_read_groups + 1; i++) {
-                          ret_vector[i].avg = stats[i].avg;
-                          ret_vector[i].var = stats[i].var;
-                        }
-                        return ret_vector;
-                      },
-                      ctgs_depths, cid, edge_base_len)
+    return upcxx::rpc(
+               target_rank,
+               [](ctgs_depths_map_t &ctgs_depths, int64_t cid, int edge_base_len) -> vector<AvgVar<float>> {
+                 const auto it = ctgs_depths->find(cid);
+                 if (it == ctgs_depths->end()) DIE("could not fetch vertex ", cid, "\n");
+                 CtgBaseDepths::read_group_base_count_t &rg_ctg = it->second.read_group_base_counts;
+                 int num_read_groups = rg_ctg.size();
+                 vector<AvgVar<double>> stats;  // calculate in double, send in float
+                 stats.resize(num_read_groups + 1);
+                 auto &avg_depth = stats[num_read_groups].avg;
+                 auto &variance = stats[num_read_groups].var;
+                 size_t clen = rg_ctg[0].size() - 2 * edge_base_len;
+                 if (clen <= 0) clen = 1;
+                 for (int rg = 0; rg < num_read_groups; rg++) {
+                   auto &ctg_base_depths = rg_ctg[rg];
+                   for (int i = edge_base_len; i < (int)ctg_base_depths.size() - edge_base_len; i++) {
+                     avg_depth += ctg_base_depths[i];
+                     stats[rg].avg += ctg_base_depths[i];
+                   }
+                   stats[rg].avg /= clen;
+                 }
+                 avg_depth /= clen;
+                 for (int rg = 0; rg < num_read_groups; rg++) {
+                   auto &ctg_base_depths = rg_ctg[rg];
+                   for (int i = edge_base_len; i < (int)ctg_base_depths.size() - edge_base_len; i++) {
+                     variance += pow((double)ctg_base_depths[i] - avg_depth, 2.0);
+                     stats[rg].var += pow((double)ctg_base_depths[i] - stats[rg].avg, 2.0);
+                   }
+                   stats[rg].var /= clen;
+                 }
+                 variance /= clen;
+                 // if (avg_depth < 2) avg_depth = 2;
+                 vector<AvgVar<float>> ret_vector;
+                 ret_vector.resize(num_read_groups + 1);
+                 for (int i = 0; i < num_read_groups + 1; i++) {
+                   ret_vector[i].avg = stats[i].avg;
+                   ret_vector[i].var = stats[i].var;
+                 }
+                 return ret_vector;
+               },
+               ctgs_depths, cid, edge_base_len)
         .wait();
   }
 };
 
-void compute_aln_depths(const string &fname, Contigs &ctgs, Alns &alns, int kmer_len, int min_ctg_len,
-                        vector<string> &read_groups, bool double_count_merged_region) {
+void compute_aln_depths(const string &fname, Contigs &ctgs, Alns &alns, int kmer_len, int min_ctg_len, vector<string> &read_groups,
+                        bool double_count_merged_region) {
   BarrierTimer timer(__FILEFUNC__);
   int edge_base_len = (min_ctg_len >= 75 ? 75 : 0);
   CtgsDepths ctgs_depths(edge_base_len, read_groups.size());
@@ -274,7 +277,8 @@ void compute_aln_depths(const string &fname, Contigs &ctgs, Alns &alns, int kmer
       // as per MetaBAT analysis, ignore the 75 bases at either end because they are likely to be in error
       auto adjusted_start = ::max(aln.cstart, edge_base_len);
       auto adjusted_stop = ::min(aln.cstop, aln.clen - 1 - edge_base_len);
-      //DBG_VERBOSE("Sending update for ", aln.to_string(), " st=", adjusted_start, " end=", adjusted_stop, " edge_base_len=", edge_base_len,
+      // DBG_VERBOSE("Sending update for ", aln.to_string(), " st=", adjusted_start, " end=", adjusted_stop, " edge_base_len=",
+      // edge_base_len,
       //    "\n");
       ctgs_depths.update_ctg_aln_depth(aln.cid, aln.read_group_id, adjusted_start, adjusted_stop, aln_cstart_merge,
                                        aln_cstop_merge);
@@ -288,9 +292,6 @@ void compute_aln_depths(const string &fname, Contigs &ctgs, Alns &alns, int kmer
   auto all_num_alns = reduce_one(alns.size(), op_fast_add, 0).wait();
   SLOG_VERBOSE("Dropped ", perc_str(reduce_one(num_bad_overlaps, op_fast_add, 0).wait(), all_num_alns), " bad overlaps and ",
                perc_str(reduce_one(num_bad_alns, op_fast_add, 0).wait(), all_num_alns), " low quality alns\n");
-#ifdef USE_KMER_DEPTHS
-  if (fname == "") SLOG_VERBOSE("Skipping contig depths calculations and output\n");
-#endif
   // get string to dump
   shared_ptr<upcxx_utils::dist_ofstream> sh_of;
   if (fname != "") sh_of = make_shared<upcxx_utils::dist_ofstream>(fname);
@@ -316,10 +317,7 @@ void compute_aln_depths(const string &fname, Contigs &ctgs, Alns &alns, int kmer
       }
       *sh_of << "\n";
     }
-// it seems that using aln depths improves the ctgy at the cost of an increase in msa
-#ifndef USE_KMER_DEPTHS
     ctg.depth = rg_avg_vars[num_read_groups].avg;
-#endif
     upcxx::progress();
   }
   barrier();

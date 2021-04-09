@@ -63,8 +63,8 @@ struct AlnScoring {
 
 template <int MAX_K>
 double find_alignments(unsigned kmer_len, std::vector<PackedReads *> &packed_reads_list, int max_store_size, int max_rpcs_in_flight,
-                       Contigs &ctgs, Alns &alns, int seed_space, int rlen_limit, bool use_minimizers, bool compute_cigar = false,
-                       int min_ctg_len = 0, int ranks_per_gpu = 0);
+                       Contigs &ctgs, Alns &alns, int seed_space, int rlen_limit, bool first_ctg_round, bool compute_cigar,
+                       int min_ctg_len, int ranks_per_gpu);
 
 // Reduce compile time by instantiating templates of common types
 // extern template declarations are in kmer.hpp

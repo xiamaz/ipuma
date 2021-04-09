@@ -352,7 +352,8 @@ TEST(MHMTest, kmer) {
   // arrange
   // act
   // assert
-  for (int i = 1; i < 96; i++) {
+  // for (int i = 1; i < 96; i++) {
+  for (int i = 1; i < 64; i++) {
     if (i <= 32) {
       test_kmer<32>(i);
       test_get_kmers<32>(i);
@@ -363,10 +364,11 @@ TEST(MHMTest, kmer) {
       test_get_kmers<64>(i);
       test_kmer_minimizers<64>(i);
     }
+    /*
     if (i <= 96) {
       test_kmer<96>(i);
       test_get_kmers<96>(i);
       test_kmer_minimizers<96>(i);
-    }
+    }*/
   }
 }

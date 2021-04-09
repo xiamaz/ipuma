@@ -50,10 +50,7 @@
 #include "contigs.hpp"
 #include "kmer_dht.hpp"
 #include "packed_reads.hpp"
-#include "upcxx_utils/log.hpp"
-#include "upcxx_utils/progress_bar.hpp"
-#include "upcxx_utils/three_tier_aggr_store.hpp"
-#include "upcxx_utils/limit_outstanding.hpp"
+#include "upcxx_utils.hpp"
 #include "utils.hpp"
 
 using namespace std;

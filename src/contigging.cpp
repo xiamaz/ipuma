@@ -60,7 +60,7 @@ using std::tie;
 using std::vector;
 
 template <int MAX_K>
-void traverse_debruijn_graph(unsigned kmer_len, dist_object<KmerDHT<MAX_K>> &kmer_dht, Contigs &my_uutigs, bool use_minimizers);
+void traverse_debruijn_graph(unsigned kmer_len, dist_object<KmerDHT<MAX_K>> &kmer_dht, Contigs &my_uutigs);
 void localassm(int max_kmer_len, int kmer_len, vector<PackedReads *> &packed_reads_list, int insert_avg, int insert_stddev,
                int qual_offset, Contigs &ctgs, const Alns &alns);
 void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Alns &alns, size_t num_ctgs);
@@ -120,17 +120,16 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     // use the max among all ranks
     my_num_kmers = upcxx::reduce_all(my_num_kmers, upcxx::op_fast_max).wait();
     dist_object<KmerDHT<MAX_K>> kmer_dht(world(), my_num_kmers, max_kmer_store, options->max_rpcs_in_flight, options->force_bloom,
-                                         options->use_heavy_hitters, options->use_minimizers);
+                                         options->use_heavy_hitters);
     barrier();
-    BEGIN_GASNET_STATS("kmer_analysis");
-    analyze_kmers(kmer_len, prev_kmer_len, options->qual_offset, packed_reads_list, options->dmin_thres, ctgs, kmer_dht);
-    END_GASNET_STATS();
+    analyze_kmers(kmer_len, prev_kmer_len, options->qual_offset, packed_reads_list, options->dmin_thres, ctgs, kmer_dht,
+                  options->ranks_per_gpu, options->dump_kmers);
+    mhm2_gasnet_stats_dump("kmer analylis\n");
     stage_timers.analyze_kmers->stop();
     barrier();
     stage_timers.dbjg_traversal->start();
-    BEGIN_GASNET_STATS("dbjg_traversal");
-    traverse_debruijn_graph(kmer_len, kmer_dht, ctgs, options->use_minimizers);
-    END_GASNET_STATS();
+    traverse_debruijn_graph(kmer_len, kmer_dht, ctgs);
+    mhm2_gasnet_stats_dump("dbjg traversal\n");
     stage_timers.dbjg_traversal->stop();
     if (is_debug || options->checkpoint) {
       stage_timers.dump_ctgs->start();
@@ -142,11 +141,11 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
   if (kmer_len < options->kmer_lens.back()) {
     Alns alns;
     stage_timers.alignments->start();
-    BEGIN_GASNET_STATS("alignment");
+    bool first_ctg_round = (kmer_len == options->kmer_lens[0]);
     double kernel_elapsed =
         find_alignments<MAX_K>(kmer_len, packed_reads_list, max_kmer_store, options->max_rpcs_in_flight, ctgs, alns,
-                               KLIGN_SEED_SPACE, rlen_limit, options->use_minimizers, false, 0, options->ranks_per_gpu);
-    END_GASNET_STATS();
+                               KLIGN_SEED_SPACE, rlen_limit, first_ctg_round, false, 0, options->ranks_per_gpu);
+    mhm2_gasnet_stats_dump("alignment\n");
     stage_timers.kernel_alns->inc_elapsed(kernel_elapsed);
     stage_timers.alignments->stop();
     barrier();
@@ -169,8 +168,8 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
         }
         avg_num_reads = reduce_one(num_reads, op_fast_add, 0).wait() / rank_n();
         max_num_reads = reduce_one(num_reads, op_fast_max, 0).wait();
-        SLOG("After shuffle: avg reads per rank ", avg_num_reads, " max ", max_num_reads, " (load balance ",
-             (double)avg_num_reads / max_num_reads, ")\n");
+        SLOG_VERBOSE("After shuffle: avg reads per rank ", avg_num_reads, " max ", max_num_reads, " (load balance ",
+                     (double)avg_num_reads / max_num_reads, ")\n");
       }
     }
 #ifdef DEBUG
@@ -181,9 +180,8 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     max_expected_ins_size = ins_avg + 8 * ins_stddev;
     barrier();
     stage_timers.localassm->start();
-    BEGIN_GASNET_STATS("local_assembly");
     localassm(LASSM_MAX_KMER_LEN, kmer_len, packed_reads_list, ins_avg, ins_stddev, options->qual_offset, ctgs, alns);
-    END_GASNET_STATS();
+    mhm2_gasnet_stats_dump("local assembly\n");
     stage_timers.localassm->stop();
   }
   barrier();

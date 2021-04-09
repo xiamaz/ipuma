@@ -90,6 +90,7 @@ class PackedRead {
   static int64_t to_packed_id(const string &id_str);
 
   uint16_t get_read_len();
+  unsigned char *get_raw_bytes();
 
   struct upcxx_serialization {
     template <typename Writer>

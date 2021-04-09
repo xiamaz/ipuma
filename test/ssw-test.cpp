@@ -6,15 +6,15 @@
 #include <string>
 #include <vector>
 
-
 #ifdef ENABLE_GPUS
 #include "adept-sw/driver.hpp"
+#include "gpu-utils/gpu_utils.hpp"
 #endif
 
-using std::vector;
-using std::string;
-using std::min;
 using std::max;
+using std::min;
+using std::string;
+using std::vector;
 
 using namespace StripedSmithWaterman;
 
@@ -42,13 +42,11 @@ void translate_adept_to_ssw(Alignment &aln, const adept_sw::AlignmentResults &al
 
 #ifdef ENABLE_GPUS
 void test_aligns_gpu(vector<Alignment> &alns, vector<string> query, vector<string> ref, adept_sw::GPUDriver &gpu_driver) {
-   alns.reserve(query.size());
+  alns.reserve(query.size());
   unsigned max_q_len = 0, max_ref_len = 0;
-  for(int i = 0; i < query.size(); i++){
-    if(max_q_len < query[i].size())
-      max_q_len = query[i].size();
-    if(max_ref_len < ref[i].size())
-      max_ref_len = ref[i].size();
+  for (int i = 0; i < query.size(); i++) {
+    if (max_q_len < query[i].size()) max_q_len = query[i].size();
+    if (max_ref_len < ref[i].size()) max_ref_len = ref[i].size();
   }
   gpu_driver.run_kernel_forwards(query, ref, max_q_len, max_ref_len);
   gpu_driver.kernel_block();
@@ -57,12 +55,11 @@ void test_aligns_gpu(vector<Alignment> &alns, vector<string> query, vector<strin
 
   auto aln_results = gpu_driver.get_aln_results();
 
-  for(int i = 0; i < query.size(); i++){
+  for (int i = 0; i < query.size(); i++) {
     alns.push_back({});
     Alignment &alignment = alns[i];
     translate_adept_to_ssw(alignment, aln_results, i);
   }
-
 }
 #endif
 
@@ -70,16 +67,18 @@ void test_aligns_gpu(vector<Alignment> &alns, vector<string> query, vector<strin
 void check_alns_gpu(vector<Alignment> &alns, vector<int> qstart, vector<int> qend, vector<int> rstart, vector<int> rend) {
   int i = 0;
   for (Alignment &aln : alns) {
-    if(i == 15) {// mismatch test
-      EXPECT_TRUE(aln.ref_end - aln.ref_begin <= 3)<<"adept.ref_begin:"<<aln.ref_begin<<"\tadept.ref_end:"<<aln.ref_end;
-      EXPECT_TRUE(aln.query_end - aln.query_begin <= 3)<<"\tadept.query_begin:"<<aln.query_begin<<"\tadept.query_end:"<<aln.query_end;
+    if (i == 15) {  // mismatch test
+      EXPECT_TRUE(aln.ref_end - aln.ref_begin <= 3) << "adept.ref_begin:" << aln.ref_begin << "\tadept.ref_end:" << aln.ref_end;
+      EXPECT_TRUE(aln.query_end - aln.query_begin <= 3)
+          << "\tadept.query_begin:" << aln.query_begin << "\tadept.query_end:" << aln.query_end;
       EXPECT_TRUE(aln.sw_score <= 4);
       EXPECT_TRUE(aln.sw_score_next_best == 0);
-    }else{
-      EXPECT_EQ(aln.ref_begin, rstart[i])<<"adept.ref_begin:"<<aln.ref_begin<<"\t"<<"correct ref_begin:"<<rstart[i];
-      EXPECT_EQ(aln.ref_end, rend[i])<<"\tadept.ref_end:"<<aln.ref_end<<"\tcorrect ref_end:"<<rend[i];
-      EXPECT_EQ(aln.query_begin, qstart[i])<<"\tadept.query_begin:"<<aln.query_begin<<"\tcorrect query_begin:"<<qstart[i];
-      EXPECT_EQ(aln.query_end, qend[i])<<"\tadept.query_end:"<<aln.query_end<<"\tcorrect query end:"<<qend[i];
+    } else {
+      EXPECT_EQ(aln.ref_begin, rstart[i]) << "adept.ref_begin:" << aln.ref_begin << "\t"
+                                          << "correct ref_begin:" << rstart[i];
+      EXPECT_EQ(aln.ref_end, rend[i]) << "\tadept.ref_end:" << aln.ref_end << "\tcorrect ref_end:" << rend[i];
+      EXPECT_EQ(aln.query_begin, qstart[i]) << "\tadept.query_begin:" << aln.query_begin << "\tcorrect query_begin:" << qstart[i];
+      EXPECT_EQ(aln.query_end, qend[i]) << "\tadept.query_end:" << aln.query_end << "\tcorrect query end:" << qend[i];
     }
     i++;
   }
@@ -135,7 +134,8 @@ void check_alns(vector<Alignment> &alns, int qstart, int qend, int rstart, int r
     EXPECT_EQ(aln.query_end, qend) << "query=" << query << " ref=" << ref << " aln=" << aln2string(aln);
     if (!aln.cigar_string.empty()) {  // mismatches should be recorded...
       EXPECT_EQ(aln.mismatches, mismatches) << "query=" << query << " ref=" << ref << " aln=" << aln2string(aln);
-      if (!cigar.empty()) EXPECT_STREQ(aln.cigar_string.c_str(), cigar.c_str()) << "query=" << query << " ref=" << ref << " aln=" << aln2string(aln);
+      if (!cigar.empty())
+        EXPECT_STREQ(aln.cigar_string.c_str(), cigar.c_str()) << "query=" << query << " ref=" << ref << " aln=" << aln2string(aln);
     }
   }
 }
@@ -143,8 +143,8 @@ void check_not_alns(vector<Alignment> &alns, string query = "", string ref = "")
   for (Alignment &aln : alns) {
     EXPECT_TRUE(aln.ref_end - aln.ref_begin <= 2) << "query=" << query << " ref=" << ref << " aln=" << aln2string(aln);
     EXPECT_TRUE(aln.query_end - aln.query_begin <= 2) << "query=" << query << " ref=" << ref << " aln=" << aln2string(aln);
-    EXPECT_TRUE(aln.sw_score <= 4)  << "query=" << query << " ref=" << ref << " aln=" << aln2string(aln);
-    EXPECT_TRUE(aln.sw_score_next_best == 0)  << "query=" << query << " ref=" << ref << " aln=" << aln2string(aln);
+    EXPECT_TRUE(aln.sw_score <= 4) << "query=" << query << " ref=" << ref << " aln=" << aln2string(aln);
+    EXPECT_TRUE(aln.sw_score_next_best == 0) << "query=" << query << " ref=" << ref << " aln=" << aln2string(aln);
   }
 }
 
@@ -196,9 +196,6 @@ TEST(MHMTest, ssw) {
   test_aligns(alns, query, ref);
   check_alns(alns, 2, 5, 0, 3, 0, query, ref, "2S4=2S");
 
-
-
-
   string r = "AAAATTTTCCCCGGGG";
   string q = "AAAATTTTCCCCGGGG";
   test_aligns(alns, q, r);
@@ -233,8 +230,6 @@ TEST(MHMTest, ssw) {
   q = "AAAATTTTCCCCGGGGACT";
   test_aligns(alns, q, r);
   check_alns(alns, 0, 15, 0, 15, 0, q, r, "16=3S");
-
-
 }
 
 #ifdef ENABLE_GPUS
@@ -246,11 +241,11 @@ TEST(MHMTest, AdeptSW) {
   double time_to_initialize;
   int device_count;
   size_t total_mem;
-  adept_sw::initialize_gpu(time_to_initialize, device_count, total_mem);
+  gpu_utils::initialize_gpu(time_to_initialize, device_count, total_mem);
   if (device_count > 0) {
     EXPECT_TRUE(total_mem > 32 * 1024 * 1024);  // >32 MB
   }
-  
+
   adept_sw::GPUDriver gpu_driver;
   auto init_time = gpu_driver.init(0, 1, (short)aln_scoring.match, (short)-aln_scoring.mismatch, (short)-aln_scoring.gap_opening,
                                    (short)-aln_scoring.gap_extending, 300);
@@ -259,7 +254,7 @@ TEST(MHMTest, AdeptSW) {
   vector<Alignment> alns;
   vector<string> refs, queries;
   vector<int> qstarts, qends, rstarts, rends;
-  //first test
+  // first test
   string ref = "ACGT";
   string query = ref;
   queries.push_back(query);
@@ -268,7 +263,7 @@ TEST(MHMTest, AdeptSW) {
   qends.push_back(3);
   rstarts.push_back(0);
   rends.push_back(3);
-  //second test
+  // second test
   ref = "AACGT";
   query = "ACGT";
   queries.push_back(query);
@@ -277,7 +272,7 @@ TEST(MHMTest, AdeptSW) {
   qends.push_back(3);
   rstarts.push_back(1);
   rends.push_back(4);
-  //third test
+  // third test
   ref = "ACGTT";
   query = "ACGT";
   queries.push_back(query);
@@ -286,7 +281,7 @@ TEST(MHMTest, AdeptSW) {
   qends.push_back(3);
   rstarts.push_back(0);
   rends.push_back(3);
-  //fourth test
+  // fourth test
   ref = "ACGT";
   query = "TACGT";
   queries.push_back(query);
@@ -313,7 +308,7 @@ TEST(MHMTest, AdeptSW) {
   qends.push_back(3);
   rstarts.push_back(0);
   rends.push_back(3);
- //seventh test 
+  // seventh test
   ref = "ACGT";
   query = "ACGTTT";
   queries.push_back(query);
@@ -322,7 +317,7 @@ TEST(MHMTest, AdeptSW) {
   qends.push_back(3);
   rstarts.push_back(0);
   rends.push_back(3);
-  //eighth test
+  // eighth test
   ref = "ACGT";
   query = "TACGTT";
   queries.push_back(query);
@@ -331,7 +326,7 @@ TEST(MHMTest, AdeptSW) {
   qends.push_back(4);
   rstarts.push_back(0);
   rends.push_back(3);
-  //ninth test
+  // ninth test
   ref = "ACGT";
   query = "TTACGTT";
   queries.push_back(query);
@@ -340,7 +335,7 @@ TEST(MHMTest, AdeptSW) {
   qends.push_back(5);
   rstarts.push_back(0);
   rends.push_back(3);
-  //tenth test
+  // tenth test
   ref = "ACGT";
   query = "TACGTTT";
   queries.push_back(query);
@@ -349,7 +344,7 @@ TEST(MHMTest, AdeptSW) {
   qends.push_back(4);
   rstarts.push_back(0);
   rends.push_back(3);
-  //eleventh test
+  // eleventh test
   ref = "ACGT";
   query = "TTACGTTT";
   queries.push_back(query);
@@ -358,7 +353,7 @@ TEST(MHMTest, AdeptSW) {
   qends.push_back(5);
   rstarts.push_back(0);
   rends.push_back(3);
- //twelvth test
+  // twelvth test
   ref = "AAAATTTTCCCCGGGG";
   query = "AAAATTTTCCCCGGGG";
   queries.push_back(query);
@@ -413,7 +408,7 @@ TEST(MHMTest, AdeptSW) {
   qends.push_back(18);
   rstarts.push_back(0);
   rends.push_back(15);
-  //soft clip end // eighteenth test
+  // soft clip end // eighteenth test
   ref = "AAAATTTTCCCCGGGG";
   query = "AAAATTTTCCCCGGGGACT";
   queries.push_back(query);
@@ -423,7 +418,7 @@ TEST(MHMTest, AdeptSW) {
   rstarts.push_back(0);
   rends.push_back(15);
 
-  //run kernel
+  // run kernel
   test_aligns_gpu(alns, queries, refs, gpu_driver);
   // verify results
   check_alns_gpu(alns, qstarts, qends, rstarts, rends);
