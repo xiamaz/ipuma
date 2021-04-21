@@ -65,6 +65,8 @@ class KmerArray {
   bool operator==(const KmerArray &o) const;
 
   size_t hash() const;
+
+  static int get_N_LONGS() { return N_LONGS; }
 };
 
 template <int MAX_K>
@@ -106,6 +108,8 @@ class HashTableGPUDriver {
   void done_inserts();
 
   std::pair<uint64_t *, uint16_t *> get_next_entry();
+
+  static int get_N_LONGS();
 };
 
 }  // namespace kcount_gpu

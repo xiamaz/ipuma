@@ -477,27 +477,31 @@ void KmerDHT<MAX_K>::flush_updates() {
     kmer_store_bloom.flush_updates();
   else
     kmer_store.flush_updates();
+
 #ifdef ENABLE_GPUS
-  // make sure every rank has finished
-  barrier();
-  // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
-  gpu_driver->done_inserts();
-  while (true) {
-    auto next_entry = gpu_driver->get_next_entry();
-    if (!next_entry.first) break;
-    Kmer<MAX_K> kmer(next_entry.first);
-    auto counts_array = next_entry.second;
-    ExtCounts left_exts = {0}, right_exts = {0};
-    left_exts.set(counts_array + 1);
-    right_exts.set(counts_array + 5);
-    KmerCounts kmer_counts = {.left_exts = left_exts,
-                              .right_exts = right_exts,
-                              .uutig_frag = nullptr,
-                              .count = counts_array[0],
-                              .left = 'X',
-                              .right = 'X',
-                              .from_ctg = false};
-    kmers->insert({kmer, kmer_counts});
+  if (pass_type == NO_BLOOM_PASS) {
+    // make sure every rank has finished
+    barrier();
+    // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
+    gpu_driver->done_inserts();
+    while (true) {
+      assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
+      auto next_entry = gpu_driver->get_next_entry();
+      if (!next_entry.first) break;
+      Kmer<MAX_K> kmer(next_entry.first);
+      auto counts_array = next_entry.second;
+      ExtCounts left_exts = {0}, right_exts = {0};
+      left_exts.set(counts_array + 1);
+      right_exts.set(counts_array + 5);
+      KmerCounts kmer_counts = {.left_exts = left_exts,
+                                .right_exts = right_exts,
+                                .uutig_frag = nullptr,
+                                .count = counts_array[0],
+                                .left = 'X',
+                                .right = 'X',
+                                .from_ctg = false};
+      kmers->insert({kmer, kmer_counts});
+    }
   }
 #endif
   SWARN("Found ", kmers->size(), " unique kmers\n");

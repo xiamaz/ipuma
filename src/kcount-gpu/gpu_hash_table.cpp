@@ -44,6 +44,7 @@
 #include <sstream>
 #include <chrono>
 #include <tuple>
+#include <assert.h>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
 
@@ -197,8 +198,9 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   if (host_kmers) delete[] host_kmers;
   if (host_counts) delete[] host_counts;
   // now copy the gpu hash table values across to the host
-  output_kmers.resize(tmp_ht.size() * N_LONGS);
-  output_kmer_counts.resize(tmp_ht.size() * 9);
+  int num_unique_kmers = tmp_ht.size();
+  output_kmers.resize(num_unique_kmers * N_LONGS);
+  output_kmer_counts.resize(num_unique_kmers * 9);
   int i = 0;
   for (auto it : tmp_ht) {
     const KmerArray<MAX_K> &kmer = it.first;
@@ -213,9 +215,16 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
 
 template <int MAX_K>
 pair<uint64_t *, uint16_t *> HashTableGPUDriver<MAX_K>::get_next_entry() {
-  if (output_index == output_kmers.size()) return {nullptr, nullptr};
+  if (output_index * N_LONGS == output_kmers.size()) return {nullptr, nullptr};
   output_index++;
+  assert((output_index - 1) * N_LONGS < output_kmers.size());
+  assert((output_index - 1) * 9 < output_kmer_counts.size());
   return {output_kmers.data() + (output_index - 1) * N_LONGS, output_kmer_counts.data() + (output_index - 1) * 9};
+}
+
+template <int MAX_K>
+int HashTableGPUDriver<MAX_K>::get_N_LONGS() {
+  return N_LONGS;
 }
 
 template class kcount_gpu::HashTableGPUDriver<32>;
