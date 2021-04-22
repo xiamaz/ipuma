@@ -70,34 +70,7 @@ static int64_t _num_kmers_counted = 0;
 static int64_t _num_kmers_counted_locally = 0;
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::update_bloom_set(Kmer<MAX_K> kmer, dist_object<BloomFilter> &bloom_filter1,
-                                      dist_object<BloomFilter> &bloom_filter2) {
-  // look for it in the first bloom filter - if not found, add it just to the first bloom filter
-  // if found, add it to the second bloom filter
-  if (!bloom_filter1->possibly_contains(kmer.get_bytes()))
-    bloom_filter1->add(kmer.get_bytes());
-  else
-    bloom_filter2->add(kmer.get_bytes());
-}
-
-template <int MAX_K>
-void KmerDHT<MAX_K>::update_ctg_bloom_set(Kmer<MAX_K> kmer, dist_object<BloomFilter> &bloom_filter1,
-                                          dist_object<BloomFilter> &bloom_filter2) {
-  // only add to bloom_filter2
-  bloom_filter2->add(kmer.get_bytes());
-}
-
-template <int MAX_K>
-void KmerDHT<MAX_K>::update_bloom_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
-                                        dist_object<BloomFilter> &bloom_filter,
-                                        dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver) {
-  // if the kmer is not found in the bloom filter, skip it
-  if (!bloom_filter->possibly_contains(kmer_and_ext.kmer.get_bytes())) return;
-  update_count(kmer_and_ext, kmers, bloom_filter, gpu_driver);
-}
-
-template <int MAX_K>
-void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers, dist_object<BloomFilter> &bloom_filter,
+void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
                                   dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver) {
 #ifdef ENABLE_GPUS
   // FIXME: buffer hash table entries, and when full, copy across to
@@ -134,7 +107,6 @@ void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> 
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
-                                            dist_object<BloomFilter> &bloom_filter,
                                             dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver) {
   // insert a new kmer derived from the previous round's contigs
   const auto it = kmers->find(kmer_and_ext.kmer);
@@ -193,18 +165,14 @@ void KmerDHT<MAX_K>::update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object
 }
 
 template <int MAX_K>
-KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool force_bloom, bool useHHSS)
+KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS)
     : kmers({})
-    , bloom_filter1({})
-    , bloom_filter2({})
     , gpu_driver({})
-    , kmer_store_bloom(bloom_filter1, bloom_filter2)
-    , kmer_store(kmers, bloom_filter2, gpu_driver)
+    , kmer_store(kmers, gpu_driver)
     , max_kmer_store_bytes(max_kmer_store_bytes)
     , initial_kmer_dht_reservation(0)
     , my_num_kmers(my_num_kmers)
     , max_rpcs_in_flight(max_rpcs_in_flight)
-    , bloom1_cardinality(0)
     , estimated_error_rate(0.0) {
   // minimizer len depends on k
   minimizer_len = Kmer<MAX_K>::get_k() * 2 / 3 + 1;
@@ -214,89 +182,59 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
   // main purpose of the timer here is to track memory usage
   BarrierTimer timer(__FILEFUNC__);
   auto node0_cores = upcxx::local_team().rank_n();
-  // check if we have enough memory to run without bloom - require 2x the estimate for non-bloom - conservative because we don't
-  // want to run out of memory
-  double adjustment_factor = KCOUNT_NO_BLOOM_ADJUSTMENT_FACTOR;
+  // check if we have enough memory to run - conservative because we don't want to run out of memory
+  double adjustment_factor = 0.2;
   auto my_adjusted_num_kmers = my_num_kmers * adjustment_factor;
   double required_space = estimate_hashtable_memory(my_adjusted_num_kmers, sizeof(Kmer<MAX_K>) + sizeof(KmerCounts)) * node0_cores;
   auto max_reqd_space = upcxx::reduce_all(required_space, upcxx::op_fast_max).wait();
   auto free_mem = get_free_mem();
   auto lowest_free_mem = upcxx::reduce_all(free_mem, upcxx::op_fast_min).wait();
   auto highest_free_mem = upcxx::reduce_all(free_mem, upcxx::op_fast_max).wait();
-  SLOG_VERBOSE("Without bloom filters and adjustment factor of ", adjustment_factor, " require ", get_size_str(max_reqd_space),
-               " per node (", my_adjusted_num_kmers, " kmers per rank), and there is ", get_size_str(lowest_free_mem), " to ",
+  SLOG_VERBOSE("With adjustment factor of ", adjustment_factor, " require ", get_size_str(max_reqd_space), " per node (",
+               my_adjusted_num_kmers, " kmers per rank), and there is ", get_size_str(lowest_free_mem), " to ",
                get_size_str(highest_free_mem), " available on the nodes\n");
-  if (force_bloom) {
-    use_bloom = true;
-    SLOG_VERBOSE("Using bloom (--force-bloom set)\n");
-  } else {
-    if (lowest_free_mem * 0.80 < max_reqd_space) {
-      use_bloom = true;
-      SLOG("Insufficient memory available: enabling bloom filters assuming 80% of free mem is available for hashtables\n");
-    } else {
-      use_bloom = false;
-      SLOG_VERBOSE("Sufficient memory available; not using bloom filters\n");
-    }
-  }
+  if (lowest_free_mem * 0.80 < max_reqd_space) SWARN("Insufficient memory available: this could crash with OOM");
 
-  if (use_bloom)
-    kmer_store_bloom.set_size("bloom", max_kmer_store_bytes, max_rpcs_in_flight, useHHSS);
-  else
-    kmer_store.set_size("kmers", max_kmer_store_bytes, max_rpcs_in_flight, useHHSS);
+  kmer_store.set_size("kmers", max_kmer_store_bytes, max_rpcs_in_flight, useHHSS);
 
-  if (use_bloom) {
+  barrier();
+  // in this case we have to roughly estimate the hash table size because the space is reserved now
+  // err on the side of excess because the whole point of doing this is speed and we don't want a
+  // hash table resize
+  // Unfortunately, this estimate depends on the depth of the sample - high depth means more wasted memory,
+  // but low depth means potentially resizing the hash table, which is very expensive
+  initial_kmer_dht_reservation = my_adjusted_num_kmers;
+  double kmers_space_reserved = my_adjusted_num_kmers * (sizeof(Kmer<MAX_K>) + sizeof(KmerCounts));
+  SLOG_VERBOSE("Reserving at least ", get_size_str(node0_cores * kmers_space_reserved), " for kmer hash tables with ",
+               node0_cores * my_adjusted_num_kmers, " entries on node 0\n");
+  double init_free_mem = get_free_mem();
+  if (my_adjusted_num_kmers <= 0) DIE("no kmers to reserve space for");
+  kmers->reserve(my_adjusted_num_kmers);
 #ifdef ENABLE_GPUS
-    SDIE("Cannot use bloom with GPU kmer counting");
-#endif
-
-    // in this case we get an accurate estimate of the hash table size after the first bloom round, so the hash table space
-    // is reserved then
-    double init_mem_free = get_free_mem();
-    bloom_filter1->init(my_num_kmers, KCOUNT_BLOOM_FP);
-    // second bloom has far fewer kmers
-    bloom_filter2->init(my_num_kmers * adjustment_factor, KCOUNT_BLOOM_FP);
-    SLOG_VERBOSE("Bloom filters used ", get_size_str(init_mem_free - get_free_mem()), " memory on node 0\n");
+  // vector<GPUKmerCounts> gpu_kmer_counts;
+  // gpu_kmer_counts.reserve(KCOUNT_GPU_MAX_HT_ENTRIES);
+  if (gpu_utils::get_num_node_gpus() <= 0) {
+    DIE("GPUs are enabled but no GPU could be configured for kmer counting");
   } else {
-    barrier();
-    // in this case we have to roughly estimate the hash table size because the space is reserved now
-    // err on the side of excess because the whole point of doing this is speed and we don't want a
-    // hash table resize
-    // Unfortunately, this estimate depends on the depth of the sample - high depth means more wasted memory,
-    // but low depth means potentially resizing the hash table, which is very expensive
-    initial_kmer_dht_reservation = my_adjusted_num_kmers;
-    double kmers_space_reserved = my_adjusted_num_kmers * (sizeof(Kmer<MAX_K>) + sizeof(KmerCounts));
-    SLOG_VERBOSE("Reserving at least ", get_size_str(node0_cores * kmers_space_reserved), " for kmer hash tables with ",
-                 node0_cores * my_adjusted_num_kmers, " entries on node 0\n");
-    double init_free_mem = get_free_mem();
-    if (my_adjusted_num_kmers <= 0) DIE("no kmers to reserve space for");
-    kmers->reserve(my_adjusted_num_kmers);
-#ifdef ENABLE_GPUS
-    // vector<GPUKmerCounts> gpu_kmer_counts;
-    // gpu_kmer_counts.reserve(KCOUNT_GPU_MAX_HT_ENTRIES);
-    if (gpu_utils::get_num_node_gpus() <= 0) {
-      DIE("GPUs are enabled but no GPU could be configured for kmer counting");
-    } else {
-      // calculate total slots for hash table. Reserve space for parse and pack
-      int bytes_for_pnp = KCOUNT_GPU_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
-      int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
-      auto gpu_avail_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
-      auto gpu_tot_mem = gpu_utils::get_tot_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
-      SLOG(KLMAGENTA, "Available GPU memory per rank for kcount hash table is ", get_size_str(gpu_avail_mem), " out of a max of ",
-           get_size_str(gpu_tot_mem), KNORM, "\n");
-      // don't use up all the memory
-      // gpu_avail_mem *= 0.9;
-      double init_time;
-      gpu_driver->init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), gpu_avail_mem, init_time);
-      SLOG(KLMAGENTA, "Initialized hash table GPU driver in ", std::fixed, std::setprecision(3), init_time, " s", KNORM, "\n");
-      // SLOG(KLMAGENTA, "GPU hash table has ", gpu_driver->get_num_entries(), " entries/rank in buffer", KNORM, "\n");
-      auto gpu_free_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n();
-      SLOG(KLMAGENTA, "After initializing GPU hash table, there is ", get_size_str(gpu_free_mem),
-           " memory available per rank, with ", get_size_str(bytes_for_pnp), " reserved for parse and pack" KNORM, "\n");
-    }
-#endif
-    barrier();
+    // calculate total slots for hash table. Reserve space for parse and pack
+    int bytes_for_pnp = KCOUNT_GPU_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
+    int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
+    auto gpu_avail_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
+    auto gpu_tot_mem = gpu_utils::get_tot_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
+    SLOG(KLMAGENTA, "Available GPU memory per rank for kcount hash table is ", get_size_str(gpu_avail_mem), " out of a max of ",
+         get_size_str(gpu_tot_mem), KNORM, "\n");
+    // don't use up all the memory
+    // gpu_avail_mem *= 0.9;
+    double init_time;
+    gpu_driver->init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), gpu_avail_mem, init_time);
+    SLOG(KLMAGENTA, "Initialized hash table GPU driver in ", std::fixed, std::setprecision(3), init_time, " s", KNORM, "\n");
+    // SLOG(KLMAGENTA, "GPU hash table has ", gpu_driver->get_num_entries(), " entries/rank in buffer", KNORM, "\n");
+    auto gpu_free_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n();
+    SLOG(KLMAGENTA, "After initializing GPU hash table, there is ", get_size_str(gpu_free_mem), " memory available per rank, with ",
+         get_size_str(bytes_for_pnp), " reserved for parse and pack" KNORM, "\n");
   }
-  start_t = CLOCK_NOW();
+#endif
+  barrier();
 }
 
 template <int MAX_K>
@@ -308,47 +246,12 @@ void KmerDHT<MAX_K>::clear() {
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::clear_stores() {
-  kmer_store_bloom.clear();
   kmer_store.clear();
 }
 
 template <int MAX_K>
 KmerDHT<MAX_K>::~KmerDHT() {
   clear();
-}
-
-template <int MAX_K>
-void KmerDHT<MAX_K>::reserve_space_and_clear_bloom1() {
-  BarrierTimer timer(__FILEFUNC__);
-  // at this point we're done with generating the bloom filters, so we can drop the first bloom filter and
-  // allocate the kmer hash table
-
-  // purge the kmer store and prep the kmer + count
-  kmer_store_bloom.clear();
-  kmer_store.set_size("kmers", max_kmer_store_bytes, max_rpcs_in_flight);
-
-  int64_t cardinality1 = bloom_filter1->estimate_num_items();
-  int64_t cardinality2 = bloom_filter2->estimate_num_items();
-  bloom1_cardinality = cardinality1;
-  SLOG_VERBOSE("Rank 0: first bloom filter size estimate is ", cardinality1, " and second size estimate is ", cardinality2,
-               " ratio is ", (double)cardinality2 / cardinality1, "\n");
-  bloom_filter1->clear();  // no longer need it
-
-  barrier();
-  // two bloom false positive rates applied
-  initial_kmer_dht_reservation = (int64_t)(cardinality2 * (1 + KCOUNT_BLOOM_FP) * (1 + KCOUNT_BLOOM_FP) + 20000);
-  auto node0_cores = upcxx::local_team().rank_n();
-  double kmers_space_reserved = initial_kmer_dht_reservation * (sizeof(Kmer<MAX_K>) + sizeof(KmerCounts));
-  SLOG_VERBOSE("Reserving at least ", get_size_str(node0_cores * kmers_space_reserved), " for kmer hash tables with ",
-               node0_cores * initial_kmer_dht_reservation, " entries on node 0\n");
-  double init_free_mem = get_free_mem();
-  kmers->reserve(initial_kmer_dht_reservation);
-  barrier();
-}
-
-template <int MAX_K>
-bool KmerDHT<MAX_K>::get_use_bloom() {
-  return use_bloom;
 }
 
 template <int MAX_K>
@@ -364,10 +267,7 @@ void KmerDHT<MAX_K>::set_pass(PASS_TYPE pass_type) {
   _num_kmers_counted_locally = 0;
   this->pass_type = pass_type;
   switch (pass_type) {
-    case BLOOM_SET_PASS: kmer_store_bloom.set_update_func(update_bloom_set); break;
-    case CTG_BLOOM_SET_PASS: kmer_store_bloom.set_update_func(update_ctg_bloom_set); break;
-    case BLOOM_COUNT_PASS: kmer_store.set_update_func(update_bloom_count); break;
-    case NO_BLOOM_PASS: kmer_store.set_update_func(update_count); break;
+    case READ_KMERS_PASS: kmer_store.set_update_func(update_count); break;
     case CTG_KMERS_PASS: kmer_store.set_update_func(update_ctg_kmers_count); break;
   };
 }
@@ -453,55 +353,43 @@ void KmerDHT<MAX_K>::add_kmer(Kmer<MAX_K> kmer, char left_ext, char right_ext, k
     }
     target_rank = get_kmer_target_rank(kmer, &kmer_rc);
   }
-  if (pass_type == BLOOM_SET_PASS || pass_type == CTG_BLOOM_SET_PASS) {
-    if (count) {
-      kmer_store_bloom.update(target_rank, kmer);
-      bytes_sent += sizeof(kmer);
-    }
+  KmerAndExt kmer_and_ext = {.kmer = kmer, .count = count, .left = left_ext, .right = right_ext};
+  if (target_rank == rank_me()) {
+    _num_kmers_counted_locally++;
+    update_count(kmer_and_ext, kmers, gpu_driver);
   } else {
-    KmerAndExt kmer_and_ext = {.kmer = kmer, .count = count, .left = left_ext, .right = right_ext};
-    if (target_rank == rank_me() && (pass_type == NO_BLOOM_PASS || pass_type == CTG_KMERS_PASS)) {
-      _num_kmers_counted_locally++;
-      update_count(kmer_and_ext, kmers, bloom_filter1, gpu_driver);
-    } else {
-      kmer_store.update(target_rank, kmer_and_ext);
-      bytes_sent += sizeof(kmer_and_ext);
-    }
+    kmer_store.update(target_rank, kmer_and_ext);
+    bytes_sent += sizeof(kmer_and_ext);
   }
 }
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::flush_updates() {
   BarrierTimer timer(__FILEFUNC__);
-  if (pass_type == BLOOM_SET_PASS || pass_type == CTG_BLOOM_SET_PASS)
-    kmer_store_bloom.flush_updates();
-  else
-    kmer_store.flush_updates();
+  kmer_store.flush_updates();
 
 #ifdef ENABLE_GPUS
-  if (pass_type == NO_BLOOM_PASS) {
-    // make sure every rank has finished
-    barrier();
-    // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
-    gpu_driver->done_inserts();
-    while (true) {
-      assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
-      auto next_entry = gpu_driver->get_next_entry();
-      if (!next_entry.first) break;
-      Kmer<MAX_K> kmer(next_entry.first);
-      auto counts_array = next_entry.second;
-      ExtCounts left_exts = {0}, right_exts = {0};
-      left_exts.set(counts_array + 1);
-      right_exts.set(counts_array + 5);
-      KmerCounts kmer_counts = {.left_exts = left_exts,
-                                .right_exts = right_exts,
-                                .uutig_frag = nullptr,
-                                .count = counts_array[0],
-                                .left = 'X',
-                                .right = 'X',
-                                .from_ctg = false};
-      kmers->insert({kmer, kmer_counts});
-    }
+  // make sure every rank has finished
+  barrier();
+  // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
+  gpu_driver->done_inserts();
+  while (true) {
+    assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
+    auto next_entry = gpu_driver->get_next_entry();
+    if (!next_entry.first) break;
+    Kmer<MAX_K> kmer(next_entry.first);
+    auto counts_array = next_entry.second;
+    ExtCounts left_exts = {0}, right_exts = {0};
+    left_exts.set(counts_array + 1);
+    right_exts.set(counts_array + 5);
+    KmerCounts kmer_counts = {.left_exts = left_exts,
+                              .right_exts = right_exts,
+                              .uutig_frag = nullptr,
+                              .count = counts_array[0],
+                              .left = 'X',
+                              .right = 'X',
+                              .from_ctg = false};
+    kmers->insert({kmer, kmer_counts});
   }
 #endif
   SWARN("Found ", kmers->size(), " unique kmers\n");

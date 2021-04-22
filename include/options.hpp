@@ -90,7 +90,6 @@ class Options {
   int max_kmer_store_mb = 0;  // per rank - default to use 1% of node memory
   int max_rpcs_in_flight = 100;
   bool use_heavy_hitters = false;  // only enable when files are localized
-  bool force_bloom = false;
   int dmin_thres = 2.0;
   bool checkpoint = true;
   bool checkpoint_merged = false;

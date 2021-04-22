@@ -100,7 +100,7 @@ foreach(KMER_LENGTH ${MHM2_KMER_LENGTHS})
 endforeach()
 
 
-foreach(tgt fastq alignments contigs packed_reads utils bloom ctg_graph options
+foreach(tgt fastq alignments contigs packed_reads utils ctg_graph options
             merge_reads dbjg_traversal klign cgraph build_ctg_graph
             walk_ctg_graph spanner splinter localassm histogrammer aln_depths shuffle_reads kmer kmer_dht
             ${EXTERN_TEMPLATE_FILES}

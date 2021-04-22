@@ -320,8 +320,8 @@ void Options::cleanup() {
 
 bool Options::load(int argc, char **argv) {
   // MHM2 version v0.1-a0decc6-master (Release) built on 2020-04-08T22:15:40 with g++
- string full_version_str = "MHM2 version " + string(MHM2_VERSION) + "-" + string(MHM2_BRANCH) + " with upcxx-utils " +
-                           string(UPCXX_UTILS_VERSION) + " built on " + string(MHM2_BUILD_DATE);
+  string full_version_str = "MHM2 version " + string(MHM2_VERSION) + "-" + string(MHM2_BRANCH) + " with upcxx-utils " +
+                            string(UPCXX_UTILS_VERSION) + " built on " + string(MHM2_BUILD_DATE);
   CLI::App app(full_version_str);
   // basic options - see user guide
   app.add_option("-r, --reads", reads_fnames,
@@ -396,9 +396,6 @@ bool Options::load(int argc, char **argv) {
   app.add_flag("--use-heavy-hitters", use_heavy_hitters, "Enable the Heavy Hitter Streaming Store (experimental).");
   app.add_option("--ranks-per-gpu", ranks_per_gpu, "Number of processes multiplexed to each GPU (default depends on hardware).")
       ->check(CLI::Range(0, (int)upcxx::local_team().rank_n() * 8));
-  auto *bloom_opt = app.add_flag("--force-bloom", force_bloom, "Always use bloom filters.")
-                        //      ->default_val(force_bloom ? "true" : "false")
-                        ->multi_option_policy();
   app.add_flag("--pin", pin_by,
                "Restrict processes according to logical CPUs, cores (groups of hardware threads), "
                "or NUMA domains (cpu, core, numa, none).")

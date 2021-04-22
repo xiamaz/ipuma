@@ -169,7 +169,7 @@ static void process_read(unsigned kmer_len, int qual_offset, const string &seq, 
 
 template <int MAX_K>
 static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *> &packed_reads_list,
-                        dist_object<KmerDHT<MAX_K>> &kmer_dht, PASS_TYPE pass_type, int ranks_per_gpu) {
+                        dist_object<KmerDHT<MAX_K>> &kmer_dht, int ranks_per_gpu) {
   BarrierTimer timer(__FILEFUNC__);
   // probability of an error is P = 10^(-Q/10) where Q is the quality cutoff
   // so we want P = 0.5*1/k (i.e. 50% chance of 1 error)
@@ -184,14 +184,8 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   int64_t num_bad_quals = 0;
   int64_t num_Ns = 0;
   string progbar_prefix = "";
-  switch (pass_type) {
-    case BLOOM_SET_PASS: progbar_prefix = "Pass 1: Processing reads to setup bloom filter"; break;
-    case BLOOM_COUNT_PASS: progbar_prefix = "Pass 2: Processing reads to count kmers"; break;
-    case NO_BLOOM_PASS: progbar_prefix = "Processing reads to count kmers"; break;
-    default: DIE("Should never get here");
-  };
   IntermittentTimer t_pp(__FILENAME__ + string(":kmer parse and pack"));
-  kmer_dht->set_pass(pass_type);
+  kmer_dht->set_pass(READ_KMERS_PASS);
   barrier();
 #ifdef ENABLE_GPUS
   int64_t num_gpu_waits = 0;
@@ -214,7 +208,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   for (auto packed_reads : packed_reads_list) {
     packed_reads->reset();
     string id, seq, quals;
-    ProgressBar progbar(packed_reads->get_local_num_reads(), progbar_prefix);
+    ProgressBar progbar(packed_reads->get_local_num_reads(), "Processing reads to count kmers");
     while (true) {
       if (!packed_reads->get_next_read(id, seq, quals)) break;
       num_reads++;
@@ -260,11 +254,9 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   auto all_num_Ns = reduce_one(num_Ns, op_fast_add, 0).wait();
   auto all_distinct_kmers = kmer_dht->get_num_kmers();
   SLOG_VERBOSE("Processed a total of ", all_num_reads, " reads\n");
-  if (pass_type != BLOOM_SET_PASS) {
-    SLOG_VERBOSE("Found ", perc_str(all_distinct_kmers, all_num_kmers), " unique kmers\n");
-    if (all_num_bad_quals) SLOG_VERBOSE("Found ", perc_str(all_num_bad_quals, all_num_kmers), " bad quality positions\n");
-    if (all_num_Ns) SLOG_VERBOSE("Found ", perc_str(all_num_Ns, all_num_kmers), " kmers with Ns\n");
-  }
+  SLOG_VERBOSE("Found ", perc_str(all_distinct_kmers, all_num_kmers), " unique kmers\n");
+  if (all_num_bad_quals) SLOG_VERBOSE("Found ", perc_str(all_num_bad_quals, all_num_kmers), " bad quality positions\n");
+  if (all_num_Ns) SLOG_VERBOSE("Found ", perc_str(all_num_Ns, all_num_kmers), " kmers with Ns\n");
   auto tot_kmers_stored = reduce_one(kmer_dht->get_local_num_kmers(), op_fast_add, 0).wait();
   auto max_kmers_stored = reduce_one(kmer_dht->get_local_num_kmers(), op_fast_max, 0).wait();
   if (!rank_me()) {
@@ -272,37 +264,6 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     SLOG_VERBOSE("Avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
                  (double)avg_kmers_stored / max_kmers_stored, "\n");
   }
-};
-
-// count ctg kmers if using bloom
-template <int MAX_K>
-static void count_ctg_kmers(unsigned kmer_len, Contigs &ctgs, dist_object<KmerDHT<MAX_K>> &kmer_dht) {
-  BarrierTimer timer(__FILEFUNC__);
-  ProgressBar progbar(ctgs.size(), "Counting kmers in contigs");
-  int64_t num_kmers = 0;
-  vector<Kmer<MAX_K>> kmers;
-  kmer_dht->set_pass(CTG_BLOOM_SET_PASS);
-  for (auto it = ctgs.begin(); it != ctgs.end(); ++it) {
-    auto ctg = it;
-    progbar.update();
-    if (ctg->seq.length() >= kmer_len) {
-      Kmer<MAX_K>::get_kmers(kmer_len, ctg->seq, kmers);
-      if (kmers.size() != ctg->seq.length() - kmer_len + 1)
-        DIE("kmers size mismatch ", kmers.size(), " != ", (ctg->seq.length() - kmer_len + 1), " '", ctg->seq, "'");
-      for (int i = 1; i < (int)(ctg->seq.length() - kmer_len); i++) {
-        kmer_dht->add_kmer(kmers[i], ctg->seq[i - 1], ctg->seq[i + kmer_len], 1);
-      }
-      num_kmers += kmers.size();
-    }
-    progress();
-  }
-  progbar.done();
-  kmer_dht->flush_updates();
-  DBG("This rank processed ", ctgs.size(), " contigs and ", num_kmers, " kmers\n");
-  auto all_num_ctgs = reduce_one(ctgs.size(), op_fast_add, 0).wait();
-  auto all_num_kmers = reduce_one(num_kmers, op_fast_add, 0).wait();
-  SLOG_VERBOSE("Processed a total of ", all_num_ctgs, " contigs and ", all_num_kmers, " kmers\n");
-  barrier();
 };
 
 template <int MAX_K>
@@ -389,6 +350,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   }
 #ifdef ENABLE_GPUS
   delete gpu_driver;
+  gpu_driver = nullptr;
 #endif
 };
 
@@ -401,14 +363,7 @@ void analyze_kmers(unsigned kmer_len, unsigned prev_kmer_len, int qual_offset, v
   _dynamic_min_depth = DYN_MIN_DEPTH;
   _dmin_thres = dmin_thres;
 
-  if (kmer_dht->get_use_bloom()) {
-    count_kmers(kmer_len, qual_offset, packed_reads_list, kmer_dht, BLOOM_SET_PASS, ranks_per_gpu);
-    if (fut_has_contigs.wait()) count_ctg_kmers(kmer_len, ctgs, kmer_dht);
-    kmer_dht->reserve_space_and_clear_bloom1();
-    count_kmers(kmer_len, qual_offset, packed_reads_list, kmer_dht, BLOOM_COUNT_PASS, ranks_per_gpu);
-  } else {
-    count_kmers(kmer_len, qual_offset, packed_reads_list, kmer_dht, NO_BLOOM_PASS, ranks_per_gpu);
-  }
+  count_kmers(kmer_len, qual_offset, packed_reads_list, kmer_dht, ranks_per_gpu);
   barrier();
   kmer_dht->print_load_factor();
   barrier();
