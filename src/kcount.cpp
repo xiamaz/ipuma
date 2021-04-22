@@ -366,8 +366,10 @@ void analyze_kmers(unsigned kmer_len, unsigned prev_kmer_len, int qual_offset, v
   count_kmers(kmer_len, qual_offset, packed_reads_list, kmer_dht, ranks_per_gpu);
   barrier();
   kmer_dht->print_load_factor();
+#ifndef ENABLE_GPUS
   barrier();
   kmer_dht->purge_kmers(2);
+#endif
   int64_t new_count = kmer_dht->get_num_kmers();
   SLOG_VERBOSE("After purge of kmers < 2, there are ", new_count, " unique kmers\n");
   barrier();

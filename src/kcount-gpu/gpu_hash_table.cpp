@@ -181,6 +181,12 @@ void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, uint16_t kmer_
   }
 }
 
+static int sum_ext_counts(const KmerCountsArray &kmer_counts) {
+  int sum = 0;
+  for (int i = 1; i < 9; i++) sum += kmer_counts[i];
+  return sum;
+}
+
 // FIXME: this should return a vector of kmers and their counts for inserting into the CPU hash table
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::done_inserts() {
@@ -189,16 +195,33 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
     num_entries = 0;
   }
 
-  if (!upcxx_rank_me) {
-    ostringstream os;
-    os << "On GPU, rank " << upcxx_rank_me << " found " << tmp_ht.size() << " unique kmers\n";
-    cout << os.str() << flush;
-  }
   // delete these to make space before returning the hash table entries
   if (host_kmers) delete[] host_kmers;
   if (host_counts) delete[] host_counts;
-  // now copy the gpu hash table values across to the host
+
+  // purge kmers with freq < 2
+  auto num_prior_kmers = tmp_ht.size();
+  if (!num_prior_kmers) return;
+  int64_t num_purged = 0;
+  for (auto it = tmp_ht.begin(); it != tmp_ht.end();) {
+    const KmerCountsArray &kmer_counts = it->second;
+    if (kmer_counts[0] < 2 || !sum_ext_counts(kmer_counts)) {
+      num_purged++;
+      it = tmp_ht.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  if (!upcxx_rank_me) {
+    ostringstream os;
+    os << "On GPU, rank " << upcxx_rank_me << " purged " << num_purged << " kmers below frequency of 2 ( "
+       << ((100.0 * num_purged) / num_prior_kmers) << " %)\n";
+    cout << os.str() << flush;
+  }
+
   int num_unique_kmers = tmp_ht.size();
+  if (!num_unique_kmers) return;
+  // now copy the gpu hash table values across to the host
   output_kmers.resize(num_unique_kmers * N_LONGS);
   output_kmer_counts.resize(num_unique_kmers * 9);
   int i = 0;
@@ -207,6 +230,10 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
     memcpy(output_kmers.data() + i * N_LONGS, kmer.to_array(), N_LONGS * sizeof(uint64_t));
     memcpy(output_kmer_counts.data() + i * 9, it.second.data(), sizeof(uint16_t) * 9);
     i++;
+    if (i > num_unique_kmers) {
+      cerr << KLRED << "Error - too many keys in GPU ht for target buffers\n";
+      break;
+    }
   }
   output_index = 0;
   tmp_ht.clear();
@@ -215,6 +242,7 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
 
 template <int MAX_K>
 pair<uint64_t *, uint16_t *> HashTableGPUDriver<MAX_K>::get_next_entry() {
+  if (output_kmers.empty()) return {nullptr, nullptr};
   if (output_index * N_LONGS == output_kmers.size()) return {nullptr, nullptr};
   output_index++;
   assert((output_index - 1) * N_LONGS < output_kmers.size());
