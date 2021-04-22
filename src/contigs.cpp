@@ -217,7 +217,7 @@ void Contigs::load_contigs(const string &ctgs_fname) {
   SLOG_VERBOSE("Loading contigs from fasta file ", ctgs_fname, "\n");
   BarrierTimer timer(__FILEFUNC__);
   contigs.clear();
-  dist_object<promise<size_t>> dist_stop_prom(world());
+  dist_object<upcxx::promise<size_t>> dist_stop_prom(world());
   string line;
   string ctg_prefix = ">Contig";
   string cname, seq, buf;
@@ -235,7 +235,7 @@ void Contigs::load_contigs(const string &ctgs_fname) {
   auto start_offset = get_file_offset_for_rank(ctgs_file, rank_me(), ctg_prefix, file_size);
   if (rank_me() > 0) {
     // notify previous rank of its stop offset
-    rpc_ff(rank_me() - 1, [](dist_object<promise<size_t>> &dist_stop_prom, size_t stop_offset) {
+    rpc_ff(rank_me() - 1, [](dist_object<upcxx::promise<size_t>> &dist_stop_prom, size_t stop_offset) {
       dist_stop_prom->fulfill_result(stop_offset);
     }, dist_stop_prom, start_offset);
   }
