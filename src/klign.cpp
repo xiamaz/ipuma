@@ -558,7 +558,7 @@ class KmerCtgDHT {
       read_seqs.pop_back();
 #endif
 #ifndef ENABLE_GPUS
-      std::this_thread::yield();  // yield if the kernel is CPU based
+      upcxx_utils::ThreadPool::yield_if_needed();  // yield if the kernel is CPU based
 #endif
       progress();
     }
