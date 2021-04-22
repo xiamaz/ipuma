@@ -67,7 +67,6 @@ using namespace upcxx_utils;
 
 // global variables to avoid passing dist objs to rpcs
 static int64_t _num_kmers_counted = 0;
-static int64_t _num_kmers_counted_locally = 0;
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
@@ -211,8 +210,6 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
   if (my_adjusted_num_kmers <= 0) DIE("no kmers to reserve space for");
   kmers->reserve(my_adjusted_num_kmers);
 #ifdef ENABLE_GPUS
-  // vector<GPUKmerCounts> gpu_kmer_counts;
-  // gpu_kmer_counts.reserve(KCOUNT_GPU_MAX_HT_ENTRIES);
   if (gpu_utils::get_num_node_gpus() <= 0) {
     DIE("GPUs are enabled but no GPU could be configured for kmer counting");
   } else {
@@ -264,7 +261,6 @@ pair<int64_t, int64_t> KmerDHT<MAX_K>::get_bytes_sent() {
 template <int MAX_K>
 void KmerDHT<MAX_K>::set_pass(PASS_TYPE pass_type) {
   _num_kmers_counted = 0;
-  _num_kmers_counted_locally = 0;
   this->pass_type = pass_type;
   switch (pass_type) {
     case READ_KMERS_PASS: kmer_store.set_update_func(update_count); break;
@@ -354,13 +350,8 @@ void KmerDHT<MAX_K>::add_kmer(Kmer<MAX_K> kmer, char left_ext, char right_ext, k
     target_rank = get_kmer_target_rank(kmer, &kmer_rc);
   }
   KmerAndExt kmer_and_ext = {.kmer = kmer, .count = count, .left = left_ext, .right = right_ext};
-  if (target_rank == rank_me()) {
-    _num_kmers_counted_locally++;
-    update_count(kmer_and_ext, kmers, gpu_driver);
-  } else {
-    kmer_store.update(target_rank, kmer_and_ext);
-    bytes_sent += sizeof(kmer_and_ext);
-  }
+  kmer_store.update(target_rank, kmer_and_ext);
+  bytes_sent += sizeof(kmer_and_ext);
 }
 
 template <int MAX_K>
@@ -369,38 +360,35 @@ void KmerDHT<MAX_K>::flush_updates() {
   kmer_store.flush_updates();
 
 #ifdef ENABLE_GPUS
-  // make sure every rank has finished
-  barrier();
-  // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
-  gpu_driver->done_inserts();
-  while (true) {
-    assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
-    auto next_entry = gpu_driver->get_next_entry();
-    if (!next_entry.first) break;
-    Kmer<MAX_K> kmer(next_entry.first);
-    auto counts_array = next_entry.second;
-    ExtCounts left_exts = {0}, right_exts = {0};
-    left_exts.set(counts_array + 1);
-    right_exts.set(counts_array + 5);
-    KmerCounts kmer_counts = {.left_exts = left_exts,
-                              .right_exts = right_exts,
-                              .uutig_frag = nullptr,
-                              .count = counts_array[0],
-                              .left = 'X',
-                              .right = 'X',
-                              .from_ctg = false};
-    kmers->insert({kmer, kmer_counts});
+  if (pass_type == READ_KMERS_PASS) {
+    // make sure every rank has finished
+    barrier();
+    // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
+    gpu_driver->done_inserts();
+    while (true) {
+      assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
+      auto next_entry = gpu_driver->get_next_entry();
+      if (!next_entry.first) break;
+      Kmer<MAX_K> kmer(next_entry.first);
+      auto counts_array = next_entry.second;
+      ExtCounts left_exts = {0}, right_exts = {0};
+      left_exts.set(counts_array + 1);
+      right_exts.set(counts_array + 5);
+      KmerCounts kmer_counts = {.left_exts = left_exts,
+                                .right_exts = right_exts,
+                                .uutig_frag = nullptr,
+                                .count = counts_array[0],
+                                .left = 'X',
+                                .right = 'X',
+                                .from_ctg = false};
+      kmers->insert({kmer, kmer_counts});
+    }
   }
 #endif
-  SWARN("Found ", kmers->size(), " unique kmers\n");
   auto avg_kmers_processed = reduce_one(_num_kmers_counted, op_fast_add, 0).wait() / rank_n();
   auto max_kmers_processed = reduce_one(_num_kmers_counted, op_fast_max, 0).wait();
-  auto avg_local_kmers = reduce_one(_num_kmers_counted_locally, op_fast_add, 0).wait() / rank_n();
-  auto max_local_kmers = reduce_one(_num_kmers_counted_locally, op_fast_max, 0).wait();
   SLOG_VERBOSE("Avg kmers processed per rank ", avg_kmers_processed, " (balance ",
                (double)avg_kmers_processed / max_kmers_processed, ")\n");
-  SLOG_VERBOSE("Avg local kmers processed per rank ", perc_str(avg_local_kmers, avg_kmers_processed), " (balance ",
-               (double)avg_local_kmers / max_local_kmers, ")\n");
 }
 
 template <int MAX_K>
