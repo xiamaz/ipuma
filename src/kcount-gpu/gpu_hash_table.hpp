@@ -47,6 +47,7 @@
 #include <unordered_map>
 
 #include "hash_funcs.h"
+#include "prime.hpp"
 
 namespace kcount_gpu {
 
@@ -91,6 +92,7 @@ class HashTableGPUDriver {
   struct HashTableDriverState;
   // stores CUDA specific variables
   HashTableDriverState *dstate = nullptr;
+  primes::Prime prime;
 
   int upcxx_rank_me;
   int upcxx_rank_n;
@@ -118,7 +120,8 @@ class HashTableGPUDriver {
   HashTableGPUDriver();
   ~HashTableGPUDriver();
 
-  void init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, int gpu_avail_mem, double &init_time);
+  bool init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, int gpu_avail_mem, double &init_time,
+            size_t &gpu_bytes_reqd);
 
   void insert_kmer(const uint64_t *kmer, uint16_t kmer_count, char left, char right);
 

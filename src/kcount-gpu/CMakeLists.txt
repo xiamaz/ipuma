@@ -39,7 +39,7 @@ message(STATUS "ARCH_FLAGS=${ARCH_FLAGS}")
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-Wall,${OpenMP_CXX_FLAGS} ${ARCH_FLAGS}")
 message(STATUS "CMAKE_CUDA_FLAGS=${CMAKE_CUDA_FLAGS}")
 
-add_library(KCOUNT_GPU_LIBRARY_obj OBJECT parse_and_pack.cpp gpu_hash_table.cpp)
+add_library(KCOUNT_GPU_LIBRARY_obj OBJECT parse_and_pack.cpp gpu_hash_table.cpp prime.cpp)
 if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13)
   target_link_libraries(KCOUNT_GPU_LIBRARY_obj INTERFACE OpenMP::OpenMP_CXX)
 endif()

@@ -221,14 +221,19 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     auto gpu_tot_mem = gpu_utils::get_tot_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
     SLOG(KLMAGENTA, "Available GPU memory per rank for kcount hash table is ", get_size_str(gpu_avail_mem), " out of a max of ",
          get_size_str(gpu_tot_mem), KNORM, "\n");
-    // don't use up all the memory
-    // gpu_avail_mem *= 0.9;
     double init_time;
-    gpu_driver->init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), my_adjusted_num_kmers * 5, gpu_avail_mem, init_time);
+    size_t gpu_bytes_reqd;
+    if (!gpu_driver->init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), my_adjusted_num_kmers * 5, gpu_avail_mem * 2, init_time,
+                          gpu_bytes_reqd)) {
+      SDIE("Insufficient memory on GPU for this size dataset, require ", get_size_str(gpu_bytes_reqd), " but only have ",
+           get_size_str(gpu_avail_mem * 0.9), " available.");
+      barrier();
+    }
     SLOG(KLMAGENTA, "Initialized hash table GPU driver in ", std::fixed, std::setprecision(3), init_time, " s", KNORM, "\n");
     auto gpu_free_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n();
     SLOG(KLMAGENTA, "After initializing GPU hash table, there is ", get_size_str(gpu_free_mem), " memory available per rank, with ",
-         get_size_str(bytes_for_pnp), " reserved for parse and pack" KNORM, "\n");
+         get_size_str(bytes_for_pnp), " reserved for parse and pack and ", get_size_str(gpu_bytes_reqd),
+         " reserved for the kmer hash table" KNORM, "\n");
   }
 #endif
   barrier();

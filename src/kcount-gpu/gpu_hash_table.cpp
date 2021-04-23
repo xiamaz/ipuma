@@ -124,14 +124,6 @@ struct HashTableGPUDriver<MAX_K>::HashTableDriverState {
   QuickTimer ht_timer;
 };
 
-static size_t get_nearest_pow2(size_t val) {
-  for (size_t i = val; i >= 1; i--) {
-    // If i is a power of 2
-    if ((i & (i - 1)) == 0) return i;
-  }
-  return 0;
-}
-
 template <int MAX_K>
 KmerArray<MAX_K>::KmerArray(const uint64_t *kmer) {
   memcpy(longs.data(), kmer, N_LONGS * sizeof(uint64_t));
@@ -160,20 +152,30 @@ HashTableGPUDriver<MAX_K>::HashTableGPUDriver()
     , t_kernel(0) {}
 
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, int gpu_avail_mem,
-                                     double &init_time) {
+bool HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, int gpu_avail_mem,
+                                     double &init_time, size_t &gpu_bytes_reqd) {
   this->upcxx_rank_me = upcxx_rank_me;
   this->upcxx_rank_n = upcxx_rank_n;
   this->kmer_len = kmer_len;
   QuickTimer init_timer, malloc_timer;
-  init_timer.start();
   int device_count = 0;
   cudaErrchk(cudaGetDeviceCount(&device_count));
   int my_gpu_id = upcxx_rank_me % device_count;
   cudaErrchk(cudaSetDevice(my_gpu_id));
-  malloc_timer.start();
 
-  ht_capacity = get_nearest_pow2(max_elems);
+  prime.set(max_elems);
+  ht_capacity = prime.get();
+  if (!upcxx_rank_me) {
+    cout << "max elems " << max_elems << " with prime " << ht_capacity << endl;
+  }
+  // now check that we have sufficient memory for the required capacity
+  gpu_bytes_reqd =
+      ht_capacity * (sizeof(KeyValue<MAX_K>) + sizeof(uint8_t)) + KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * sizeof(KmerAndExts<MAX_K>);
+
+  if (gpu_bytes_reqd > gpu_avail_mem) return false;
+
+  init_timer.start();
+  malloc_timer.start();
   // FIXME: to go on device
   elems_dev.resize(ht_capacity);
   memset((void *)elems_dev.data(), 0, ht_capacity * sizeof(KeyValue<MAX_K>));
@@ -192,6 +194,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
 
   init_timer.stop();
   init_time = init_timer.get_elapsed();
+  return true;
 }
 
 template <int MAX_K>
@@ -214,15 +217,15 @@ static void inc_ext_count(KmerCountsArray &kmer_counts, char ext, int count, boo
   }
 }
 
-// FIXME: this needs to be on the device
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::insert_kmer_block(int64_t &num_new_elems, int64_t &num_inserts, int64_t &num_dropped) {
+  // FIXME: first copy across the elem buf to the gpu, and then call the below code on the gpu
   for (int i = 0; i < num_buff_entries; i++) {
     KmerArray<MAX_K> kmer = elem_buff_host[i].kmer;
     uint16_t kmer_count = elem_buff_host[i].count;
     char left_ext = elem_buff_host[i].left;
     char right_ext = elem_buff_host[i].right;
-    uint64_t slot = kmer.hash() & (ht_capacity - 1);
+    uint64_t slot = prime.mod(kmer.hash());
     num_inserts++;
     // loop in linear probe to max 100 (?) steps
     int j;
@@ -245,7 +248,8 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block(int64_t &num_new_elems, int64_
         break;
       }
       // slot was occupied, linear probe along to next available slot
-      slot = (slot + 1) & (ht_capacity - 1);
+      // slot = (slot + 1) & (ht_capacity - 1);
+      slot = (slot + 1) % ht_capacity;
     }
     if (j == MAX_PROBE) {
       // this entry didn't get inserted because we ran out of probing time (and probably space)
