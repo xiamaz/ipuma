@@ -140,6 +140,7 @@ __device__ void revcomp(uint64_t *longs, uint64_t *rc_longs, int kmer_len, int n
   }
 }
 
+/*
 __device__ uint64_t quick_hash(uint64_t v) {
   v = v * 3935559000370003845 + 2691343689449507681;
   v ^= v >> 21;
@@ -151,6 +152,7 @@ __device__ uint64_t quick_hash(uint64_t v) {
   v ^= v << 5;
   return v;
 }
+*/
 
 __device__ uint64_t gpu_minimizer_hash_fast(int m, int kmer_len, int num_longs, uint64_t *longs, uint64_t *rc_longs) {
   const int chunk_step = 32 - ((m + 3) / 4) * 4;  // chunk_step is a multiple of 4

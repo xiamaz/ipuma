@@ -224,9 +224,8 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     // don't use up all the memory
     // gpu_avail_mem *= 0.9;
     double init_time;
-    gpu_driver->init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), gpu_avail_mem, init_time);
+    gpu_driver->init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), my_adjusted_num_kmers * 5, gpu_avail_mem, init_time);
     SLOG(KLMAGENTA, "Initialized hash table GPU driver in ", std::fixed, std::setprecision(3), init_time, " s", KNORM, "\n");
-    // SLOG(KLMAGENTA, "GPU hash table has ", gpu_driver->get_num_entries(), " entries/rank in buffer", KNORM, "\n");
     auto gpu_free_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n();
     SLOG(KLMAGENTA, "After initializing GPU hash table, there is ", get_size_str(gpu_free_mem), " memory available per rank, with ",
          get_size_str(bytes_for_pnp), " reserved for parse and pack" KNORM, "\n");
@@ -365,18 +364,25 @@ void KmerDHT<MAX_K>::flush_updates() {
     // make sure every rank has finished
     barrier();
     // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
-    auto gpu_elapsed_time = gpu_driver->done_inserts();
-    SLOG("Elapsed GPU time for kmer hash tables ", fixed, setprecision(3), gpu_elapsed_time, " s\n");
-    stage_timers.kernel_kmer_analysis->inc_elapsed(gpu_elapsed_time);
+    gpu_driver->done_inserts();
+    // a bunch of stats about the hash table on the GPU
+    auto num_dropped_elems = reduce_one(gpu_driver->get_num_dropped(), op_fast_add, 0).wait();
+    auto num_inserts = reduce_one(gpu_driver->get_num_inserts(), op_fast_add, 0).wait();
+    auto num_elems = reduce_one(gpu_driver->get_num_elems(), op_fast_add, 0).wait();
+    auto avg_load_factor = reduce_one(gpu_driver->get_load_factor(), op_fast_add, 0).wait() / rank_n();
+    auto max_load_factor = reduce_one(gpu_driver->get_load_factor(), op_fast_max, 0).wait();
+    if (num_dropped_elems) SWARN("GPU hash table: failed to insert ", perc_str(num_dropped_elems, num_inserts), " elements\n");
+    SLOG("GPU hash table: load factor ", fixed, setprecision(3), avg_load_factor, " avg, ", max_load_factor, " max, num entries ",
+         num_elems, "\n");
+    int64_t num_purged = 0;
     while (true) {
       assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
       auto next_entry = gpu_driver->get_next_entry();
-      if (!next_entry.first) break;
-      Kmer<MAX_K> kmer(next_entry.first);
-      auto counts_array = next_entry.second;
+      if (!next_entry) break;
+      auto &counts_array = next_entry->val;
       ExtCounts left_exts = {0}, right_exts = {0};
-      left_exts.set(counts_array + 1);
-      right_exts.set(counts_array + 5);
+      left_exts.set(counts_array.data() + 1);
+      right_exts.set(counts_array.data() + 5);
       KmerCounts kmer_counts = {.left_exts = left_exts,
                                 .right_exts = right_exts,
                                 .uutig_frag = nullptr,
@@ -384,8 +390,20 @@ void KmerDHT<MAX_K>::flush_updates() {
                                 .left = 'X',
                                 .right = 'X',
                                 .from_ctg = false};
-      kmers->insert({kmer, kmer_counts});
+      // purge out low freq kmers
+      if ((kmer_counts.count < 2) || (kmer_counts.left_exts.is_zero() && kmer_counts.right_exts.is_zero())) {
+        num_purged++;
+      } else {
+        Kmer<MAX_K> kmer(next_entry->key.to_array());
+        kmers->insert({kmer, kmer_counts});
+      }
     }
+    auto all_num_purged = reduce_one(num_purged, op_fast_add, 0).wait();
+    auto all_kmers_size = reduce_one(kmers->size(), op_fast_add, 0).wait();
+    SLOG("Purged ", perc_str(all_num_purged, all_num_purged + all_kmers_size), " singleton kmers\n");
+    auto gpu_elapsed_time = gpu_driver->get_kernel_elapsed_time();
+    stage_timers.kernel_kmer_analysis->inc_elapsed(gpu_elapsed_time);
+    SLOG("Elapsed GPU time for kmer hash tables ", fixed, setprecision(3), gpu_elapsed_time, " s\n");
   }
 #endif
   auto avg_kmers_processed = reduce_one(_num_kmers_counted, op_fast_add, 0).wait() / rank_n();
@@ -410,8 +428,6 @@ void KmerDHT<MAX_K>::purge_kmers(int threshold) {
   }
   auto all_num_purged = reduce_one(num_purged, op_fast_add, 0).wait();
   SLOG_VERBOSE("Purged ", perc_str(all_num_purged, num_prior_kmers), " kmers below frequency threshold of ", threshold, "\n");
-  estimated_error_rate = 1.0 - pow(1.0 - (double)all_num_purged / (double)num_prior_kmers, 1.0 / (double)Kmer<MAX_K>::get_k());
-  SLOG_VERBOSE("Estimated per-base error rate from purge: ", estimated_error_rate, "\n");
 }
 
 template <int MAX_K>

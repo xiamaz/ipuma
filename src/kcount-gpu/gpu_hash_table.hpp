@@ -55,18 +55,34 @@ using KmerCountsArray = std::array<uint16_t, 9>;
 template <int MAX_K>
 class KmerArray {
   static const int N_LONGS = (MAX_K + 31) / 32;
-  std::array<uint64_t, N_LONGS> data;
+  std::array<uint64_t, N_LONGS> longs;
 
  public:
+  KmerArray() {}
   KmerArray(const uint64_t *x);
 
-  const uint64_t *to_array() const { return data.data(); }
+  void operator=(const uint64_t *kmer);
+
+  const uint64_t *to_array() const { return longs.data(); }
 
   bool operator==(const KmerArray &o) const;
 
   size_t hash() const;
 
   static int get_N_LONGS() { return N_LONGS; }
+};
+
+template <int MAX_K>
+struct KeyValue {
+  KmerArray<MAX_K> key;
+  KmerCountsArray val;
+};
+
+template <int MAX_K>
+struct KmerAndExts {
+  KmerArray<MAX_K> kmer;
+  uint16_t count;
+  uint8_t left, right;
 };
 
 template <int MAX_K>
@@ -80,36 +96,44 @@ class HashTableGPUDriver {
   int upcxx_rank_n;
   int kmer_len;
   double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
-  // packed kmers, can be 1 or more uint64_t in length per kmer
-  uint64_t *dev_kmers = nullptr;
-  // extension and kmer counts. Each uint32_t has packed into it the uint16_t count, and a byte each for left and right extensions
-  uint32_t *dev_counts = nullptr;
-  uint64_t *host_kmers = nullptr;
-  uint8_t *host_counts = nullptr;
-  int num_entries = 0;
-  std::vector<uint64_t> output_kmers;
-  std::vector<uint16_t> output_kmer_counts;
+  int num_buff_entries = 0;
+  std::vector<KeyValue<MAX_K>> output_elems;
   size_t output_index = 0;
+  // array of key-value pairs
+  // KeyValue<MAX_K> *elems_dev = nullptr;
+  std::vector<KeyValue<MAX_K>> elems_dev;
+  // locks for mutexes
+  int8_t *locks_dev = nullptr;
+  // for buffering elements in the host memory
+  KmerAndExts<MAX_K> *elem_buff_host = nullptr;
 
-  std::unordered_map<KmerArray<MAX_K>, KmerCountsArray> tmp_ht;
+  int64_t ht_capacity = 0;
+  int64_t num_elems = 0;
+  int64_t num_dropped_entries = 0;
+  int64_t num_attempted_inserts = 0;
 
-  void insert_kmer_block();
+  void insert_kmer_block(int64_t &num_new_elems, int64_t &num_inserts, int64_t &num_dropped);
 
  public:
   HashTableGPUDriver();
   ~HashTableGPUDriver();
 
-  void init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int gpu_avail_mem, double &init_time);
-
-  int get_num_entries();
+  void init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, int gpu_avail_mem, double &init_time);
 
   void insert_kmer(const uint64_t *kmer, uint16_t kmer_count, char left, char right);
 
-  double done_inserts();
+  void done_inserts();
 
-  std::pair<uint64_t *, uint16_t *> get_next_entry();
+  KeyValue<MAX_K> *get_next_entry();
 
   static int get_N_LONGS();
+
+  double get_kernel_elapsed_time();
+
+  int64_t get_num_elems();
+  int64_t get_num_inserts();
+  int64_t get_num_dropped();
+  double get_load_factor();
 };
 
 }  // namespace kcount_gpu
