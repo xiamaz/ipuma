@@ -105,7 +105,7 @@ class HashTableGPUDriver {
 
   void insert_kmer(const uint64_t *kmer, uint16_t kmer_count, char left, char right);
 
-  void done_inserts();
+  double done_inserts();
 
   std::pair<uint64_t *, uint16_t *> get_next_entry();
 

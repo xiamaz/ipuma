@@ -364,7 +364,8 @@ void KmerDHT<MAX_K>::flush_updates() {
     // make sure every rank has finished
     barrier();
     // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
-    gpu_driver->done_inserts();
+    auto gpu_elapsed_time = gpu_driver->done_inserts();
+    SLOG("Elapsed GPU time for kmer hash tables ", fixed, setprecision(3), gpu_elapsed_time, " s\n");
     while (true) {
       assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
       auto next_entry = gpu_driver->get_next_entry();

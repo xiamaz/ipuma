@@ -59,6 +59,7 @@ using namespace kcount_gpu;
 template <int MAX_K>
 struct HashTableGPUDriver<MAX_K>::HashTableDriverState {
   cudaEvent_t event;
+  QuickTimer ht_timer;
 };
 
 /*
@@ -169,6 +170,7 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block() {
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, uint16_t kmer_count, char left, char right) {
+  dstate->ht_timer.start();
   memcpy(host_kmers + num_entries * N_LONGS, kmer, N_LONGS * sizeof(uint64_t));
   memcpy(host_counts + num_entries * 4, (void *)&kmer_count, 2);
   host_counts[num_entries * 4 + 2] = left;
@@ -179,6 +181,7 @@ void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, uint16_t kmer_
     // cp to dev and run kernel
     num_entries = 0;
   }
+  dstate->ht_timer.stop();
 }
 
 static int sum_ext_counts(const KmerCountsArray &kmer_counts) {
@@ -189,7 +192,8 @@ static int sum_ext_counts(const KmerCountsArray &kmer_counts) {
 
 // FIXME: this should return a vector of kmers and their counts for inserting into the CPU hash table
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::done_inserts() {
+double HashTableGPUDriver<MAX_K>::done_inserts() {
+  dstate->ht_timer.start();
   if (num_entries) {
     insert_kmer_block();
     num_entries = 0;
@@ -201,7 +205,10 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
 
   // purge kmers with freq < 2
   auto num_prior_kmers = tmp_ht.size();
-  if (!num_prior_kmers) return;
+  if (!num_prior_kmers) {
+    dstate->ht_timer.stop();
+    return dstate->ht_timer.get_elapsed();
+  }
   int64_t num_purged = 0;
   for (auto it = tmp_ht.begin(); it != tmp_ht.end();) {
     const KmerCountsArray &kmer_counts = it->second;
@@ -220,7 +227,10 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   }
 
   int num_unique_kmers = tmp_ht.size();
-  if (!num_unique_kmers) return;
+  if (!num_unique_kmers) {
+    dstate->ht_timer.stop();
+    return dstate->ht_timer.get_elapsed();
+  }
   // now copy the gpu hash table values across to the host
   output_kmers.resize(num_unique_kmers * N_LONGS);
   output_kmer_counts.resize(num_unique_kmers * 9);
@@ -238,6 +248,8 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   output_index = 0;
   tmp_ht.clear();
   std::unordered_map<KmerArray<MAX_K>, KmerCountsArray>().swap(tmp_ht);
+  dstate->ht_timer.stop();
+  return dstate->ht_timer.get_elapsed();
 }
 
 template <int MAX_K>
