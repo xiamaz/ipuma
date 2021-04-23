@@ -49,8 +49,8 @@ using upcxx_utils::IntermittentTimer;
 inline bool _verbose = false;
 
 struct StageTimers {
-  IntermittentTimer *merge_reads, *cache_reads, *load_ctgs, *analyze_kmers, *dbjg_traversal, *alignments, *kernel_alns, *localassm,
-      *cgraph, *dump_ctgs, *compute_kmer_depths, *shuffle_reads;
+  IntermittentTimer *merge_reads, *cache_reads, *load_ctgs, *analyze_kmers, *kernel_kmer_analysis, *dbjg_traversal, *alignments,
+      *kernel_alns, *localassm, *cgraph, *dump_ctgs, *compute_kmer_depths, *shuffle_reads;
 };
 
 inline StageTimers stage_timers = {
@@ -58,6 +58,7 @@ inline StageTimers stage_timers = {
     .cache_reads = new IntermittentTimer(__FILENAME__ + string(":") + "Load reads into cache", "Loading reads into cache"),
     .load_ctgs = new IntermittentTimer(__FILENAME__ + string(":") + "Load contigs", "Loading contigs"),
     .analyze_kmers = new IntermittentTimer(__FILENAME__ + string(":") + "Analyze kmers", "Analyzing kmers"),
+    .kernel_kmer_analysis = new IntermittentTimer(__FILENAME__ + string(":") + "Kernel kmer analysis", ""),
     .dbjg_traversal = new IntermittentTimer(__FILENAME__ + string(":") + "Traverse deBruijn graph", "Traversing deBruijn graph"),
     .alignments = new IntermittentTimer(__FILENAME__ + string(":") + "Alignments", "Aligning reads to contigs"),
     .kernel_alns = new IntermittentTimer(__FILENAME__ + string(":") + "Kernel alignments", ""),

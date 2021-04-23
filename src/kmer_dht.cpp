@@ -54,6 +54,7 @@
 #include "upcxx_utils/timers.hpp"
 #include "zstr.hpp"
 
+#include "stage_timers.hpp"
 #include "kmer_dht.hpp"
 
 using namespace std;
@@ -366,6 +367,7 @@ void KmerDHT<MAX_K>::flush_updates() {
     // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
     auto gpu_elapsed_time = gpu_driver->done_inserts();
     SLOG("Elapsed GPU time for kmer hash tables ", fixed, setprecision(3), gpu_elapsed_time, " s\n");
+    stage_timers.kernel_kmer_analysis->inc_elapsed(gpu_elapsed_time);
     while (true) {
       assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
       auto next_entry = gpu_driver->get_next_entry();

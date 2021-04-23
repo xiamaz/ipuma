@@ -351,6 +351,7 @@ int main(int argc, char **argv) {
     else
       SLOG("    ", stage_timers.cache_reads->get_final(), "\n");
     SLOG("    ", stage_timers.analyze_kmers->get_final(), "\n");
+    SLOG("      -> ", stage_timers.kernel_kmer_analysis->get_final(), "\n");
     SLOG("    ", stage_timers.dbjg_traversal->get_final(), "\n");
     SLOG("    ", stage_timers.alignments->get_final(), "\n");
     SLOG("      -> ", stage_timers.kernel_alns->get_final(), "\n");
