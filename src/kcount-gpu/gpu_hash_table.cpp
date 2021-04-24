@@ -152,7 +152,7 @@ HashTableGPUDriver<MAX_K>::HashTableGPUDriver()
     , t_kernel(0) {}
 
 template <int MAX_K>
-bool HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem,
+void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem,
                                      double &init_time, size_t &gpu_bytes_reqd) {
   this->upcxx_rank_me = upcxx_rank_me;
   this->upcxx_rank_n = upcxx_rank_n;
@@ -166,11 +166,14 @@ bool HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   prime.set(max_elems);
   ht_capacity = prime.get();
   // now check that we have sufficient memory for the required capacity
-  gpu_bytes_reqd =
-      ht_capacity * (sizeof(KeyValue<MAX_K>) + sizeof(uint8_t)) + KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * sizeof(KmerAndExts<MAX_K>);
+  size_t elem_size = sizeof(KeyValue<MAX_K>) + sizeof(uint8_t);
+  size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * sizeof(KmerAndExts<MAX_K>);
+  gpu_bytes_reqd = ht_capacity * elem_size + elem_buff_size;
 
-  if (gpu_bytes_reqd > gpu_avail_mem) return false;
-
+  if (gpu_bytes_reqd > gpu_avail_mem) {
+    prime.set((gpu_avail_mem - elem_buff_size) / elem_size);
+    ht_capacity = prime.get();
+  }
   init_timer.start();
   malloc_timer.start();
   // FIXME: to go on device
@@ -191,7 +194,6 @@ bool HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
 
   init_timer.stop();
   init_time = init_timer.get_elapsed();
-  return true;
 }
 
 template <int MAX_K>
@@ -223,10 +225,14 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block(int64_t &num_new_elems, int64_
     char left_ext = elem_buff_host[i].left;
     char right_ext = elem_buff_host[i].right;
     uint64_t slot = prime.mod(kmer.hash());
+    auto start_slot = slot;
     num_inserts++;
-    // loop in linear probe to max 100 (?) steps
+    // probe loop
     int j;
-    const int MAX_PROBE = 100;
+    // restricting the number of probes reduces computation (and imbalance) at the cost of some loss of completeness
+    // for a good hash function, this should only kick in when the hash table load is getting really high
+    // then we'll start to see the loss of inserts
+    const int MAX_PROBE = min((size_t)100, elems_dev.size());
     for (j = 0; j < MAX_PROBE; j++) {
       bool found = false;
       // empty if the count is zero
@@ -244,9 +250,10 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block(int64_t &num_new_elems, int64_
         inc_ext_count(kmer_counts, right_ext, kmer_count, false);
         break;
       }
-      // slot was occupied, linear probe along to next available slot
-      // slot = (slot + 1) & (ht_capacity - 1);
-      slot = (slot + 1) % ht_capacity;
+      // linear probing
+      // slot = (start_slot + j) % ht_capacity;
+      // quadratic probing - worse cache but reduced clustering
+      slot = (start_slot + (j + 1) * (j + 1)) % ht_capacity;
     }
     if (j == MAX_PROBE) {
       // this entry didn't get inserted because we ran out of probing time (and probably space)
@@ -317,6 +324,11 @@ int HashTableGPUDriver<MAX_K>::get_N_LONGS() {
 template <int MAX_K>
 int64_t HashTableGPUDriver<MAX_K>::get_num_elems() {
   return num_elems;
+}
+
+template <int MAX_K>
+int64_t HashTableGPUDriver<MAX_K>::get_capacity() {
+  return ht_capacity;
 }
 
 template <int MAX_K>

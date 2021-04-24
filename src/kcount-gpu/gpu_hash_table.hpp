@@ -120,7 +120,7 @@ class HashTableGPUDriver {
   HashTableGPUDriver();
   ~HashTableGPUDriver();
 
-  bool init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem, double &init_time,
+  void init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem, double &init_time,
             size_t &gpu_bytes_reqd);
 
   void insert_kmer(const uint64_t *kmer, uint16_t kmer_count, char left, char right);
@@ -133,6 +133,7 @@ class HashTableGPUDriver {
 
   double get_kernel_elapsed_time();
 
+  int64_t get_capacity();
   int64_t get_num_elems();
   int64_t get_num_inserts();
   int64_t get_num_dropped();
