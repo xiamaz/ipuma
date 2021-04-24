@@ -223,7 +223,7 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
          get_size_str(gpu_tot_mem), KNORM, "\n");
     double init_time;
     size_t gpu_bytes_reqd;
-    if (!gpu_driver->init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), my_adjusted_num_kmers * 5, gpu_avail_mem * 2, init_time,
+    if (!gpu_driver->init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), my_adjusted_num_kmers * 4, gpu_avail_mem, init_time,
                           gpu_bytes_reqd)) {
       SDIE("Insufficient memory on GPU for this size dataset, require ", get_size_str(gpu_bytes_reqd), " but only have ",
            get_size_str(gpu_avail_mem * 0.9), " available.");

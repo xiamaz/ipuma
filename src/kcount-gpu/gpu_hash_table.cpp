@@ -152,7 +152,7 @@ HashTableGPUDriver<MAX_K>::HashTableGPUDriver()
     , t_kernel(0) {}
 
 template <int MAX_K>
-bool HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, int gpu_avail_mem,
+bool HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem,
                                      double &init_time, size_t &gpu_bytes_reqd) {
   this->upcxx_rank_me = upcxx_rank_me;
   this->upcxx_rank_n = upcxx_rank_n;
@@ -165,9 +165,6 @@ bool HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
 
   prime.set(max_elems);
   ht_capacity = prime.get();
-  if (!upcxx_rank_me) {
-    cout << "max elems " << max_elems << " with prime " << ht_capacity << endl;
-  }
   // now check that we have sufficient memory for the required capacity
   gpu_bytes_reqd =
       ht_capacity * (sizeof(KeyValue<MAX_K>) + sizeof(uint8_t)) + KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * sizeof(KmerAndExts<MAX_K>);
