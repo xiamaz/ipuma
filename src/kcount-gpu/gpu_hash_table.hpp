@@ -51,26 +51,16 @@
 
 namespace kcount_gpu {
 
-using KmerCountsArray = std::array<uint16_t, 9>;
+using KmerCountsArray = uint16_t[9];
 
 template <int MAX_K>
-class KmerArray {
+struct KmerArray {
+  // these are public anyway to make it easier for gpu __device__ code
   static const int N_LONGS = (MAX_K + 31) / 32;
-  std::array<uint64_t, N_LONGS> longs;
+  uint64_t longs[N_LONGS];
 
- public:
   KmerArray() {}
   KmerArray(const uint64_t *x);
-
-  void operator=(const uint64_t *kmer);
-
-  const uint64_t *to_array() const { return longs.data(); }
-
-  bool operator==(const KmerArray &o) const;
-
-  size_t hash() const;
-
-  static int get_N_LONGS() { return N_LONGS; }
 };
 
 template <int MAX_K>
@@ -103,9 +93,9 @@ class HashTableGPUDriver {
   size_t output_index = 0;
   // array of key-value pairs
   // KeyValue<MAX_K> *elems_dev = nullptr;
-  std::vector<KeyValue<MAX_K>> elems_dev;
+  KeyValue<MAX_K> *elems_dev = nullptr;
   // locks for mutexes
-  int8_t *locks_dev = nullptr;
+  int *locks_dev = nullptr;
   // for buffering elements in the host memory
   KmerAndExts<MAX_K> *elem_buff_host = nullptr;
 
@@ -141,14 +131,3 @@ class HashTableGPUDriver {
 };
 
 }  // namespace kcount_gpu
-
-namespace std {
-
-template <int MAX_K>
-struct hash<kcount_gpu::KmerArray<MAX_K>> {
-  static const int N_LONGS = (MAX_K + 31) / 32;
-
-  size_t operator()(kcount_gpu::KmerArray<MAX_K> const &kmer_array) const { return kmer_array.hash(); }
-};
-
-}  // namespace std

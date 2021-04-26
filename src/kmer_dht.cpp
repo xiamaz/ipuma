@@ -217,7 +217,7 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     // calculate total slots for hash table. Reserve space for parse and pack
     int bytes_for_pnp = KCOUNT_GPU_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
     int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
-    auto gpu_avail_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
+    auto gpu_avail_mem = (gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp) * 0.9;
     auto gpu_tot_mem = gpu_utils::get_tot_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
     SLOG(KLMAGENTA, "Available GPU memory per rank for kcount hash table is ", get_size_str(gpu_avail_mem), " out of a max of ",
          get_size_str(gpu_tot_mem), KNORM, "\n");
@@ -227,7 +227,7 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     gpu_driver->init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), my_adjusted_num_kmers, gpu_avail_mem, init_time, gpu_bytes_reqd);
     auto capacity = gpu_driver->get_capacity();
     if (capacity < my_adjusted_num_kmers)
-      SWARN("Require ", get_size_str(gpu_bytes_reqd), " memory on GPU but only have ", get_size_str(gpu_avail_mem * 0.9),
+      SWARN("Require ", get_size_str(gpu_bytes_reqd), " memory on GPU but only have ", get_size_str(gpu_avail_mem),
             ". Capacity is ", perc_str(capacity, my_adjusted_num_kmers), " of max expected kmers");
 
     SLOG(KLMAGENTA, "Initialized hash table GPU driver in ", std::fixed, std::setprecision(3), init_time, " s", KNORM, "\n");
@@ -387,8 +387,8 @@ void KmerDHT<MAX_K>::flush_updates() {
       if (!next_entry) break;
       auto &counts_array = next_entry->val;
       ExtCounts left_exts = {0}, right_exts = {0};
-      left_exts.set(counts_array.data() + 1);
-      right_exts.set(counts_array.data() + 5);
+      left_exts.set(counts_array + 1);
+      right_exts.set(counts_array + 5);
       KmerCounts kmer_counts = {.left_exts = left_exts,
                                 .right_exts = right_exts,
                                 .uutig_frag = nullptr,
@@ -400,7 +400,7 @@ void KmerDHT<MAX_K>::flush_updates() {
       if ((kmer_counts.count < 2) || (kmer_counts.left_exts.is_zero() && kmer_counts.right_exts.is_zero())) {
         num_purged++;
       } else {
-        Kmer<MAX_K> kmer(next_entry->key.to_array());
+        Kmer<MAX_K> kmer(next_entry->key.longs);
         kmers->insert({kmer, kmer_counts});
       }
     }
