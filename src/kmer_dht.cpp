@@ -375,11 +375,14 @@ void KmerDHT<MAX_K>::flush_updates() {
     auto num_dropped_elems = reduce_one(gpu_driver->get_num_dropped(), op_fast_add, 0).wait();
     auto num_inserts = reduce_one(gpu_driver->get_num_inserts(), op_fast_add, 0).wait();
     auto num_elems = reduce_one(gpu_driver->get_num_elems(), op_fast_add, 0).wait();
+    auto avg_num_gpu_calls = reduce_one(gpu_driver->get_num_gpu_calls(), op_fast_add, 0).wait() / rank_n();
+    auto max_num_gpu_calls = reduce_one(gpu_driver->get_num_gpu_calls(), op_fast_max, 0).wait();
     auto avg_load_factor = reduce_one(gpu_driver->get_load_factor(), op_fast_add, 0).wait() / rank_n();
     auto max_load_factor = reduce_one(gpu_driver->get_load_factor(), op_fast_max, 0).wait();
     if (num_dropped_elems) SWARN("GPU hash table: failed to insert ", perc_str(num_dropped_elems, num_inserts), " elements\n");
     SLOG("GPU hash table: load factor ", fixed, setprecision(3), avg_load_factor, " avg, ", max_load_factor, " max, num entries ",
          num_elems, "\n");
+    SLOG("GPU called ", avg_num_gpu_calls, " avg, ", max_num_gpu_calls, " max\n");
     int64_t num_purged = 0;
     while (true) {
       assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());

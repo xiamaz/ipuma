@@ -101,6 +101,7 @@ class HashTableGPUDriver {
   int64_t num_elems = 0;
   int64_t num_dropped_entries = 0;
   int64_t num_attempted_inserts = 0;
+  int num_gpu_calls = 0;
 
   void insert_kmer_block(int64_t &num_new_elems, int64_t &num_inserts, int64_t &num_dropped);
 
@@ -126,6 +127,7 @@ class HashTableGPUDriver {
   int64_t get_num_inserts();
   int64_t get_num_dropped();
   double get_load_factor();
+  int get_num_gpu_calls();
 };
 
 }  // namespace kcount_gpu
