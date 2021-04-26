@@ -55,7 +55,6 @@ using KmerCountsArray = uint16_t[9];
 
 template <int MAX_K>
 struct KmerArray {
-  // these are public anyway to make it easier for gpu __device__ code
   static const int N_LONGS = (MAX_K + 31) / 32;
   uint64_t longs[N_LONGS];
 
@@ -92,7 +91,6 @@ class HashTableGPUDriver {
   std::vector<KeyValue<MAX_K>> output_elems;
   size_t output_index = 0;
   // array of key-value pairs
-  // KeyValue<MAX_K> *elems_dev = nullptr;
   KeyValue<MAX_K> *elems_dev = nullptr;
   // locks for mutexes
   int *locks_dev = nullptr;
