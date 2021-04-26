@@ -856,25 +856,26 @@ uint64_t Prime::div(uint64_t x) {
 /// Return the remainder after division
 uint64_t Prime::mod(uint64_t x) { return x - div(x) * number.value; }
 
-/// Pick a suitable prime number larger than the argument
-void Prime::set(uint64_t desiredSize) {
+void Prime::set(uint64_t desiredSize, bool larger) {
   // Sanity check, should never happen for practical usage as we are close to 2^64
   if (desiredSize >= prime_nums[primeCount - 1].value) {
     number = prime_nums[primeCount - 1];
     return;
   }
-  // Pick a number
-  unsigned lower = 0, upper = primeCount - 1;
-  while (lower != upper) {
-    unsigned middle = lower + ((upper - lower) / 2);
-    if (prime_nums[middle].value < desiredSize) {
-      lower = middle + 1;
-    } else if (prime_nums[middle].value > desiredSize) {
-      upper = middle;
-    } else {
-      number = prime_nums[middle];
-      return;
+  if (larger) {
+    for (int i = 0; i < primeCount; i++) {
+      if (prime_nums[i].value >= desiredSize) {
+        number = prime_nums[i];
+        return;
+      }
+    }
+  } else {
+    for (int i = primeCount - 1; i >= 0; i--) {
+      if (prime_nums[i].value <= desiredSize) {
+        number = prime_nums[i];
+        return;
+      }
     }
   }
-  number = prime_nums[lower];
 }
+

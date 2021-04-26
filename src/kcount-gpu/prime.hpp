@@ -46,8 +46,8 @@ class Prime {
   uint64_t div(uint64_t x);
   /// Return the remainder after division
   uint64_t mod(uint64_t x);
-  /// Pick a suitable prime number larger than the argument
-  void set(uint64_t desiredSize);
+  /// Pick a suitable prime number, larger or smaller
+  void set(uint64_t desiredSize, bool larger);
 };
 //---------------------------------------------------------------------------
 }  // namespace primes

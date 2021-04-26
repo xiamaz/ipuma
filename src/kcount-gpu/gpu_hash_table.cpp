@@ -102,7 +102,8 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   int my_gpu_id = upcxx_rank_me % device_count;
   cudaErrchk(cudaSetDevice(my_gpu_id));
 
-  prime.set(max_elems);
+  // set to upper prime number
+  prime.set(max_elems, true);
   ht_capacity = prime.get();
   // now check that we have sufficient memory for the required capacity
   size_t elem_size = sizeof(KeyValue<MAX_K>) + sizeof(uint8_t);
@@ -110,7 +111,8 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   gpu_bytes_reqd = ht_capacity * elem_size + elem_buff_size;
 
   if (gpu_bytes_reqd > gpu_avail_mem) {
-    prime.set((gpu_avail_mem - elem_buff_size) / elem_size);
+    // insufficient capacity - set to lower prime number so we don't run out of memory
+    prime.set((gpu_avail_mem - elem_buff_size) / elem_size, false);
     ht_capacity = prime.get();
   }
   init_timer.start();
@@ -236,7 +238,6 @@ void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, uint16_t kmer_
   num_buff_entries++;
   if (num_buff_entries == KCOUNT_GPU_HASHTABLE_BLOCK_SIZE) {
     // cp to dev and run kernel
-    // if (!upcxx_rank_me) cout << "calling insert_kmer_block from insert_kmer\n";
     insert_kmer_block(num_elems, num_attempted_inserts, num_dropped_entries);
     num_buff_entries = 0;
   }
@@ -247,7 +248,6 @@ template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::done_inserts() {
   dstate->ht_timer.start();
   if (num_buff_entries) {
-    if (!upcxx_rank_me) cout << "calling insert_kmer_block from done_inserts\n";
     insert_kmer_block(num_elems, num_attempted_inserts, num_dropped_entries);
     num_buff_entries = 0;
   }
