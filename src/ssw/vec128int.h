@@ -37,19 +37,19 @@ VECLIB_INLINE __m128i vec_load1q(__m128i const *address)
 /* Load 128-bits of integer data, unaligned */
 VECLIB_INLINE __m128i vec_loadu1q(__m128i const *address)
 {
-    __m128i src1, src2;
-
-    src1 = vec_ld(0, (vector unsigned char *)address);
-    src2 = vec_ld(16, (vector unsigned char *)address);
-
 #if (defined(__ibmxl__) && (defined(__LITTLE_ENDIAN__) || defined(__BIG_ENDIAN__)))
+    __m128i src1 = vec_ld(0, (vector unsigned char *)address);
+    __m128i src2 = vec_ld(16, (vector unsigned char *)address);
     return (__m128i)vec_perm(src1, src2, vec_lvsl(0, (unsigned char *)address));
 #elif ((defined __GNUC__) && (__GCC_VERSION__ >= 492))
     return vec_xl(0, (unsigned char *)address);
 #elif (defined __GNUC__) && (__GCC_VERSION__ < 492)
+    __m128i src1 = vec_ld(0, (vector unsigned char *)address);
+    __m128i src2 = vec_ld(16, (vector unsigned char *)address);
     static const vector unsigned char permMask = { 0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00 };
     return (__m128i)vec_perm(src1, src2, vec_perm(vec_lvsl(0, (unsigned char *)address), src1, permMask));
 #endif
+
 }
 
 /* Load 128-bits of integer data, unaligned - deprecated - use previous function */
