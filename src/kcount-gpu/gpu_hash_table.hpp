@@ -86,7 +86,6 @@ class HashTableGPUDriver {
   int upcxx_rank_me;
   int upcxx_rank_n;
   int kmer_len;
-  double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
   int num_buff_entries = 0;
   std::vector<KeyValue<MAX_K>> output_elems;
   size_t output_index = 0;
@@ -98,12 +97,11 @@ class HashTableGPUDriver {
   KmerAndExts<MAX_K> *elem_buff_host = nullptr;
 
   int64_t ht_capacity = 0;
-  int64_t num_elems = 0;
   int64_t num_dropped_entries = 0;
   int64_t num_attempted_inserts = 0;
   int num_gpu_calls = 0;
 
-  void insert_kmer_block(int64_t &num_new_elems, int64_t &num_inserts, int64_t &num_dropped);
+  void insert_kmer_block(int64_t &num_inserts, int64_t &num_dropped);
 
  public:
   HashTableGPUDriver();
@@ -123,10 +121,8 @@ class HashTableGPUDriver {
   double get_kernel_elapsed_time();
 
   int64_t get_capacity();
-  int64_t get_num_elems();
   int64_t get_num_inserts();
   int64_t get_num_dropped();
-  double get_load_factor();
   int get_num_gpu_calls();
 };
 
