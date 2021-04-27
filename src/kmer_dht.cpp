@@ -410,12 +410,15 @@ void KmerDHT<MAX_K>::flush_updates() {
     double load = (double)(num_purged + kmers->size()) / gpu_driver->get_capacity();
     double avg_load_factor = reduce_one(load, op_fast_add, 0).wait() / rank_n();
     double max_load_factor = reduce_one(load, op_fast_max, 0).wait();
-    auto gpu_elapsed_time = gpu_driver->get_kernel_elapsed_time();
     SLOG(KLMAGENTA "GPU kmer hash table: load factor ", fixed, setprecision(3), avg_load_factor, " avg, ", max_load_factor,
          " max, num entries ", all_kmers_size, KNORM "\n");
 
-    stage_timers.kernel_kmer_analysis->inc_elapsed(gpu_elapsed_time);
-    SLOG(KLMAGENTA "Elapsed GPU time for kmer hash tables: ", fixed, setprecision(3), gpu_elapsed_time, " s" KNORM "\n");
+    auto gpu_time = gpu_driver->get_kernel_elapsed_time();
+    auto avg_gpu_time = reduce_one(gpu_time, op_fast_add, 0).wait() / rank_n();
+    auto max_gpu_time = reduce_one(gpu_time, op_fast_max, 0).wait();
+    stage_timers.kernel_kmer_analysis->inc_elapsed(max_gpu_time);
+    SLOG(KLMAGENTA "Elapsed GPU time for kmer hash tables: ", fixed, setprecision(3), avg_gpu_time, " s avg, ", max_gpu_time,
+         " s max" KNORM "\n");
   }
 #endif
   auto avg_kmers_processed = reduce_one(_num_kmers_counted, op_fast_add, 0).wait() / rank_n();
