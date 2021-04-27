@@ -227,8 +227,8 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       quals_block += '\0';
 #else
       process_read(kmer_len, qual_offset, seq, quals, kmer_dht, num_Ns, num_kmers, kmers);
-      progress();
 #endif
+      progress();
     }
     progbar.done();
   }
