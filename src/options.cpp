@@ -389,7 +389,7 @@ bool Options::load(int argc, char **argv) {
       ->check(CLI::Range(1, 100));
   // performance trade-offs
   app.add_option("--max-kmer-store", max_kmer_store_mb, "Maximum size for kmer store in MB per rank (set to 0 for auto 1% memory).")
-      ->check(CLI::Range(0, 1000));
+      ->check(CLI::Range(0, 5000));
   app.add_option("--max-rpcs-in-flight", max_rpcs_in_flight,
                  "Maximum number of RPCs in flight, per process (set to 0 for unlimited).")
       ->check(CLI::Range(0, 10000));
