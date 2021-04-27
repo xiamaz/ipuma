@@ -45,6 +45,7 @@
 #include <vector>
 #include <array>
 #include <unordered_map>
+#include <thread>
 
 #include "hash_funcs.h"
 #include "prime.hpp"
@@ -100,6 +101,8 @@ class HashTableGPUDriver {
   int64_t num_dropped_entries = 0;
   int64_t num_attempted_inserts = 0;
   int num_gpu_calls = 0;
+
+  std::thread *gpu_thread = nullptr;
 
   void insert_kmer_block(int64_t &num_inserts, int64_t &num_dropped);
 
