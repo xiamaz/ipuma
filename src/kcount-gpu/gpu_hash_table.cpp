@@ -44,6 +44,7 @@
 #include <sstream>
 #include <chrono>
 #include <tuple>
+#include <thread>
 #include <assert.h>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
@@ -220,18 +221,21 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block(int64_t &num_inserts, int64_t 
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, uint16_t kmer_count, char left, char right) {
-  dstate->ht_timer.start();
-  elem_buff_host[num_buff_entries].kmer = kmer;
-  elem_buff_host[num_buff_entries].count = kmer_count;
-  elem_buff_host[num_buff_entries].left = left;
-  elem_buff_host[num_buff_entries].right = right;
-  num_buff_entries++;
-  if (num_buff_entries == KCOUNT_GPU_HASHTABLE_BLOCK_SIZE) {
-    // cp to dev and run kernel
-    insert_kmer_block(num_attempted_inserts, num_dropped_entries);
-    num_buff_entries = 0;
-  }
-  dstate->ht_timer.stop();
+  thread gpu_thread([&]() {
+    dstate->ht_timer.start();
+    elem_buff_host[num_buff_entries].kmer = kmer;
+    elem_buff_host[num_buff_entries].count = kmer_count;
+    elem_buff_host[num_buff_entries].left = left;
+    elem_buff_host[num_buff_entries].right = right;
+    num_buff_entries++;
+    if (num_buff_entries == KCOUNT_GPU_HASHTABLE_BLOCK_SIZE) {
+      // cp to dev and run kernel
+      insert_kmer_block(num_attempted_inserts, num_dropped_entries);
+      num_buff_entries = 0;
+    }
+    dstate->ht_timer.stop();
+  });
+  gpu_thread.join();
 }
 
 template <int MAX_K>
