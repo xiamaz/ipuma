@@ -61,7 +61,7 @@ using namespace kcount_gpu;
 template <int MAX_K>
 struct HashTableGPUDriver<MAX_K>::HashTableDriverState {
   cudaEvent_t event;
-  QuickTimer ht_timer;
+  QuickTimer ht_timer, wait_timer;
 };
 
 template <int MAX_K>
@@ -199,10 +199,12 @@ __global__ void gpu_insert_kmer_block(KeyValue<MAX_K> *elems, int *locks, const 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::insert_kmer_block(int64_t &num_inserts, int64_t &num_dropped) {
   if (gpu_thread) {
+    dstate->wait_timer.start();
     // if (!upcxx_rank_me) cout << "joining existing gpu thread\n";
     gpu_thread->join();
     // if (!upcxx_rank_me) cout << "done with existing gpu thread\n";
     delete gpu_thread;
+    dstate->wait_timer.stop();
   }
   KmerAndExts<MAX_K> *elem_buff_dev;
   // copy across outside of thread so that we can reuse the elem_buff_host to carry on with inserts while the gpu is running
@@ -252,8 +254,10 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   if (num_buff_entries) {
     insert_kmer_block(num_attempted_inserts, num_dropped_entries);
     if (gpu_thread) {
+      dstate->wait_timer.start();
       gpu_thread->join();
       delete gpu_thread;
+      dstate->wait_timer.stop();
     }
     num_buff_entries = 0;
   }
@@ -272,8 +276,8 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
 }
 
 template <int MAX_K>
-double HashTableGPUDriver<MAX_K>::get_kernel_elapsed_time() {
-  return dstate->ht_timer.get_elapsed();
+std::pair<double, double> HashTableGPUDriver<MAX_K>::get_elapsed_time() {
+  return {dstate->ht_timer.get_elapsed(), dstate->wait_timer.get_elapsed()};
 }
 
 template <int MAX_K>

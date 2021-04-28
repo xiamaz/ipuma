@@ -121,8 +121,7 @@ class HashTableGPUDriver {
 
   static int get_N_LONGS();
 
-  double get_kernel_elapsed_time();
-
+  std::pair<double, double> get_elapsed_time();
   int64_t get_capacity();
   int64_t get_num_inserts();
   int64_t get_num_dropped();
