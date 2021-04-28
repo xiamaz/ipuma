@@ -276,8 +276,14 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
 }
 
 template <int MAX_K>
-std::pair<double, double> HashTableGPUDriver<MAX_K>::get_elapsed_time() {
-  return {dstate->ht_timer.get_elapsed(), dstate->wait_timer.get_elapsed()};
+void HashTableGPUDriver<MAX_K>::get_elapsed_time(double &gpu_time, double &gpu_wait_time) {
+  gpu_time = dstate->ht_timer.get_elapsed();
+  gpu_wait_time = dstate->wait_timer.get_elapsed();
+  /*
+  if (!upcxx_rank_me) 
+    cout << KLMAGENTA << "timers inside gpu_driver: " << dstate->ht_timer.get_elapsed() << " " << dstate->wait_timer.get_elapsed() 
+         << KNORM << endl;
+  */
 }
 
 template <int MAX_K>

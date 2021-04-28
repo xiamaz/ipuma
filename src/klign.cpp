@@ -729,7 +729,7 @@ class KmerCtgDHT {
         auto prev_bucket_count = ctg_cache.bucket_count();
         it = ctg_cache.insert({ctg_loc.cid, string(ctg_loc.clen, ' ')}).first;
         if (prev_bucket_count != ctg_cache.bucket_count())
-          SWARN("resized ctg cache from ", prev_bucket_count, " to ", ctg_cache.bucket_count());
+          SLOG_VERBOSE("resized ctg cache from ", prev_bucket_count, " to ", ctg_cache.bucket_count());
       }
       if (!found) {
         fetch_ctg_seqs_timer.start();

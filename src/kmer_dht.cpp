@@ -413,7 +413,9 @@ void KmerDHT<MAX_K>::flush_updates() {
     SLOG(KLMAGENTA "GPU kmer hash table: load factor ", fixed, setprecision(3), avg_load_factor, " avg, ", max_load_factor,
          " max, num entries ", all_kmers_size, KNORM "\n");
 
-    auto [gpu_time, gpu_wait_time] = gpu_driver->get_elapsed_time();
+    double gpu_time = 0, gpu_wait_time = 0;
+    gpu_driver->get_elapsed_time(gpu_time, gpu_wait_time);
+    //SLOG(KLMAGENTA "Timers outside gpu_driver: ", gpu_time, " ", gpu_wait_time, "\n");
     auto avg_gpu_time = reduce_one(gpu_time, op_fast_add, 0).wait() / rank_n();
     auto max_gpu_time = reduce_one(gpu_time, op_fast_max, 0).wait();
     auto avg_gpu_wait_time = reduce_one(gpu_wait_time, op_fast_add, 0).wait() / rank_n();
@@ -422,8 +424,14 @@ void KmerDHT<MAX_K>::flush_updates() {
     auto avg_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_add, 0).wait() / rank_n();
     auto max_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_max, 0).wait();
     stage_timers.kernel_kmer_analysis->inc_elapsed(max_gpu_kernel_time);
-    SLOG(KLMAGENTA "Elapsed GPU kernel time for kmer hash tables: ", fixed, setprecision(3), avg_gpu_kernel_time, " s avg, ",
-         max_gpu_kernel_time, " s max, wait time ", avg_gpu_wait_time, " s avg, ", max_gpu_wait_time, " s max" KNORM "\n");
+    SLOG(KLMAGENTA "Elapsed GPU time for kmer hash tables: kernel ", fixed, setprecision(3), avg_gpu_kernel_time, " avg, ",
+         max_gpu_kernel_time, " max; wait ", avg_gpu_wait_time, " avg, ", max_gpu_wait_time, " max; overall ",
+         avg_gpu_time, " avg, ", max_gpu_time, " max" KNORM "\n");
+    if (gpu_wait_time > 5.0 * gpu_kernel_time) 
+      WARN("Elapsed GPU time for kmer hash tables: kernel ", fixed, setprecision(3), gpu_kernel_time, "; wait ", gpu_wait_time, 
+           "; overall ", gpu_time, "\n");
+    LOG("Elapsed GPU time for kmer hash tables: kernel ", fixed, setprecision(3), gpu_kernel_time, "; wait ", gpu_wait_time, 
+        "; overall ", gpu_time, "\n");
   }
 #endif
   auto avg_kmers_processed = reduce_one(_num_kmers_counted, op_fast_add, 0).wait() / rank_n();
