@@ -105,7 +105,7 @@ auto KmerDHT<MAX_K>::update_count_func() {
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers) {
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) & defined(KCOUNT_ENABLE_GPUS)
   // FIXME: buffer hash table entries, and when full, copy across to
   // gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right);
 #endif
@@ -252,7 +252,7 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     kmer_store.set_size("kmers", max_kmer_store_bytes, max_rpcs_in_flight, useHHSS);
 
   if (use_bloom) {
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) & defined(KCOUNT_ENABLE_GPUS)
     SDIE("Cannot use bloom with GPU kmer counting");
 #endif
 
@@ -277,7 +277,7 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     double init_free_mem = get_free_mem();
     if (my_adjusted_num_kmers <= 0) DIE("no kmers to reserve space for");
     kmers->reserve(my_adjusted_num_kmers);
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) & defined(KCOUNT_ENABLE_GPUS)
     // vector<GPUKmerCounts> gpu_kmer_counts;
     // gpu_kmer_counts.reserve(KCOUNT_GPU_MAX_HT_ENTRIES);
     if (gpu_utils::get_num_node_gpus() <= 0) {
@@ -325,7 +325,7 @@ void KmerDHT<MAX_K>::clear_stores() {
 template <int MAX_K>
 KmerDHT<MAX_K>::~KmerDHT() {
   clear();
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) & defined(KCOUNT_ENABLE_GPUS)
   delete gpu_driver;
 #endif
 }
@@ -490,7 +490,7 @@ void KmerDHT<MAX_K>::flush_updates() {
     kmer_store_bloom.flush_updates();
   else
     kmer_store.flush_updates();
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) & defined(KCOUNT_ENABLE_GPUS)
     // FIXME: call gpus to process any outstanding buffered local updates
     // FIXME: copy from gpu to cpu and insert in cpu unordered_map
 #endif

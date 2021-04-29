@@ -59,7 +59,7 @@
 #include "upcxx_utils/flat_aggr_store.hpp"
 #include "upcxx_utils/three_tier_aggr_store.hpp"
 
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) & defined(KCOUNT_ENABLE_GPUS)
 #include "gpu-utils/gpu_utils.hpp"
 #include "kcount-gpu/gpu_hash_table.hpp"
 #endif
@@ -184,7 +184,7 @@ class KmerDHT {
   bool use_bloom;
   int64_t bytes_sent = 0;
   int minimizer_len = 15;
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) & defined(KCOUNT_ENABLE_GPUS)
   kcount_gpu::HashTableGPUDriver *gpu_driver;
 #endif
 
