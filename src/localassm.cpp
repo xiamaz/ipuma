@@ -50,10 +50,7 @@
 #include "contigs.hpp"
 #include "kmer_dht.hpp"
 #include "packed_reads.hpp"
-#include "upcxx_utils/log.hpp"
-#include "upcxx_utils/progress_bar.hpp"
-#include "upcxx_utils/three_tier_aggr_store.hpp"
-#include "upcxx_utils/limit_outstanding.hpp"
+#include "upcxx_utils.hpp"
 #include "utils.hpp"
 
 using namespace std;
@@ -66,6 +63,14 @@ struct CtgInfo {
   int64_t cid;
   char orient;
   char side;
+  CtgInfo()
+      : cid{}
+      , orient{}
+      , side{} {}
+  CtgInfo(int64_t _cid, char _orient, char _side)
+      : cid(_cid)
+      , orient(_orient)
+      , side(_side) {}
 #if UPCXX_VERSION < 20210300L
   char pad[6];  // necessary in upcxx < 2021.03 see upcxx Issue #427
   UPCXX_SERIALIZED_FIELDS(cid, orient, side, pad);
@@ -187,14 +192,24 @@ struct CtgData {
 };
 
 struct CtgReadData {
+  CtgReadData()
+      : cid{}
+      , side{}
+      , read_seq{} {}
+  CtgReadData(int64_t _cid, char _side, const ReadSeq _read_seq)
+      : cid(_cid)
+      , side(_side)
+      , read_seq(_read_seq) {}
   int64_t cid;
   char side;
 #if UPCXX_VERSION < 20210300L
   char pad[7];  // necessary in upcxx <= 2021.03 see upcxx Issue #427
   ReadSeq read_seq;
+
   UPCXX_SERIALIZED_FIELDS(cid, side, pad, read_seq);
 #else
   ReadSeq read_seq;
+
   UPCXX_SERIALIZED_FIELDS(cid, side, read_seq);
 #endif
 };
@@ -254,7 +269,7 @@ class CtgsWithReadsDHT {
   }
 
   void add_read(int64_t cid, char side, const ReadSeq read_seq) {
-    CtgReadData ctg_read_data = {.cid = cid, .side = side, .pad = {}, .read_seq = read_seq};
+    CtgReadData ctg_read_data(cid, side, read_seq);
     add_read(ctg_read_data);
   }
   void add_read(const CtgReadData &ctg_read_data) { ctg_read_store.update(get_target_rank(ctg_read_data.cid), ctg_read_data); }
@@ -451,9 +466,9 @@ static void process_reads(unsigned kmer_len, vector<PackedReads *> &packed_reads
                   reverse(quals_rc.begin(), quals_rc.end());
                   was_revcomp = true;
                 }
-                ctgs_to_add.push_back({ctg.cid, ctg.side, {}, {id, seq_rc, quals_rc}});
+                ctgs_to_add.push_back(CtgReadData(ctg.cid, ctg.side, {id, seq_rc, quals_rc}));
               } else {
-                ctgs_to_add.push_back({ctg.cid, ctg.side, {}, {id, seq, quals}});
+                ctgs_to_add.push_back(CtgReadData(ctg.cid, ctg.side, {id, seq, quals}));
               }
             }
           }

@@ -1,5 +1,3 @@
-#pragma once
-
 /*
  HipMer v 2.0, Copyright (c) 2020, The Regents of the University of California,
  through Lawrence Berkeley National Laboratory (subject to receipt of any required
@@ -42,83 +40,49 @@
  form.
 */
 
+#pragma once
+
 #include <iostream>
-#include <sstream>
-#include <string>
-#include <vector>
+#include <chrono>
+#include <cuda_runtime_api.h>
+#include <cuda.h>
 
-#include "version.h"
+#include "upcxx_utils/colors.h"
+#include "gpu_common.hpp"
 
-using std::cout;
-using std::endl;
-using std::string;
-using std::vector;
+// Functions that are common to all cuda code; not to be used by upcxx code
 
-class Options {
-  vector<string> splitter(string in_pattern, string &content);
+#define cudaErrchk(ans) \
+  { gpu_utils::gpu_die((ans), __FILE__, __LINE__); }
 
-  template <typename T>
-  string vec_to_str(const vector<T> &vec, const string &delimiter = ",") {
-    std::ostringstream oss;
-    for (auto elem : vec) {
-      oss << elem;
-      if (elem != vec.back()) oss << delimiter;
-    }
-    return oss.str();
+namespace gpu_utils {
+
+inline void gpu_die(cudaError_t code, const char *file, int line, bool abort = true) {
+  if (code != cudaSuccess) {
+    std::cerr << KLRED << "<" << file << ":" << line << "> ERROR:" << KNORM << cudaGetErrorString(code) << "\n";
+    std::abort();
+    // do not throw exceptions -- does not work properly within progress() throw std::runtime_error(outstr);
   }
+}
 
-  bool extract_previous_lens(vector<unsigned> &lens, unsigned k);
+using timepoint_t = std::chrono::time_point<std::chrono::high_resolution_clock>;
 
-  void get_restart_options();
-
-  double setup_output_dir();
-
-  double setup_log_file();
-
-  bool find_restart(string stage_type, int k);
-
-  static string get_job_id();
+class QuickTimer {
+  timepoint_t t;
+  double secs = 0;
 
  public:
-  vector<string> reads_fnames;
-  vector<string> paired_fnames;
-  vector<string> unpaired_fnames;
-  vector<unsigned> kmer_lens = {};
-  int max_kmer_len = 0;
-  int prev_kmer_len = 0;
-  vector<unsigned> scaff_kmer_lens = {};
-  int qual_offset = 33;
-  bool verbose = false;
-  int max_kmer_store_mb = 0;  // per rank - default to use 1% of node memory
-  int max_rpcs_in_flight = 100;
-  bool use_heavy_hitters = false;  // only enable when files are localized
-  bool force_bloom = false;
-  int dmin_thres = 2.0;
-  bool checkpoint = true;
-  bool checkpoint_merged = false;
-  bool klign_kmer_cache = false;
-  bool post_assm_aln = false;
-  bool post_assm_abundances = false;
-  bool post_assm_only = false;
-  bool dump_gfa = false;
-  bool show_progress = false;
-  string pin_by = "core";
-  int ranks_per_gpu = 0;  // autodetect
-  int max_worker_threads = 3;
-  string ctgs_fname;
-  vector<int> insert_size = {0, 0};
-  int min_ctg_print_len = 500;
-  int break_scaff_Ns = 10;
-  string output_dir;
-  string setup_time;
-  bool restart = false;
-  bool shuffle_reads = false;
-  bool dump_kmers = false;
+  QuickTimer()
+      : secs(0) {}
 
-  Options();
-  ~Options();
+  void start() { t = std::chrono::high_resolution_clock::now(); }
 
-  void cleanup();
+  void stop() {
+    std::chrono::duration<double> t_elapsed = std::chrono::high_resolution_clock::now() - t;
+    secs += t_elapsed.count();
+  }
 
-  bool load(int argc, char **argv);
+  double get_elapsed() { return secs; }
 };
+
+}  // namespace gpu_utils

@@ -52,6 +52,7 @@
 #include "upcxx_utils.hpp"
 #include "upcxx_utils/thread_pool.hpp"
 #include "utils.hpp"
+#include "gpu-utils/gpu_utils.hpp"
 
 #include "kmer.hpp"
 
@@ -74,12 +75,7 @@ int main(int argc, char **argv) {
   upcxx::promise<> report_init_timings(1);
 
 #if defined(ENABLE_GASNET_STATS)
-  const char *gasnet_stats_stage = getenv("GASNET_STATS_STAGE");
-  const char *gasnet_statsfile = getenv("GASNET_STATSFILE");
-  if (gasnet_stats_stage && gasnet_statsfile) {
-    mhm2_stats_set_mask("");
-    _gasnet_stats_stage = string(gasnet_stats_stage);
-  }
+  mhm2_gasnet_stats_start();
 #endif
 
   // we wish to have all ranks start at the same time to determine actual timing
@@ -171,13 +167,13 @@ int main(int argc, char **argv) {
   int num_gpus = -1;
   size_t gpu_mem = 0;
   bool init_gpu_thread = true;
-  SLOG_VERBOSE("Detecting GPUs\n");
   auto detect_gpu_fut = execute_in_thread_pool(
-      [&gpu_startup_duration, &num_gpus, &gpu_mem]() { adept_sw::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
+      [&gpu_startup_duration, &num_gpus, &gpu_mem]() { gpu_utils::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
   detect_gpu_fut = detect_gpu_fut.then([&gpu_startup_duration, &num_gpus, &gpu_mem]() {
     if (num_gpus > 0) {
-      SLOG_VERBOSE("Using ", num_gpus, " GPUs on node 0, with ", get_size_str(gpu_mem), " available memory. Detected in ",
-                   gpu_startup_duration, " s.\n");
+      SLOG_VERBOSE(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
+                   get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
+      SLOG_VERBOSE(gpu_utils::get_gpu_device_description());
     } else {
       SWARN("Compiled for GPUs but no GPUs available...");
     }
@@ -198,11 +194,10 @@ int main(int argc, char **argv) {
     double elapsed_write_io_t = 0;
     if (!options->restart | !options->checkpoint_merged) {
       // merge the reads and insert into the packed reads memory cache
-      BEGIN_GASNET_STATS("merge_reads");
       stage_timers.merge_reads->start();
       merge_reads(options->reads_fnames, options->qual_offset, elapsed_write_io_t, packed_reads_list, options->checkpoint_merged);
       stage_timers.merge_reads->stop();
-      END_GASNET_STATS();
+      mhm2_gasnet_stats_dump("merge reads\n");
     } else {
       // since this is a restart with checkpoint_merged true, the merged reads should be on disk already
       // load the merged reads instead of merge the original ones again
@@ -232,6 +227,16 @@ int main(int argc, char **argv) {
     int prev_kmer_len = options->prev_kmer_len;
     int ins_avg = 0;
     int ins_stddev = 0;
+
+#ifdef ENABLE_GPUS
+    if (init_gpu_thread) {
+      Timer t("Waiting for GPU to be initialized (should be noop)");
+      init_gpu_thread = false;
+      detect_gpu_fut.wait();
+    }
+    int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
+    SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
+#endif
 
     // contigging loops
     if (options->kmer_lens.size()) {
@@ -267,14 +272,6 @@ int main(int argc, char **argv) {
         prev_kmer_len = kmer_len;
       }
     }
-
-#ifdef ENABLE_GPUS
-    if (init_gpu_thread) {
-      Timer t("Waiting for GPU to be initialized (should be noop)");
-      init_gpu_thread = false;
-      detect_gpu_fut.wait();
-    }
-#endif
 
     // scaffolding loops
     if (options->dump_gfa) {

@@ -363,7 +363,6 @@ bool Options::load(int argc, char **argv) {
       ->check(CLI::Range(0, 100000));
   auto *output_dir_opt = app.add_option("-o,--output", output_dir, "Output directory.")->capture_default_str();
   app.add_flag("--shuffle-reads", shuffle_reads, "Shuffle reads to improve locality")->capture_default_str();
-  app.add_flag("--minimizers", use_minimizers, "Use minimizers for kmer analysis and alignment")->capture_default_str();
   app.add_flag("--checkpoint", checkpoint, "Enable checkpointing.")
       ->default_val(checkpoint ? "true" : "false")
       ->capture_default_str()
@@ -384,6 +383,7 @@ bool Options::load(int argc, char **argv) {
       ->capture_default_str();
   app.add_flag("--post-asm-only", post_assm_only, "Only run post assembly (alignment and/or abundances).")->capture_default_str();
   app.add_flag("--write-gfa", dump_gfa, "Write scaffolding contig graphs in GFA2 format.")->capture_default_str();
+  app.add_flag("--dump-kmers", dump_kmers, "Write kmers out after kmer counting.")->capture_default_str();
   app.add_option("-Q, --quality-offset", qual_offset, "Phred encoding offset (auto-detected by default).")
       ->check(CLI::IsMember({0, 33, 64}));
   app.add_flag("--progress", show_progress, "Show progress bars for operations.");

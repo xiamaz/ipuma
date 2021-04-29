@@ -1,5 +1,3 @@
-#pragma once
-
 /*
  HipMer v 2.0, Copyright (c) 2020, The Regents of the University of California,
  through Lawrence Berkeley National Laboratory (subject to receipt of any required
@@ -44,81 +42,66 @@
 
 #include <iostream>
 #include <sstream>
-#include <string>
-#include <vector>
+#include <chrono>
+#include <tuple>
+#include <cuda_runtime_api.h>
+#include <cuda.h>
 
-#include "version.h"
+#include "upcxx_utils/colors.h"
+#include "gpu_common.hpp"
+#include "gpu_hash_table.hpp"
 
-using std::cout;
-using std::endl;
-using std::string;
-using std::vector;
+using namespace std;
+using namespace gpu_utils;
 
-class Options {
-  vector<string> splitter(string in_pattern, string &content);
-
-  template <typename T>
-  string vec_to_str(const vector<T> &vec, const string &delimiter = ",") {
-    std::ostringstream oss;
-    for (auto elem : vec) {
-      oss << elem;
-      if (elem != vec.back()) oss << delimiter;
-    }
-    return oss.str();
-  }
-
-  bool extract_previous_lens(vector<unsigned> &lens, unsigned k);
-
-  void get_restart_options();
-
-  double setup_output_dir();
-
-  double setup_log_file();
-
-  bool find_restart(string stage_type, int k);
-
-  static string get_job_id();
-
- public:
-  vector<string> reads_fnames;
-  vector<string> paired_fnames;
-  vector<string> unpaired_fnames;
-  vector<unsigned> kmer_lens = {};
-  int max_kmer_len = 0;
-  int prev_kmer_len = 0;
-  vector<unsigned> scaff_kmer_lens = {};
-  int qual_offset = 33;
-  bool verbose = false;
-  int max_kmer_store_mb = 0;  // per rank - default to use 1% of node memory
-  int max_rpcs_in_flight = 100;
-  bool use_heavy_hitters = false;  // only enable when files are localized
-  bool force_bloom = false;
-  int dmin_thres = 2.0;
-  bool checkpoint = true;
-  bool checkpoint_merged = false;
-  bool klign_kmer_cache = false;
-  bool post_assm_aln = false;
-  bool post_assm_abundances = false;
-  bool post_assm_only = false;
-  bool dump_gfa = false;
-  bool show_progress = false;
-  string pin_by = "core";
-  int ranks_per_gpu = 0;  // autodetect
-  int max_worker_threads = 3;
-  string ctgs_fname;
-  vector<int> insert_size = {0, 0};
-  int min_ctg_print_len = 500;
-  int break_scaff_Ns = 10;
-  string output_dir;
-  string setup_time;
-  bool restart = false;
-  bool shuffle_reads = false;
-  bool dump_kmers = false;
-
-  Options();
-  ~Options();
-
-  void cleanup();
-
-  bool load(int argc, char **argv);
+struct kcount_gpu::HashTableDriverState {
+  cudaEvent_t event;
 };
+
+static size_t get_nearest_pow2(size_t val) {
+  for (size_t i = val; i >= 1; i--) {
+    // If i is a power of 2
+    if ((i & (i - 1)) == 0) return i;
+  }
+  return 0;
+}
+
+kcount_gpu::HashTableGPUDriver::HashTableGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs,
+                                                   int gpu_avail_mem, double &init_time)
+    : upcxx_rank_me(upcxx_rank_me)
+    , upcxx_rank_n(upcxx_rank_n)
+    , kmer_len(kmer_len)
+    , num_kmer_longs(num_kmer_longs)
+    , t_func(0)
+    , t_malloc(0)
+    , t_cp(0)
+    , t_kernel(0) {
+  QuickTimer init_timer, malloc_timer;
+  init_timer.start();
+  int device_count = 0;
+  cudaErrchk(cudaGetDeviceCount(&device_count));
+  int my_gpu_id = upcxx_rank_me % device_count;
+  cudaErrchk(cudaSetDevice(my_gpu_id));
+  int bytes_per_slot = num_kmer_longs * sizeof(uint64_t) + sizeof(uint16_t) + 1;
+  // ensure the size is a power of 2 in order to use optimized binary & instead of % for index calculation
+  num_ht_slots = get_nearest_pow2(gpu_avail_mem / bytes_per_slot);
+  malloc_timer.start();
+  cudaErrchk(cudaMalloc(&dev_kmers, num_ht_slots * num_kmer_longs * sizeof(uint64_t)));
+  cudaErrchk(cudaMalloc(&dev_counts, num_ht_slots * sizeof(uint16_t)));
+  cudaErrchk(cudaMalloc(&dev_mutexes, num_ht_slots * sizeof(char)));
+  malloc_timer.stop();
+  t_malloc += malloc_timer.get_elapsed();
+
+  dstate = new HashTableDriverState();
+  init_timer.stop();
+  init_time = init_timer.get_elapsed();
+}
+
+kcount_gpu::HashTableGPUDriver::~HashTableGPUDriver() {
+  cudaFree(dev_kmers);
+  cudaFree(dev_counts);
+  cudaFree(dev_mutexes);
+  delete dstate;
+}
+
+int kcount_gpu::HashTableGPUDriver::get_num_ht_slots() { return num_ht_slots; }

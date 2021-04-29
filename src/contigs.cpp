@@ -74,23 +74,10 @@ using upcxx::promise;
 using upcxx::rank_me;
 using upcxx::rank_n;
 using upcxx::reduce_one;
+using upcxx::rpc;
+using upcxx::rpc_ff;
 
 using namespace upcxx_utils;
-
-#ifdef USE_KMER_DEPTHS
-
-uint16_t Contig::get_kmer_depth(int start_pos, int kmer_len, int prev_kmer_len) {
-  int len_diff = kmer_len - prev_kmer_len;
-  int d = 0;
-  for (int i = start_pos; i < start_pos + len_diff; i++) {
-    assert(i < kmer_depths.size());
-    d += kmer_depths[i];
-  }
-  d /= len_diff;
-  return d;
-}
-
-#endif
 
 void Contigs::clear() {
   contigs.clear();
@@ -224,7 +211,7 @@ void Contigs::load_contigs(const string &ctgs_fname) {
   string cname, seq, buf;
   size_t bytes_read = 0;
   size_t file_size = 0;
-  
+
   // broadcast the file size
   if (rank_me() == 0) {
     file_size = upcxx_utils::get_file_size(ctgs_fname);
@@ -232,13 +219,14 @@ void Contigs::load_contigs(const string &ctgs_fname) {
   ifstream ctgs_file(ctgs_fname);
   if (!ctgs_file.is_open()) DIE("Could not open ctgs file '", ctgs_fname, "': ", strerror(errno));
   file_size = upcxx::broadcast(file_size, 0).wait();
-  
+
   auto start_offset = get_file_offset_for_rank(ctgs_file, rank_me(), ctg_prefix, file_size);
   if (rank_me() > 0) {
     // notify previous rank of its stop offset
-    rpc_ff(rank_me() - 1, [](dist_object<promise<size_t>> &dist_stop_prom, size_t stop_offset) {
-      dist_stop_prom->fulfill_result(stop_offset);
-    }, dist_stop_prom, start_offset);
+    rpc_ff(
+        rank_me() - 1,
+        [](dist_object<promise<size_t>> &dist_stop_prom, size_t stop_offset) { dist_stop_prom->fulfill_result(stop_offset); },
+        dist_stop_prom, start_offset);
   }
   if (rank_me() == rank_n() - 1) {
     dist_stop_prom->fulfill_result(file_size);
@@ -266,7 +254,8 @@ void Contigs::load_contigs(const string &ctgs_fname) {
     Contig contig = {.id = id, .seq = seq, .depth = depth};
     add_contig(contig);
   }
-  if (ctgs_file.tellg() < stop_offset) DIE("Did not read the entire contigs file from ", start_offset, " to ", stop_offset, " tellg=", ctgs_file.tellg());
+  if (ctgs_file.tellg() < stop_offset)
+    DIE("Did not read the entire contigs file from ", start_offset, " to ", stop_offset, " tellg=", ctgs_file.tellg());
   progbar.done();
   barrier();
   SLOG_VERBOSE("Loaded ", reduce_one(contigs.size(), op_fast_add, 0).wait(), " contigs (",
