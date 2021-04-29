@@ -445,7 +445,7 @@ bool KmerDHT<MAX_K>::kmer_exists(Kmer<MAX_K> kmer_fw) {
   const Kmer<MAX_K> kmer_rc = kmer_fw.revcomp();
   const Kmer<MAX_K> *kmer = (kmer_rc < kmer_fw) ? &kmer_rc : &kmer_fw;
 
-  return rpc(get_kmer_target_rank(*kmer, &kmer_rc),
+  return rpc(get_kmer_target_rank(kmer_fw, &kmer_rc),
              [](Kmer<MAX_K> kmer, dist_object<KmerMap> &kmers) -> bool {
                const auto it = kmers->find(kmer);
                if (it == kmers->end()) return false;

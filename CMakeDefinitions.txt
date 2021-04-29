@@ -52,6 +52,8 @@ add_definitions(-DKCOUNT_KMER_CACHE_MAX_LOAD=0.8)
 # how many bytes for sequences (reads or ctgs) gathered at one time for processing on GPU.
 # Must be big enough for expected max ctg length
 add_definitions(-DKCOUNT_GPU_SEQ_BLOCK_SIZE=5242880)
+# enable GPU in kcount
+#add_definitions(-DKCOUNT_ENABLE_GPU)
 
 # dynamic min depth used in debruijn graph traversal
 add_definitions(-DDYN_MIN_DEPTH=0.9)
