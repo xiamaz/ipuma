@@ -116,6 +116,8 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
 
   // for transferring elements from host to gpu
   elem_buff_host = new KmerAndExts<MAX_K>[KCOUNT_GPU_HASHTABLE_BLOCK_SIZE];
+  // buffer on the device
+  cudaErrchk(cudaMalloc(&elem_buff_dev, KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * sizeof(KmerAndExts<MAX_K>)));
 
   dstate = new HashTableDriverState();
   init_timer.stop();
@@ -187,9 +189,7 @@ __global__ void gpu_insert_kmer_block(KeyValue<MAX_K> *elems, const KmerAndExts<
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::insert_kmer_block(int64_t &num_inserts, int64_t &num_dropped) {
-  KmerAndExts<MAX_K> *elem_buff_dev;
   // copy across outside of thread so that we can reuse the elem_buff_host to carry on with inserts while the gpu is running
-  cudaErrchk(cudaMalloc(&elem_buff_dev, num_buff_entries * sizeof(KmerAndExts<MAX_K>)));
   cudaErrchk(cudaMemcpy(elem_buff_dev, elem_buff_host, num_buff_entries * sizeof(KmerAndExts<MAX_K>), cudaMemcpyHostToDevice));
   int mingridsize = 0;
   int threadblocksize = 0;
@@ -214,7 +214,6 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block(int64_t &num_inserts, int64_t 
 
   dstate->kernel_timer.inc(elapsed_time / 1000.0);
 
-  cudaFree(elem_buff_dev);
   num_gpu_calls++;
 }
 
@@ -249,7 +248,10 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   output_elems.resize(ht_capacity);
   output_index = 0;
 
+  // FIXME: can do this async - also
+  // FIXME: call kernel to reduce sparse elems array to compact before copying
   cudaErrchk(cudaMemcpy(output_elems.data(), elems_dev, ht_capacity * sizeof(KeyValue<MAX_K>), cudaMemcpyDeviceToHost));
+  cudaFree(elem_buff_dev);
   cudaFree(elems_dev);
   dstate->ht_timer.stop();
 }

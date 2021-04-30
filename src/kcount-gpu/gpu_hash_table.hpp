@@ -97,6 +97,8 @@ class HashTableGPUDriver {
   KeyValue<MAX_K> *elems_dev = nullptr;
   // for buffering elements in the host memory
   KmerAndExts<MAX_K> *elem_buff_host = nullptr;
+  // for transferring host memory buffer to device
+  KmerAndExts<MAX_K> *elem_buff_dev = nullptr;
 
   int64_t ht_capacity = 0;
   int64_t num_dropped_entries = 0;
