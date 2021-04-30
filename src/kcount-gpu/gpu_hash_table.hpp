@@ -52,12 +52,15 @@
 
 namespace kcount_gpu {
 
-using KmerCountsArray = uint16_t[9];
+using cu_uint64_t = unsigned long long int;
+static_assert(sizeof(cu_uint64_t) == 8);
+using count_t = uint32_t;
+using KmerCountsArray = count_t[9];
 
 template <int MAX_K>
 struct KmerArray {
   static const int N_LONGS = (MAX_K + 31) / 32;
-  uint64_t longs[N_LONGS];
+  cu_uint64_t longs[N_LONGS];
 
   KmerArray() {}
   KmerArray(const uint64_t *x);
@@ -72,7 +75,7 @@ struct KeyValue {
 template <int MAX_K>
 struct KmerAndExts {
   KmerArray<MAX_K> kmer;
-  uint16_t count;
+  count_t count;
   uint8_t left, right;
 };
 
@@ -113,7 +116,7 @@ class HashTableGPUDriver {
   void init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem, double &init_time,
             size_t &gpu_bytes_reqd);
 
-  void insert_kmer(const uint64_t *kmer, uint16_t kmer_count, char left, char right);
+  void insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right);
 
   void done_inserts();
 

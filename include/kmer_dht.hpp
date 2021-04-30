@@ -93,6 +93,13 @@ struct ExtCounts {
     count_T = counts[3];
   }
 
+  void set(uint32_t *counts) {
+    count_A = static_cast<uint16_t>(counts[0]);
+    count_C = static_cast<uint16_t>(counts[1]);
+    count_G = static_cast<uint16_t>(counts[2]);
+    count_T = static_cast<uint16_t>(counts[3]);
+  }
+
   std::array<std::pair<char, int>, 4> get_sorted() {
     std::array<std::pair<char, int>, 4> counts = {std::make_pair('A', (int)count_A), std::make_pair('C', (int)count_C),
                                                   std::make_pair('G', (int)count_G), std::make_pair('T', (int)count_T)};
