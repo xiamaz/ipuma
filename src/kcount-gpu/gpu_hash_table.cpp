@@ -114,9 +114,6 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   cudaErrchk(cudaMalloc(&elems_dev, ht_capacity * sizeof(KeyValue<MAX_K>)));
   cudaErrchk(cudaMemset(elems_dev, 0, ht_capacity * sizeof(KeyValue<MAX_K>)));
 
-  cudaErrchk(cudaMalloc(&locks_dev, ht_capacity * sizeof(int)));
-  cudaErrchk(cudaMemset(locks_dev, 0, ht_capacity * sizeof(int)));
-
   // for transferring elements from host to gpu
   elem_buff_host = new KmerAndExts<MAX_K>[KCOUNT_GPU_HASHTABLE_BLOCK_SIZE];
 
@@ -131,8 +128,8 @@ HashTableGPUDriver<MAX_K>::~HashTableGPUDriver() {
 }
 
 template <int MAX_K>
-__global__ void gpu_insert_kmer_block(KeyValue<MAX_K> *elems, int *locks, const KmerAndExts<MAX_K> *elem_buff,
-                                      uint32_t num_buff_entries, cu_uint64_t ht_capacity) {
+__global__ void gpu_insert_kmer_block(KeyValue<MAX_K> *elems, const KmerAndExts<MAX_K> *elem_buff, uint32_t num_buff_entries,
+                                      cu_uint64_t ht_capacity) {
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
 
   int N_LONGS = KmerArray<MAX_K>::N_LONGS;
@@ -204,7 +201,7 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block(int64_t &num_inserts, int64_t 
   cudaErrchk(cudaEventCreate(&stop_evt));
   cudaErrchk(cudaEventRecord(start_evt, 0));
 
-  gpu_insert_kmer_block<<<gridsize, threadblocksize>>>(elems_dev, locks_dev, elem_buff_dev, num_buff_entries, ht_capacity);
+  gpu_insert_kmer_block<<<gridsize, threadblocksize>>>(elems_dev, elem_buff_dev, num_buff_entries, ht_capacity);
 
   cudaErrchk(cudaEventRecord(stop_evt, 0));
   cudaErrchk(cudaEventSynchronize(stop_evt));
@@ -254,7 +251,6 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
 
   cudaErrchk(cudaMemcpy(output_elems.data(), elems_dev, ht_capacity * sizeof(KeyValue<MAX_K>), cudaMemcpyDeviceToHost));
   cudaFree(elems_dev);
-  cudaFree(locks_dev);
   dstate->ht_timer.stop();
 }
 

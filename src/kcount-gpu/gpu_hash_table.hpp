@@ -95,8 +95,6 @@ class HashTableGPUDriver {
   size_t output_index = 0;
   // array of key-value pairs
   KeyValue<MAX_K> *elems_dev = nullptr;
-  // locks for mutexes
-  int *locks_dev = nullptr;
   // for buffering elements in the host memory
   KmerAndExts<MAX_K> *elem_buff_host = nullptr;
 

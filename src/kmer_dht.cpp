@@ -385,7 +385,8 @@ void KmerDHT<MAX_K>::flush_updates() {
       KmerCounts kmer_counts = {.left_exts = left_exts,
                                 .right_exts = right_exts,
                                 .uutig_frag = nullptr,
-                                .count = static_cast<uint16_t>(counts_array[0]),
+                                .count = static_cast<kmer_count_t>(std::min(
+                                    static_cast<kcount_gpu::count_t>(std::numeric_limits<kmer_count_t>::max()), counts_array[0])),
                                 .left = 'X',
                                 .right = 'X',
                                 .from_ctg = false};
