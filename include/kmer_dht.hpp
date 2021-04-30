@@ -112,7 +112,7 @@ struct ExtCounts {
 
   ext_count_t inc_with_limit(int count1, int count2) {
     count1 += count2;
-    return std::min(count1, (int)numeric_limits<ext_count_t>::max());
+    return std::min(count1, (int)std::numeric_limits<ext_count_t>::max());
   }
 
   void inc(char ext, int count) {
