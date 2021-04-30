@@ -372,6 +372,8 @@ void KmerDHT<MAX_K>::flush_updates() {
     // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
     gpu_driver->done_inserts();
     int64_t num_purged = 0;
+    Timer insert_timer("gpu insert to cpu timer");
+    insert_timer.start();
     while (true) {
       assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
       auto next_entry = gpu_driver->get_next_entry();
@@ -398,6 +400,11 @@ void KmerDHT<MAX_K>::flush_updates() {
         kmers->insert({kmer, kmer_counts});
       }
     }
+    insert_timer.stop();
+    auto all_avg_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_add, 0).wait() / rank_n();
+    auto all_max_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_max, 0).wait();
+    SLOG(KLMAGENTA, "Inserting kmers from GPU to cpu hash table took ", all_avg_elapsed_time, " avg, ", all_max_elapsed_time,
+         " max" KNORM "\n");
     // a bunch of stats about the hash table on the GPU
     auto num_dropped_elems = reduce_one(gpu_driver->get_num_dropped(), op_fast_add, 0).wait();
     auto num_inserts = reduce_one(gpu_driver->get_num_inserts(), op_fast_add, 0).wait();
