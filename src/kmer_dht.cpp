@@ -404,34 +404,32 @@ void KmerDHT<MAX_K>::flush_updates() {
     auto max_num_gpu_calls = reduce_one(gpu_driver->get_num_gpu_calls(), op_fast_max, 0).wait();
     if (num_dropped_elems) SWARN("GPU hash table: failed to insert ", perc_str(num_dropped_elems, num_inserts), " elements\n");
     SLOG(KLMAGENTA "Number of calls to hash table GPU driver: ", avg_num_gpu_calls, " avg, ", max_num_gpu_calls, " max" KNORM "\n");
+    LOG("Number of calls to hash table GPU driver: ", gpu_driver->get_num_gpu_calls(), "\n");
+    //WARN("Number of calls to hash table GPU driver: ", gpu_driver->get_num_gpu_calls(), "\n");
     auto all_num_purged = reduce_one(num_purged, op_fast_add, 0).wait();
     auto all_kmers_size = reduce_one(kmers->size(), op_fast_add, 0).wait();
-    SLOG("Purged ", perc_str(all_num_purged, all_num_purged + all_kmers_size), " singleton kmers\n");
+    SLOG_VERBOSE("Purged ", perc_str(all_num_purged, all_num_purged + all_kmers_size), " singleton kmers\n");
     double load = (double)(num_purged + kmers->size()) / gpu_driver->get_capacity();
     double avg_load_factor = reduce_one(load, op_fast_add, 0).wait() / rank_n();
     double max_load_factor = reduce_one(load, op_fast_max, 0).wait();
     SLOG(KLMAGENTA "GPU kmer hash table: load factor ", fixed, setprecision(3), avg_load_factor, " avg, ", max_load_factor,
          " max, num entries ", all_kmers_size, KNORM "\n");
+    LOG("GPU kmer hash table: load factor ", fixed, setprecision(3), load, ", num entries ", kmers->size(), "\n");
+    //WARN("GPU kmer hash table: load factor ", fixed, setprecision(3), load, ", num entries ", kmers->size(), "\n");
 
-    double gpu_time = 0, gpu_wait_time = 0;
-    gpu_driver->get_elapsed_time(gpu_time, gpu_wait_time);
-    //SLOG(KLMAGENTA "Timers outside gpu_driver: ", gpu_time, " ", gpu_wait_time, "\n");
+    double gpu_time = 0, gpu_kernel_time = 0;
+    gpu_driver->get_elapsed_time(gpu_time, gpu_kernel_time);
     auto avg_gpu_time = reduce_one(gpu_time, op_fast_add, 0).wait() / rank_n();
     auto max_gpu_time = reduce_one(gpu_time, op_fast_max, 0).wait();
-    auto avg_gpu_wait_time = reduce_one(gpu_wait_time, op_fast_add, 0).wait() / rank_n();
-    auto max_gpu_wait_time = reduce_one(gpu_wait_time, op_fast_max, 0).wait();
-    auto gpu_kernel_time = gpu_time - gpu_wait_time;
     auto avg_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_add, 0).wait() / rank_n();
     auto max_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_max, 0).wait();
     stage_timers.kernel_kmer_analysis->inc_elapsed(max_gpu_kernel_time);
     SLOG(KLMAGENTA "Elapsed GPU time for kmer hash tables: kernel ", fixed, setprecision(3), avg_gpu_kernel_time, " avg, ",
-         max_gpu_kernel_time, " max; wait ", avg_gpu_wait_time, " avg, ", max_gpu_wait_time, " max; overall ",
-         avg_gpu_time, " avg, ", max_gpu_time, " max" KNORM "\n");
-    if (gpu_wait_time > 5.0 * gpu_kernel_time) 
-      WARN("Elapsed GPU time for kmer hash tables: kernel ", fixed, setprecision(3), gpu_kernel_time, "; wait ", gpu_wait_time, 
-           "; overall ", gpu_time, "\n");
-    LOG("Elapsed GPU time for kmer hash tables: kernel ", fixed, setprecision(3), gpu_kernel_time, "; wait ", gpu_wait_time, 
-        "; overall ", gpu_time, "\n");
+         max_gpu_kernel_time, " max; overall ", avg_gpu_time, " avg, ", max_gpu_time, " max" KNORM "\n");
+    //if (gpu_time > 5.0 * gpu_kernel_time) 
+    //  WARN("Elapsed GPU time for kmer hash tables: kernel ", fixed, setprecision(3), gpu_kernel_time, "; overall ", gpu_time, "\n");
+    LOG("Elapsed GPU time for kmer hash tables: kernel ", fixed, setprecision(3), gpu_kernel_time, "; overall ", gpu_time, "\n");
+    //WARN("Elapsed GPU time for kmer hash tables: kernel ", fixed, setprecision(3), gpu_kernel_time, "; overall ", gpu_time, "\n");
   }
 #endif
   auto avg_kmers_processed = reduce_one(_num_kmers_counted, op_fast_add, 0).wait() / rank_n();

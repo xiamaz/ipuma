@@ -205,10 +205,15 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   vector<Kmer<MAX_K>> kmers;
 #endif
 
+  int64_t tot_num_local_reads = 0;
+  for (auto packed_reads : packed_reads_list) {
+    tot_num_local_reads += packed_reads->get_local_num_reads();
+  }
+  ProgressBar progbar(tot_num_local_reads, "Processing reads to count kmers");
+
   for (auto packed_reads : packed_reads_list) {
     packed_reads->reset();
     string id, seq, quals;
-    ProgressBar progbar(packed_reads->get_local_num_reads(), "Processing reads to count kmers");
     while (true) {
       if (!packed_reads->get_next_read(id, seq, quals)) break;
       num_reads++;
@@ -230,13 +235,13 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
 #endif
       progress();
     }
-    progbar.done();
   }
 #ifdef ENABLE_GPUS
   if (!seq_block.empty()) {
     process_read_block_gpu(kmer_len, qual_offset, seq_block, quals_block, kmer_dht, num_Ns, num_kmers, num_gpu_waits);
     num_read_blocks++;
   }
+  progbar.done();
   SLOG(KLMAGENTA, "Number of calls to progress while PnP GPU driver was running: ", num_gpu_waits, KNORM, "\n");
   auto [gpu_time_tot, gpu_time_malloc, gpu_time_cp, gpu_time_kernel] = gpu_driver->get_elapsed_times();
   SLOG(KLMAGENTA, "Number of calls to PnP GPU kernel: ", num_read_blocks, KNORM, "\n");
@@ -244,6 +249,8 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
        ", cp ", gpu_time_cp, ", kernel ", gpu_time_kernel, KNORM, "\n");
   delete gpu_driver;
   gpu_driver = nullptr;
+#else
+  progbar.done();
 #endif
 
   kmer_dht->flush_updates();

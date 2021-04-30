@@ -82,6 +82,8 @@ class QuickTimer {
     secs += t_elapsed.count();
   }
 
+  void inc(double s) { secs += s;}
+
   double get_elapsed() { return secs; }
 };
 

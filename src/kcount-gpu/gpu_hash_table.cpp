@@ -61,7 +61,7 @@ using namespace kcount_gpu;
 template <int MAX_K>
 struct HashTableGPUDriver<MAX_K>::HashTableDriverState {
   cudaEvent_t event;
-  QuickTimer ht_timer, wait_timer;
+  QuickTimer ht_timer, kernel_timer;
 };
 
 template <int MAX_K>
@@ -168,7 +168,7 @@ __global__ void gpu_insert_kmer_block(KeyValue<MAX_K> *elems, int *locks, const 
     for (j = 0; j < MAX_PROBE; j++) {
       bool found = false;
       // try to get lock on slot
-      while (atomicCAS(&locks[slot], 0, 1) == 1)
+//      while (atomicCAS(&locks[slot], 0, 1) == 1)
         ;
       // empty if the count is zero
       if (!elems[slot].val[0]) {
@@ -182,12 +182,12 @@ __global__ void gpu_insert_kmer_block(KeyValue<MAX_K> *elems, int *locks, const 
         kmer_counts[0] = inc_ext_count_with_limit(kmer_counts[0], kmer_count);
         inc_ext_count(kmer_counts, left_ext, kmer_count, true);
         inc_ext_count(kmer_counts, right_ext, kmer_count, false);
-        atomicExch(&locks[slot], 0);
+//        atomicExch(&locks[slot], 0);
         break;
       }
-      atomicExch(&locks[slot], 0);
+//      atomicExch(&locks[slot], 0);
       // linear probing
-      // slot = (start_slot + j) % ht_capacity;
+      //slot = (start_slot + j) % ht_capacity;
       // quadratic probing - worse cache but reduced clustering
       slot = (start_slot + (j + 1) * (j + 1)) % ht_capacity;
     }
@@ -198,6 +198,7 @@ __global__ void gpu_insert_kmer_block(KeyValue<MAX_K> *elems, int *locks, const 
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::insert_kmer_block(int64_t &num_inserts, int64_t &num_dropped) {
+/*
   if (gpu_thread) {
     dstate->wait_timer.start();
     // if (!upcxx_rank_me) cout << "joining existing gpu thread\n";
@@ -206,29 +207,44 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block(int64_t &num_inserts, int64_t 
     delete gpu_thread;
     dstate->wait_timer.stop();
   }
+*/
   KmerAndExts<MAX_K> *elem_buff_dev;
   // copy across outside of thread so that we can reuse the elem_buff_host to carry on with inserts while the gpu is running
   cudaErrchk(cudaMalloc(&elem_buff_dev, num_buff_entries * sizeof(KmerAndExts<MAX_K>)));
   // if (!upcxx_rank_me) cout << "Copying " << num_buff_entries << " entries from host to device\n";
   cudaErrchk(cudaMemcpy(elem_buff_dev, elem_buff_host, num_buff_entries * sizeof(KmerAndExts<MAX_K>), cudaMemcpyHostToDevice));
-  gpu_thread = new thread(
-      [](int num_buff_entries, KmerAndExts<MAX_K> *elem_buff_dev, KeyValue<MAX_K> *elems_dev, int *locks_dev, int ht_capacity,
-         int upcxx_rank_me) {
+  //gpu_thread = new thread(
+//      [](int num_buff_entries, KmerAndExts<MAX_K> *elem_buff_dev, KeyValue<MAX_K> *elems_dev, int *locks_dev, int ht_capacity,
+//         int upcxx_rank_me) {
         // if (!upcxx_rank_me) cout << "inside insert_kmer_block thread\n";
-        cudaEvent_t evt;
-        cudaEventCreate(&evt);
-        int mingridsize = 0;
-        int threadblocksize = 0;
-        cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_insert_kmer_block<MAX_K>, 0, 0);
-        int gridsize = ((uint32_t)num_buff_entries + threadblocksize - 1) / threadblocksize;
-        gpu_insert_kmer_block<<<gridsize, threadblocksize>>>(elems_dev, locks_dev, elem_buff_dev, (uint32_t)num_buff_entries,
-                                                             ht_capacity);
-        cudaEventRecord(evt);
-        cudaEventSynchronize(evt);
-        cudaFree(elem_buff_dev);
+  int mingridsize = 0;
+  int threadblocksize = 0;
+  cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_insert_kmer_block<MAX_K>, 0, 0));
+  int gridsize = ((uint32_t)num_buff_entries + threadblocksize - 1) / threadblocksize;
+
+  cudaEvent_t start_evt, stop_evt;
+  cudaErrchk(cudaEventCreate(&start_evt));
+  cudaErrchk(cudaEventCreate(&stop_evt));
+  cudaErrchk(cudaEventRecord(start_evt, 0));
+
+  gpu_insert_kmer_block<<<gridsize, threadblocksize>>>(elems_dev, locks_dev, elem_buff_dev, (uint32_t)num_buff_entries,
+                                                       ht_capacity);
+
+  cudaErrchk(cudaEventRecord(stop_evt, 0));
+  cudaErrchk(cudaEventSynchronize(stop_evt));
+
+  float elapsed_time = 0;
+  cudaErrchk(cudaEventElapsedTime(&elapsed_time, start_evt, stop_evt));
+
+  cudaErrchk(cudaEventDestroy(start_evt));
+  cudaErrchk(cudaEventDestroy(stop_evt));
+  
+  dstate->kernel_timer.inc(elapsed_time / 1000.0);
+
+  cudaFree(elem_buff_dev);
         // if (!upcxx_rank_me) cout << "DONE insert_kmer_block thread\n";
-      },
-      num_buff_entries, elem_buff_dev, elems_dev, locks_dev, ht_capacity, upcxx_rank_me);
+//      },
+//      num_buff_entries, elem_buff_dev, elems_dev, locks_dev, ht_capacity, upcxx_rank_me);
   num_gpu_calls++;
 }
 
@@ -253,12 +269,13 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   dstate->ht_timer.start();
   if (num_buff_entries) {
     insert_kmer_block(num_attempted_inserts, num_dropped_entries);
+    /*
     if (gpu_thread) {
       dstate->wait_timer.start();
       gpu_thread->join();
       delete gpu_thread;
       dstate->wait_timer.stop();
-    }
+      }*/
     num_buff_entries = 0;
   }
   // delete to make space before returning the hash table entries
@@ -276,9 +293,9 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
 }
 
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::get_elapsed_time(double &gpu_time, double &gpu_wait_time) {
+void HashTableGPUDriver<MAX_K>::get_elapsed_time(double &gpu_time, double &gpu_kernel_time) {
   gpu_time = dstate->ht_timer.get_elapsed();
-  gpu_wait_time = dstate->wait_timer.get_elapsed();
+  gpu_kernel_time = dstate->kernel_timer.get_elapsed();
   /*
   if (!upcxx_rank_me) 
     cout << KLMAGENTA << "timers inside gpu_driver: " << dstate->ht_timer.get_elapsed() << " " << dstate->wait_timer.get_elapsed() 
