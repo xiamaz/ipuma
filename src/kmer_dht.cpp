@@ -420,10 +420,12 @@ void KmerDHT<MAX_K>::flush_updates() {
     double avg_load_factor = reduce_one(load, op_fast_add, 0).wait() / rank_n();
     double max_load_factor = reduce_one(load, op_fast_max, 0).wait();
     int64_t all_num_gpu_entries = reduce_one(gpu_driver->get_num_entries(), op_fast_add, 0).wait();
-    SLOG(KLMAGENTA "GPU kmer hash table: load factor ", fixed, setprecision(3), avg_load_factor, " avg, ", max_load_factor,
-         " max, num entries in found in hash table ", all_num_entries, " num entries reported for gpu ht ", all_num_gpu_entries,
-         KNORM "\n");
-    SLOG("Purged ", perc_str(all_num_purged, all_num_purged + all_kmers_size), " singleton kmers\n");
+    SLOG(KLMAGENTA "GPU kmer hash table load factor ", fixed, setprecision(3), avg_load_factor, " avg, ", max_load_factor,
+         " max" KNORM "\n");
+    if (all_num_gpu_entries != all_num_entries)
+      WARN("Mismatch in number of entries reported by GPU vs counted in CPU: ", all_num_gpu_entries, " != ", all_num_entries,
+           KNORM "\n");
+    SLOG("Purged ", perc_str(all_num_purged, all_num_purged + all_kmers_size), " singleton kmers out of ", all_num_entries, "\n");
 
     double gpu_time = 0, gpu_kernel_time = 0, buff_memcpy_time = 0, ht_memcpy_time = 0;
     gpu_driver->get_elapsed_time(gpu_time, gpu_kernel_time, buff_memcpy_time, ht_memcpy_time);

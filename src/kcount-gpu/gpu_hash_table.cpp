@@ -242,13 +242,14 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block() {
   t.start();
   gpu_insert_kmer_block<<<gridsize, threadblocksize>>>(elems_dev, elem_buff_dev, num_buff_entries, ht_capacity, counts_gpu);
   t.stop();
+  dstate->kernel_timer.inc(t.get_elapsed());
+
   unsigned int counts_host[NUM_COUNTS];
   cudaErrchk(cudaMemcpy(&counts_host, counts_gpu, NUM_COUNTS * sizeof(unsigned int), cudaMemcpyDeviceToHost));
   cudaFree(counts_gpu);
   num_attempted_inserts += counts_host[0];
   num_dropped_inserts += counts_host[1];
   num_new_inserts += counts_host[2];
-  dstate->kernel_timer.inc(t.get_elapsed());
   num_gpu_calls++;
   if (static_cast<unsigned int>(num_buff_entries) != counts_host[0])
     cerr << KLRED << "[" << upcxx_rank_me << "] WARNING: " << KNORM
@@ -281,6 +282,7 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   }
   // delete to make space before returning the hash table entries
   if (elem_buff_host) delete[] elem_buff_host;
+  cudaFree(elem_buff_dev);
   // now copy the gpu hash table values across to the host
   // We only do this once, which requires enough memory on the host to store the full GPU hash table, but since the GPU memory
   // is generally a lot less than the host memory, it should be fine.
@@ -292,7 +294,6 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   dstate->ht_memcpy_timer.start();
   cudaErrchk(cudaMemcpy(output_elems.data(), elems_dev, ht_capacity * sizeof(KeyValue<MAX_K>), cudaMemcpyDeviceToHost));
   dstate->ht_memcpy_timer.stop();
-  cudaFree(elem_buff_dev);
   cudaFree(elems_dev);
   dstate->ht_timer.stop();
 }
@@ -310,7 +311,7 @@ template <int MAX_K>
 KeyValue<MAX_K> *HashTableGPUDriver<MAX_K>::get_next_entry() {
   if (output_elems.empty() || output_index == output_elems.size()) return nullptr;
   output_index++;
-  return &(output_elems[output_index]);
+  return &(output_elems[output_index - 1]);
 }
 
 template <int MAX_K>
