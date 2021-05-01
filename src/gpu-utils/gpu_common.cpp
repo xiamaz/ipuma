@@ -40,97 +40,57 @@
  form.
 */
 
-#pragma once
-
-#include <vector>
+#include <iostream>
 #include <array>
-#include <unordered_map>
-#include <thread>
 
-#include "hash_funcs.h"
-#include "prime.hpp"
+#include "upcxx_utils/colors.h"
+#include "gpu_common.hpp"
 
-namespace kcount_gpu {
+namespace gpu_common {
 
-using cu_uint64_t = unsigned long long int;
-static_assert(sizeof(cu_uint64_t) == 8);
-using count_t = uint32_t;
-using KmerCountsArray = count_t[9];
+void gpu_die(cudaError_t code, const char *file, int line, bool abort) {
+  if (code != cudaSuccess) {
+    std::cerr << KLRED << "<" << file << ":" << line << "> ERROR:" << KNORM << cudaGetErrorString(code) << "\n";
+    std::abort();
+    // do not throw exceptions -- does not work properly within progress() throw std::runtime_error(outstr);
+  }
+}
 
-template <int MAX_K>
-struct KmerArray {
-  static const int N_LONGS = (MAX_K + 31) / 32;
-  cu_uint64_t longs[N_LONGS];
+QuickTimer::QuickTimer()
+    : secs(0) {}
 
-  KmerArray() {}
-  KmerArray(const uint64_t *x);
-};
+void QuickTimer::start() { t = std::chrono::high_resolution_clock::now(); }
 
-template <int MAX_K>
-struct KeyValue {
-  KmerArray<MAX_K> key;
-  KmerCountsArray val;
-};
+void QuickTimer::stop() {
+  std::chrono::duration<double> t_elapsed = std::chrono::high_resolution_clock::now() - t;
+  secs += t_elapsed.count();
+}
 
-template <int MAX_K>
-struct KmerAndExts {
-  KmerArray<MAX_K> kmer;
-  count_t count;
-  uint8_t left, right;
-};
+void QuickTimer::inc(double s) { secs += s; }
 
-template <int MAX_K>
-class HashTableGPUDriver {
-  static const int N_LONGS = (MAX_K + 31) / 32;
-  struct HashTableDriverState;
-  // stores CUDA specific variables
-  HashTableDriverState *dstate = nullptr;
-  primes::Prime prime;
+double QuickTimer::get_elapsed() { return secs; }
 
-  int upcxx_rank_me;
-  int upcxx_rank_n;
-  int kmer_len;
-  int num_buff_entries = 0;
-  std::vector<KeyValue<MAX_K>> output_elems;
-  size_t output_index = 0;
-  // array of key-value pairs
-  KeyValue<MAX_K> *elems_dev = nullptr;
-  // for buffering elements in the host memory
-  KmerAndExts<MAX_K> *elem_buff_host = nullptr;
-  // for transferring host memory buffer to device
-  KmerAndExts<MAX_K> *elem_buff_dev = nullptr;
+GPUTimer::GPUTimer() {
+  cudaErrchk(cudaEventCreate(&start_event));
+  cudaErrchk(cudaEventCreate(&stop_event));
+  elapsed_t_ms = 0;
+}
 
-  int64_t ht_capacity = 0;
-  int64_t num_dropped_inserts = 0;
-  int64_t num_attempted_inserts = 0;
-  int64_t num_new_inserts = 0;
-  int num_gpu_calls = 0;
+GPUTimer::~GPUTimer() {
+  cudaErrchk(cudaEventDestroy(start_event));
+  cudaErrchk(cudaEventDestroy(stop_event));
+}
 
-  std::thread *gpu_thread = nullptr;
+void GPUTimer::start() { cudaErrchk(cudaEventRecord(start_event, 0)); }
 
-  void insert_kmer_block();
+void GPUTimer::stop() {
+  cudaErrchk(cudaEventRecord(stop_event, 0));
+  cudaErrchk(cudaEventSynchronize(stop_event));
+  float ms;
+  cudaErrchk(cudaEventElapsedTime(&ms, start_event, stop_event));
+  elapsed_t_ms += ms;
+}
 
- public:
-  HashTableGPUDriver();
-  ~HashTableGPUDriver();
+double GPUTimer::get_elapsed() { return elapsed_t_ms / 1000.0; }
 
-  void init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem, double &init_time,
-            size_t &gpu_bytes_reqd);
-
-  void insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right);
-
-  void done_inserts();
-
-  KeyValue<MAX_K> *get_next_entry();
-
-  static int get_N_LONGS();
-
-  void get_elapsed_time(double &gpu_time, double &gpu_wait_time, double &buff_memcpy_time, double &ht_memcpy_time);
-  int64_t get_capacity();
-  int64_t get_num_attempted_inserts();
-  int64_t get_num_dropped();
-  int64_t get_num_entries();
-  int get_num_gpu_calls();
-};
-
-}  // namespace kcount_gpu
+}  // namespace gpu_common

@@ -39,12 +39,12 @@ message(STATUS "ARCH_FLAGS=${ARCH_FLAGS}")
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-Wall,${OpenMP_CXX_FLAGS} ${ARCH_FLAGS}")
 message(STATUS "CMAKE_CUDA_FLAGS=${CMAKE_CUDA_FLAGS}")
 
-add_library(GPU_UTILS_LIBRARY_obj OBJECT gpu_utils.cpp)
+add_library(GPU_UTILS_LIBRARY_obj OBJECT gpu_utils.cpp gpu_common.cpp)
 if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13)
   target_link_libraries(GPU_UTILS_LIBRARY_obj INTERFACE OpenMP::OpenMP_CXX)
 endif()
 
-set_source_files_properties(gpu_utils.cpp PROPERTIES LANGUAGE CUDA LINKER_LANGUAGE CUDA)
+set_source_files_properties(gpu_utils.cpp gpu_common.cpp PROPERTIES LANGUAGE CUDA LINKER_LANGUAGE CUDA)
 option(GPU_UTILS_SHARED "GPU-utils shared library" OFF)
 option(GPU_UTILS_STATIC "GPU-utils static library" ON)
 

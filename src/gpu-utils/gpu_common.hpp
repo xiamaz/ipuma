@@ -47,23 +47,14 @@
 #include <cuda_runtime_api.h>
 #include <cuda.h>
 
-#include "upcxx_utils/colors.h"
-#include "gpu_common.hpp"
-
 // Functions that are common to all cuda code; not to be used by upcxx code
 
 #define cudaErrchk(ans) \
-  { gpu_utils::gpu_die((ans), __FILE__, __LINE__); }
+  { gpu_common::gpu_die((ans), __FILE__, __LINE__); }
 
-namespace gpu_utils {
+namespace gpu_common {
 
-inline void gpu_die(cudaError_t code, const char *file, int line, bool abort = true) {
-  if (code != cudaSuccess) {
-    std::cerr << KLRED << "<" << file << ":" << line << "> ERROR:" << KNORM << cudaGetErrorString(code) << "\n";
-    std::abort();
-    // do not throw exceptions -- does not work properly within progress() throw std::runtime_error(outstr);
-  }
-}
+void gpu_die(cudaError_t code, const char *file, int line, bool abort = true);
 
 using timepoint_t = std::chrono::time_point<std::chrono::high_resolution_clock>;
 
@@ -72,19 +63,23 @@ class QuickTimer {
   double secs = 0;
 
  public:
-  QuickTimer()
-      : secs(0) {}
-
-  void start() { t = std::chrono::high_resolution_clock::now(); }
-
-  void stop() {
-    std::chrono::duration<double> t_elapsed = std::chrono::high_resolution_clock::now() - t;
-    secs += t_elapsed.count();
-  }
-
-  void inc(double s) { secs += s;}
-
-  double get_elapsed() { return secs; }
+  QuickTimer();
+  void start();
+  void stop();
+  void inc(double s);
+  double get_elapsed();
 };
 
-}  // namespace gpu_utils
+class GPUTimer {
+  cudaEvent_t start_event, stop_event;
+  float elapsed_t_ms = 0;
+
+ public:
+  GPUTimer();
+  ~GPUTimer();
+  void start();
+  void stop();
+  double get_elapsed();
+};
+
+}  // namespace gpu_common
