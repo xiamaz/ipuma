@@ -44,7 +44,7 @@
 #include "utils.hpp"
 #include "kcount.hpp"
 
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_KCOUNT_GPUS
 #include "gpu-utils/gpu_utils.hpp"
 #include "kcount-gpu/parse_and_pack.hpp"
 
@@ -59,7 +59,7 @@ using namespace std;
 using namespace upcxx_utils;
 using namespace upcxx;
 
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_KCOUNT_GPUS
 template <int MAX_K>
 static void process_read_block_gpu(unsigned kmer_len, int qual_offset, const string &seq_block, const string &quals_block,
                                    dist_object<KmerDHT<MAX_K>> &kmer_dht, int64_t &num_Ns, int64_t &num_kmers,
@@ -187,7 +187,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   IntermittentTimer t_pp(__FILENAME__ + string(":kmer parse and pack"));
   kmer_dht->set_pass(READ_KMERS_PASS);
   barrier();
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_KCOUNT_GPUS
   int64_t num_gpu_waits = 0;
   int num_read_blocks = 0;
   string seq_block, quals_block;
@@ -219,7 +219,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       num_reads++;
       progbar.update();
       if (seq.length() < kmer_len) continue;
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_KCOUNT_GPUS
       if (seq_block.length() + 1 + seq.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) {
         process_read_block_gpu(kmer_len, qual_offset, seq_block, quals_block, kmer_dht, num_Ns, num_kmers, num_gpu_waits);
         seq_block.clear();
@@ -236,7 +236,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       progress();
     }
   }
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_KCOUNT_GPUS
   if (!seq_block.empty()) {
     process_read_block_gpu(kmer_len, qual_offset, seq_block, quals_block, kmer_dht, num_Ns, num_kmers, num_gpu_waits);
     num_read_blocks++;
@@ -282,7 +282,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   kmer_dht->set_pass(CTG_KMERS_PASS);
   auto start_local_num_kmers = kmer_dht->get_local_num_kmers();
 
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_KCOUNT_GPUS
   int64_t num_gpu_waits = 0;
   int num_ctg_blocks = 0;
   string seq_block = "";
@@ -305,7 +305,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     auto ctg = it;
     progbar.update();
     if (ctg->seq.length() < kmer_len + 2) continue;
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_KCOUNT_GPUS
     if (seq_block.length() + 1 + ctg->seq.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) {
       process_ctg_block_gpu(kmer_len, seq_block, depth_block, kmer_dht, num_kmers, num_gpu_waits);
       seq_block.clear();
@@ -330,7 +330,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
 #endif
   }
   progbar.done();
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_KCOUNT_GPUS
   if (!seq_block.empty()) {
     process_ctg_block_gpu(kmer_len, seq_block, depth_block, kmer_dht, num_kmers, num_gpu_waits);
     num_ctg_blocks++;
@@ -355,7 +355,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     SLOG_VERBOSE("add ctgs: avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
                  (double)avg_kmers_stored / max_kmers_stored, "\n");
   }
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_KCOUNT_GPUS
   delete gpu_driver;
   gpu_driver = nullptr;
 #endif
@@ -373,7 +373,7 @@ void analyze_kmers(unsigned kmer_len, unsigned prev_kmer_len, int qual_offset, v
   count_kmers(kmer_len, qual_offset, packed_reads_list, kmer_dht, ranks_per_gpu);
   barrier();
   kmer_dht->print_load_factor();
-#ifndef ENABLE_GPUS
+#ifndef ENABLE_KCOUNT_GPUS
   barrier();
   kmer_dht->purge_kmers(2);
 #endif
