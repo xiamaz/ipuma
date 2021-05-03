@@ -208,11 +208,11 @@ def get_pbs_job_nodes():
     """Query the PBS job environment for the number of nodes"""
     nodesfile = os.environ.get('PBS_NODEFILE')
     if nodesfile is not None:
-        nodes = 0
+        nodes = dict()
         with open(nodesfile, 'r') as f:
             for line in f:
-                nodes += 1
-        return nodes
+                nodes[line] = 1
+        return len(nodes)
     print("Warning: could not determine the number of nodes in this PBS job (%d). Only using 1" % (get_job_id()))
     return 1
 
