@@ -237,16 +237,9 @@ __global__ void gpu_insert_kmer_block(KeyValue<MAX_K> *elems, const KmerAndExts<
     // this entry didn't get inserted because we ran out of probing time (and probably space)
     if (j == MAX_PROBE) dropped_insert = 1;
   }
-  int block_num_attempted_inserts = blockReduceSum(attempted_insert, num_buff_entries);
-  int block_num_dropped = blockReduceSum(dropped_insert, num_buff_entries);
-  int block_num_new = blockReduceSum(new_insert, num_buff_entries);
-  if (threadIdx.x == 0) {
-    atomicAdd(&(insert_counts[0]), block_num_attempted_inserts);
-    atomicAdd(&(insert_counts[1]), block_num_dropped);
-    atomicAdd(&(insert_counts[2]), block_num_new);
-  }
-
-  // reduce(attempted_insert, num_buff_entries, &(insert_counts[0]));
+  reduce(attempted_insert, num_buff_entries, &(insert_counts[0]));
+  reduce(dropped_insert, num_buff_entries, &(insert_counts[1]));
+  reduce(new_insert, num_buff_entries, &(insert_counts[2]));
 }
 
 template <int MAX_K>
