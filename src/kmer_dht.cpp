@@ -74,7 +74,7 @@ static int num_inserts = 0;
 template <int MAX_K>
 void KmerDHT<MAX_K>::update_count(bool last_elem, KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
                                   dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver) {
-#ifdef ENABLE_KCOUNT_GPUS
+#ifdef ENABLE_KCOUNT_GPUS_HT
   if (last_elem)
     num_last_inserts++;
   else
@@ -216,7 +216,7 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
   double init_free_mem = get_free_mem();
   if (my_adjusted_num_kmers <= 0) DIE("no kmers to reserve space for");
   kmers->reserve(my_adjusted_num_kmers);
-#ifdef ENABLE_KCOUNT_GPUS
+#ifdef ENABLE_KCOUNT_GPUS_HT
   if (gpu_utils::get_num_node_gpus() <= 0) {
     DIE("GPUs are enabled but no GPU could be configured for kmer counting");
   } else {
@@ -372,7 +372,7 @@ void KmerDHT<MAX_K>::flush_updates() {
   BarrierTimer timer(__FILEFUNC__);
   kmer_store.flush_updates();
 
-#ifdef ENABLE_KCOUNT_GPUS
+#ifdef ENABLE_KCOUNT_GPUS_HT
   if (pass_type == READ_KMERS_PASS) {
     Timer insert_timer("gpu insert to cpu timer");
     insert_timer.start();
