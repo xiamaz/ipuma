@@ -227,45 +227,57 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block() {
   dstate->buff_memcpy_timer.start();
   // copy across outside of thread so that we can reuse the elem_buff_host to carry on with inserts while the gpu is running
   cudaErrchk(cudaMemcpy(elem_buff_dev, elem_buff_host, num_buff_entries * sizeof(KmerAndExts<MAX_K>), cudaMemcpyHostToDevice));
-  unsigned int *counts_gpu;
-  int const NUM_COUNTS = 3;
-  cudaErrchk(cudaMalloc(&counts_gpu, NUM_COUNTS * sizeof(unsigned int)));
-  cudaErrchk(cudaMemset(counts_gpu, 0, NUM_COUNTS * sizeof(unsigned int)));
   dstate->buff_memcpy_timer.stop();
 
-  int mingridsize = 0;
-  int threadblocksize = 0;
-  cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_insert_kmer_block<MAX_K>, 0, 0));
-  int gridsize = ((uint32_t)num_buff_entries + threadblocksize - 1) / threadblocksize;
+  if (gpu_thread) {
+    gpu_thread->join();
+    delete gpu_thread;
+  }
 
-  GPUTimer t;
-  t.start();
-  gpu_insert_kmer_block<<<gridsize, threadblocksize>>>(elems_dev, elem_buff_dev, num_buff_entries, ht_capacity, counts_gpu);
-  t.stop();
-  dstate->kernel_timer.inc(t.get_elapsed());
+  gpu_thread = new thread(
+      [](int num_buff_entries, KmerAndExts<MAX_K> *elem_buff_dev, KeyValue<MAX_K> *elems_dev, int ht_capacity, int upcxx_rank_me) {
+        unsigned int *counts_gpu;
+        int const NUM_COUNTS = 3;
+        cudaErrchk(cudaMalloc(&counts_gpu, NUM_COUNTS * sizeof(unsigned int)));
+        cudaErrchk(cudaMemset(counts_gpu, 0, NUM_COUNTS * sizeof(unsigned int)));
 
-  unsigned int counts_host[NUM_COUNTS];
-  cudaErrchk(cudaMemcpy(&counts_host, counts_gpu, NUM_COUNTS * sizeof(unsigned int), cudaMemcpyDeviceToHost));
-  cudaFree(counts_gpu);
-  num_attempted_inserts += counts_host[0];
-  num_dropped_inserts += counts_host[1];
-  num_new_inserts += counts_host[2];
+        int mingridsize = 0;
+        int threadblocksize = 0;
+        cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_insert_kmer_block<MAX_K>, 0, 0));
+        int gridsize = ((uint32_t)num_buff_entries + threadblocksize - 1) / threadblocksize;
+
+        GPUTimer t;
+        t.start();
+        gpu_insert_kmer_block<<<gridsize, threadblocksize>>>(elems_dev, elem_buff_dev, num_buff_entries, ht_capacity, counts_gpu);
+        t.stop();
+        // dstate->kernel_timer.inc(t.get_elapsed());
+
+        unsigned int counts_host[NUM_COUNTS];
+        cudaErrchk(cudaMemcpy(&counts_host, counts_gpu, NUM_COUNTS * sizeof(unsigned int), cudaMemcpyDeviceToHost));
+        cudaFree(counts_gpu);
+        /*
+        num_attempted_inserts += counts_host[0];
+        num_dropped_inserts += counts_host[1];
+        num_new_inserts += counts_host[2];
+        */
+        if (static_cast<unsigned int>(num_buff_entries) != counts_host[0])
+          cerr << KLRED << "[" << upcxx_rank_me << "] WARNING: " << KNORM
+               << "mismatch in GPU entries processed vs input: " << counts_host[0] << " != " << num_buff_entries << endl;
+      },
+      num_buff_entries, elem_buff_dev, elems_dev, ht_capacity, upcxx_rank_me);
+
   num_gpu_calls++;
-  if (static_cast<unsigned int>(num_buff_entries) != counts_host[0])
-    cerr << KLRED << "[" << upcxx_rank_me << "] WARNING: " << KNORM
-         << "mismatch in GPU entries processed vs input: " << counts_host[0] << " != " << num_buff_entries << endl;
-  // if (counts_host[1]) cout << KLMAGENTA << "rank " << upcxx_rank_me << ": dropped " << counts_host[1] << " inserts" KNORM "\n";
 }
 
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right) {
+void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right, bool is_last) {
   dstate->ht_timer.start();
   elem_buff_host[num_buff_entries].kmer = kmer;
   elem_buff_host[num_buff_entries].count = kmer_count;
   elem_buff_host[num_buff_entries].left = left;
   elem_buff_host[num_buff_entries].right = right;
   num_buff_entries++;
-  if (num_buff_entries == KCOUNT_GPU_HASHTABLE_BLOCK_SIZE) {
+  if ((num_buff_entries == KCOUNT_GPU_HASHTABLE_BLOCK_SIZE / 2 && is_last) || num_buff_entries == KCOUNT_GPU_HASHTABLE_BLOCK_SIZE) {
     // cp to dev and run kernel
     insert_kmer_block();
     num_buff_entries = 0;
@@ -278,6 +290,8 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   dstate->ht_timer.start();
   if (num_buff_entries) {
     insert_kmer_block();
+    gpu_thread->join();
+    delete gpu_thread;
     num_buff_entries = 0;
   }
   // delete to make space before returning the hash table entries

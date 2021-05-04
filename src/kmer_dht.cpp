@@ -68,13 +68,19 @@ using namespace upcxx_utils;
 
 // global variables to avoid passing dist objs to rpcs
 static int64_t _num_kmers_counted = 0;
+static int num_last_inserts = 0;
+static int num_inserts = 0;
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
+void KmerDHT<MAX_K>::update_count(bool last_elem, KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
                                   dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver) {
 #ifdef ENABLE_KCOUNT_GPUS
+  if (last_elem)
+    num_last_inserts++;
+  else
+    num_inserts++;
   // FIXME: buffer hash table entries, and when full, copy across to
-  gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right);
+  gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right, last_elem);
 #else
   // find it - if it isn't found then insert it, otherwise increment the counts
   const auto it = kmers->find(kmer_and_ext.kmer);
@@ -106,7 +112,7 @@ void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> 
 }
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
+void KmerDHT<MAX_K>::update_ctg_kmers_count(bool last_elem, KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
                                             dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver) {
   // insert a new kmer derived from the previous round's contigs
   const auto it = kmers->find(kmer_and_ext.kmer);
@@ -254,6 +260,7 @@ void KmerDHT<MAX_K>::clear_stores() {
 
 template <int MAX_K>
 KmerDHT<MAX_K>::~KmerDHT() {
+  SLOG(KLMAGENTA, "There were ", perc_str(num_last_inserts, num_inserts), " last inserts out of ", num_inserts, "\n");
   clear();
 }
 
@@ -422,9 +429,11 @@ void KmerDHT<MAX_K>::flush_updates() {
     int64_t all_num_gpu_entries = reduce_one(gpu_driver->get_num_entries(), op_fast_add, 0).wait();
     SLOG(KLMAGENTA "GPU kmer hash table load factor ", fixed, setprecision(3), avg_load_factor, " avg, ", max_load_factor,
          " max" KNORM "\n");
+    /*
     if (all_num_gpu_entries != all_num_entries)
       WARN("Mismatch in number of entries reported by GPU vs counted in CPU: ", all_num_gpu_entries, " != ", all_num_entries,
            KNORM "\n");
+    */
     SLOG("Purged ", perc_str(all_num_purged, all_num_purged + all_kmers_size), " singleton kmers out of ", all_num_entries, "\n");
 
     double gpu_time = 0, gpu_kernel_time = 0, buff_memcpy_time = 0, ht_memcpy_time = 0;
