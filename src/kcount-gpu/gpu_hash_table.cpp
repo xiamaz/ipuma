@@ -331,8 +331,6 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   cudaFree(num_purged_dev);
   num_purged += num_purged_host;
 
-  if (!upcxx_rank_me) cout << KLMAGENTA << "GPU purged " << num_purged << " kmers in " << t.get_elapsed() << " s" KNORM "\n";
-
   dstate->memcpy_timer.start();
   // delete to make space before returning the hash table entries
   if (elem_buff_host) delete[] elem_buff_host;
@@ -386,7 +384,7 @@ int64_t HashTableGPUDriver<MAX_K>::get_num_purged() {
 
 template <int MAX_K>
 int64_t HashTableGPUDriver<MAX_K>::get_num_entries() {
-  return num_new_inserts;
+  return num_new_inserts - num_purged;
 }
 
 template <int MAX_K>
