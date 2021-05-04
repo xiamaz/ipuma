@@ -277,7 +277,7 @@ void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, count_t kmer_c
   elem_buff_host[num_buff_entries].left = left;
   elem_buff_host[num_buff_entries].right = right;
   num_buff_entries++;
-  if ((num_buff_entries == KCOUNT_GPU_HASHTABLE_BLOCK_SIZE / 2 && is_last) || num_buff_entries == KCOUNT_GPU_HASHTABLE_BLOCK_SIZE) {
+  if ((num_buff_entries > KCOUNT_GPU_HASHTABLE_BLOCK_SIZE / 2 && is_last) || num_buff_entries == KCOUNT_GPU_HASHTABLE_BLOCK_SIZE) {
     // cp to dev and run kernel
     insert_kmer_block();
     num_buff_entries = 0;
