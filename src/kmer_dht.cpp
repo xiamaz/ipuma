@@ -382,12 +382,16 @@ void KmerDHT<MAX_K>::flush_updates() {
     // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
     gpu_driver->done_inserts();
     auto num_entries = gpu_driver->get_num_entries();
+    int64_t all_num_entries = reduce_one(gpu_driver->get_num_entries(), op_fast_add, 0).wait();
     // add some space for the ctg kmers
+    SLOG(KLMAGENTA, "GPU hash table contains ", all_num_entries, " valid entries" KNORM "\n");
     kmers->reserve(num_entries * 1.5);
+    int num_slots = 0;
     while (true) {
       assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
       auto next_entry = gpu_driver->get_next_entry();
       if (!next_entry) break;
+      num_slots++;
       auto &counts_array = next_entry->val;
       // empty slot
       if (!counts_array[0]) continue;
@@ -409,6 +413,7 @@ void KmerDHT<MAX_K>::flush_updates() {
       kmers->insert({kmer, kmer_counts});
     }
     insert_timer.stop();
+    SLOG(KLMAGENTA, "CPU iterated through ", reduce_one(num_slots, op_fast_add, 0).wait(), " slots for GPU hash table" KNORM "\n");
     auto all_avg_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_add, 0).wait() / rank_n();
     auto all_max_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_max, 0).wait();
     SLOG(KLMAGENTA, "Inserting kmers from GPU to cpu hash table took ", all_avg_elapsed_time, " avg, ", all_max_elapsed_time,
@@ -423,9 +428,8 @@ void KmerDHT<MAX_K>::flush_updates() {
     auto all_kmers_size = reduce_one(kmers->size(), op_fast_add, 0).wait();
     auto num_purged = gpu_driver->get_num_purged();
     auto all_num_purged = reduce_one(num_purged, op_fast_add, 0).wait();
-    int64_t all_num_gpu_entries = reduce_one(gpu_driver->get_num_entries(), op_fast_add, 0).wait();
-    if (!rank_me() && all_kmers_size != all_num_gpu_entries)
-      SWARN("CPU kmer counts not equal to gpu kmer counts: ", all_kmers_size, " != ", all_num_gpu_entries);
+    if (!rank_me() && all_kmers_size != all_num_entries)
+      SWARN("CPU kmer counts not equal to gpu kmer counts: ", all_kmers_size, " != ", all_num_entries);
     double load = (double)(num_purged + kmers->size()) / gpu_driver->get_capacity();
     double avg_load_factor = reduce_one(load, op_fast_add, 0).wait() / rank_n();
     double max_load_factor = reduce_one(load, op_fast_max, 0).wait();

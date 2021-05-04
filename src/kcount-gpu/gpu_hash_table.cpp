@@ -161,6 +161,39 @@ __device__ void reduce(int count, int num, unsigned int *result) {
 }
 
 template <int MAX_K>
+__global__ void gpu_compact_ht(KeyValue<MAX_K> *elems, cu_uint64_t ht_capacity, KeyValue<MAX_K> *compact_elems, int num_entries,
+                               unsigned int *num_dropped) {
+  unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
+  const int N_LONGS = KmerArray<MAX_K>::N_LONGS;
+  int dropped_insert = 0;
+  if (threadid < ht_capacity) {
+    if (elems[threadid].val[0]) {
+      KmerArray<MAX_K> kmer = elems[threadid].key;
+      cu_uint64_t slot = kmer_hash(kmer) % num_entries;
+      auto start_slot = slot;
+      // we set a constraint on the max probe to track whether we are getting excessive collisions and need a bigger default compact
+      // table
+      const int MAX_PROBE = (num_entries < 1000 ? num_entries : 1000);
+      // look for empty slot in compact hash table
+      int j;
+      for (j = 0; j < MAX_PROBE; j++) {
+        cu_uint64_t old_key = atomicCAS(&(compact_elems[slot].key.longs[0]), 0, kmer.longs[0]);
+        if (!old_key) {
+          // found empty slot, copy across
+          for (int i = 1; i < N_LONGS; i++) compact_elems[slot].key.longs[i] = kmer.longs[i];
+          for (int i = 0; i < 9; i++) compact_elems[slot].val[i] = elems[threadid].val[i];
+          break;
+        }
+        // quadratic probing - worse cache but reduced clustering
+        slot = (start_slot + (j + 1) * (j + 1)) % num_entries;
+      }
+      if (j == MAX_PROBE) dropped_insert = 1;
+    }
+  }
+  reduce(dropped_insert, num_entries, num_dropped);
+}
+
+template <int MAX_K>
 __global__ void gpu_purge_invalid(KeyValue<MAX_K> *elems, cu_uint64_t ht_capacity, unsigned int *num_purged) {
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
   int is_purged = 0;
@@ -175,8 +208,6 @@ __global__ void gpu_purge_invalid(KeyValue<MAX_K> *elems, cu_uint64_t ht_capacit
       }
     }
   }
-  // int block_num_purged = blockReduceSum(is_purged, ht_capacity);
-  // if (threadIdx.x == 0) atomicAdd(num_purged, block_num_purged);
   reduce(is_purged, ht_capacity, num_purged);
 }
 
@@ -310,42 +341,59 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
     // delete gpu_thread;
     num_buff_entries = 0;
   }
-
-  unsigned int *num_purged_dev;
-  cudaErrchk(cudaMalloc(&num_purged_dev, sizeof(unsigned int)));
-  cudaErrchk(cudaMemset(num_purged_dev, 0, sizeof(unsigned int)));
-
+  // delete to make space before returning the hash table entries
+  if (elem_buff_host) delete[] elem_buff_host;
+  cudaFree(elem_buff_dev);
   int mingridsize = 0;
   int threadblocksize = 0;
   cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_purge_invalid<MAX_K>, 0, 0));
   int gridsize = ((uint32_t)ht_capacity + threadblocksize - 1) / threadblocksize;
 
-  GPUTimer t;
-  t.start();
+  unsigned int *num_purged_dev;
+  cudaErrchk(cudaMalloc(&num_purged_dev, sizeof(unsigned int)));
+  cudaErrchk(cudaMemset(num_purged_dev, 0, sizeof(unsigned int)));
+  GPUTimer purge_timer;
+  purge_timer.start();
   // now purge all invalid kmers (do it on the gpu)
   gpu_purge_invalid<<<gridsize, threadblocksize>>>(elems_dev, ht_capacity, num_purged_dev);
-  t.stop();
-
+  purge_timer.stop();
   unsigned int num_purged_host = 0;
   cudaErrchk(cudaMemcpy(&num_purged_host, num_purged_dev, sizeof(unsigned int), cudaMemcpyDeviceToHost));
   cudaFree(num_purged_dev);
   num_purged += num_purged_host;
 
+  // now compact the hash table entries
+  unsigned int *num_dropped_dev;
+  cudaErrchk(cudaMalloc(&num_dropped_dev, sizeof(unsigned int)));
+  cudaErrchk(cudaMemset(num_dropped_dev, 0, sizeof(unsigned int)));
+  int num_entries = get_num_entries();
+  KeyValue<MAX_K> *compact_elems_dev;
+  // overallocate to reduce collisions
+  num_entries *= 1.3;
+  cudaErrchk(cudaMalloc(&compact_elems_dev, num_entries * sizeof(KeyValue<MAX_K>)));
+  cudaErrchk(cudaMemset(compact_elems_dev, 0, num_entries * sizeof(KeyValue<MAX_K>)));
+  GPUTimer compact_timer;
+  compact_timer.start();
+  gpu_compact_ht<<<gridsize, threadblocksize>>>(elems_dev, ht_capacity, compact_elems_dev, num_entries, num_dropped_dev);
+  compact_timer.stop();
+  cudaFree(elems_dev);
+  unsigned int num_dropped_host = 0;
+  cudaErrchk(cudaMemcpy(&num_dropped_host, num_dropped_dev, sizeof(unsigned int), cudaMemcpyDeviceToHost));
+  cudaFree(num_dropped_dev);
+  if (num_dropped_host)
+    cerr << KLRED << "Rank " << upcxx_rank_me << " WARNING: dropped " << num_dropped_host << " when compacting output" KNORM "\n";
+
   dstate->memcpy_timer.start();
-  // delete to make space before returning the hash table entries
-  if (elem_buff_host) delete[] elem_buff_host;
-  cudaFree(elem_buff_dev);
   // now copy the gpu hash table values across to the host
   // We only do this once, which requires enough memory on the host to store the full GPU hash table, but since the GPU memory
   // is generally a lot less than the host memory, it should be fine.
-  output_elems.resize(ht_capacity);
+  output_elems.resize(num_entries);
   output_index = 0;
-
   // FIXME: can do this async - also
   // FIXME: call kernel to reduce sparse elems array to compact before copying
-  cudaErrchk(cudaMemcpy(output_elems.data(), elems_dev, ht_capacity * sizeof(KeyValue<MAX_K>), cudaMemcpyDeviceToHost));
-  cudaFree(elems_dev);
+  cudaErrchk(cudaMemcpy(output_elems.data(), compact_elems_dev, num_entries * sizeof(KeyValue<MAX_K>), cudaMemcpyDeviceToHost));
   dstate->memcpy_timer.stop();
+  cudaFree(compact_elems_dev);
 }
 
 template <int MAX_K>
