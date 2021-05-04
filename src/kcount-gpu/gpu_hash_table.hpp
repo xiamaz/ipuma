@@ -104,6 +104,7 @@ class HashTableGPUDriver {
   int64_t num_dropped_inserts = 0;
   int64_t num_attempted_inserts = 0;
   int64_t num_new_inserts = 0;
+  int64_t num_purged = 0;
   int num_gpu_calls = 0;
 
   std::thread *gpu_thread = nullptr;
@@ -118,7 +119,6 @@ class HashTableGPUDriver {
             size_t &gpu_bytes_reqd);
 
   void insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right, bool is_last);
-
   void done_inserts();
 
   KeyValue<MAX_K> *get_next_entry();
@@ -130,6 +130,7 @@ class HashTableGPUDriver {
   int64_t get_num_attempted_inserts();
   int64_t get_num_dropped();
   int64_t get_num_entries();
+  int64_t get_num_purged();
   int get_num_gpu_calls();
 };
 
