@@ -61,7 +61,7 @@ using namespace kcount_gpu;
 template <int MAX_K>
 struct HashTableGPUDriver<MAX_K>::HashTableDriverState {
   cudaEvent_t event;
-  QuickTimer ht_timer, kernel_timer, buff_memcpy_timer, ht_memcpy_timer;
+  QuickTimer insert_timer, kernel_timer, memcpy_timer;
 };
 
 template <int MAX_K>
@@ -224,18 +224,17 @@ __global__ void gpu_insert_kmer_block(KeyValue<MAX_K> *elems, const KmerAndExts<
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::insert_kmer_block() {
-  dstate->buff_memcpy_timer.start();
+  dstate->insert_timer.start();
   // copy across outside of thread so that we can reuse the elem_buff_host to carry on with inserts while the gpu is running
   cudaErrchk(cudaMemcpy(elem_buff_dev, elem_buff_host, num_buff_entries * sizeof(KmerAndExts<MAX_K>), cudaMemcpyHostToDevice));
-  dstate->buff_memcpy_timer.stop();
-
+/*
   if (gpu_thread) {
     gpu_thread->join();
     delete gpu_thread;
   }
-
   gpu_thread = new thread(
       [](int num_buff_entries, KmerAndExts<MAX_K> *elem_buff_dev, KeyValue<MAX_K> *elems_dev, int ht_capacity, int upcxx_rank_me) {
+*/
         unsigned int *counts_gpu;
         int const NUM_COUNTS = 3;
         cudaErrchk(cudaMalloc(&counts_gpu, NUM_COUNTS * sizeof(unsigned int)));
@@ -250,28 +249,26 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block() {
         t.start();
         gpu_insert_kmer_block<<<gridsize, threadblocksize>>>(elems_dev, elem_buff_dev, num_buff_entries, ht_capacity, counts_gpu);
         t.stop();
-        // dstate->kernel_timer.inc(t.get_elapsed());
+        dstate->kernel_timer.inc(t.get_elapsed());
 
         unsigned int counts_host[NUM_COUNTS];
         cudaErrchk(cudaMemcpy(&counts_host, counts_gpu, NUM_COUNTS * sizeof(unsigned int), cudaMemcpyDeviceToHost));
         cudaFree(counts_gpu);
-        /*
         num_attempted_inserts += counts_host[0];
         num_dropped_inserts += counts_host[1];
         num_new_inserts += counts_host[2];
-        */
         if (static_cast<unsigned int>(num_buff_entries) != counts_host[0])
           cerr << KLRED << "[" << upcxx_rank_me << "] WARNING: " << KNORM
                << "mismatch in GPU entries processed vs input: " << counts_host[0] << " != " << num_buff_entries << endl;
-      },
-      num_buff_entries, elem_buff_dev, elems_dev, ht_capacity, upcxx_rank_me);
+///      },
+//      num_buff_entries, elem_buff_dev, elems_dev, ht_capacity, upcxx_rank_me);
 
   num_gpu_calls++;
+  dstate->insert_timer.stop();
 }
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right, bool is_last) {
-  dstate->ht_timer.start();
   elem_buff_host[num_buff_entries].kmer = kmer;
   elem_buff_host[num_buff_entries].count = kmer_count;
   elem_buff_host[num_buff_entries].left = left;
@@ -282,18 +279,17 @@ void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, count_t kmer_c
     insert_kmer_block();
     num_buff_entries = 0;
   }
-  dstate->ht_timer.stop();
 }
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::done_inserts() {
-  dstate->ht_timer.start();
   if (num_buff_entries) {
     insert_kmer_block();
-    gpu_thread->join();
-    delete gpu_thread;
+    //gpu_thread->join();
+    //delete gpu_thread;
     num_buff_entries = 0;
   }
+  dstate->memcpy_timer.start();
   // delete to make space before returning the hash table entries
   if (elem_buff_host) delete[] elem_buff_host;
   cudaFree(elem_buff_dev);
@@ -305,20 +301,16 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
 
   // FIXME: can do this async - also
   // FIXME: call kernel to reduce sparse elems array to compact before copying
-  dstate->ht_memcpy_timer.start();
   cudaErrchk(cudaMemcpy(output_elems.data(), elems_dev, ht_capacity * sizeof(KeyValue<MAX_K>), cudaMemcpyDeviceToHost));
-  dstate->ht_memcpy_timer.stop();
   cudaFree(elems_dev);
-  dstate->ht_timer.stop();
+  dstate->memcpy_timer.stop();
 }
 
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::get_elapsed_time(double &gpu_time, double &gpu_kernel_time, double &buff_memcpy_time,
-                                                 double &ht_memcpy_time) {
-  gpu_time = dstate->ht_timer.get_elapsed();
-  gpu_kernel_time = dstate->kernel_timer.get_elapsed();
-  buff_memcpy_time = dstate->buff_memcpy_timer.get_elapsed();
-  ht_memcpy_time = dstate->ht_memcpy_timer.get_elapsed();
+void HashTableGPUDriver<MAX_K>::get_elapsed_time(double &insert_time, double &kernel_time, double &memcpy_time) {
+  insert_time = dstate->insert_timer.get_elapsed();
+  kernel_time = dstate->kernel_timer.get_elapsed();
+  memcpy_time = dstate->memcpy_timer.get_elapsed();
 }
 
 template <int MAX_K>

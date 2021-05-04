@@ -125,7 +125,7 @@ class HashTableGPUDriver {
 
   static int get_N_LONGS();
 
-  void get_elapsed_time(double &gpu_time, double &gpu_wait_time, double &buff_memcpy_time, double &ht_memcpy_time);
+  void get_elapsed_time(double &insert_time, double &kernel_time, double &memcpy_time);
   int64_t get_capacity();
   int64_t get_num_attempted_inserts();
   int64_t get_num_dropped();

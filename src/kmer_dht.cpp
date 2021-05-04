@@ -374,13 +374,13 @@ void KmerDHT<MAX_K>::flush_updates() {
 
 #ifdef ENABLE_KCOUNT_GPUS
   if (pass_type == READ_KMERS_PASS) {
+    Timer insert_timer("gpu insert to cpu timer");
+    insert_timer.start();
     // make sure every rank has finished
     barrier();
     // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
     gpu_driver->done_inserts();
     int64_t num_purged = 0, num_entries = 0;
-    Timer insert_timer("gpu insert to cpu timer");
-    insert_timer.start();
     while (true) {
       assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
       auto next_entry = gpu_driver->get_next_entry();
@@ -436,23 +436,19 @@ void KmerDHT<MAX_K>::flush_updates() {
     */
     SLOG("Purged ", perc_str(all_num_purged, all_num_purged + all_kmers_size), " singleton kmers out of ", all_num_entries, "\n");
 
-    double gpu_time = 0, gpu_kernel_time = 0, buff_memcpy_time = 0, ht_memcpy_time = 0;
-    gpu_driver->get_elapsed_time(gpu_time, gpu_kernel_time, buff_memcpy_time, ht_memcpy_time);
-    auto avg_gpu_time = reduce_one(gpu_time, op_fast_add, 0).wait() / rank_n();
-    auto max_gpu_time = reduce_one(gpu_time, op_fast_max, 0).wait();
+    double gpu_insert_time = 0, gpu_kernel_time = 0, gpu_memcpy_time = 0;
+    gpu_driver->get_elapsed_time(gpu_insert_time, gpu_kernel_time, gpu_memcpy_time);
+    auto avg_gpu_insert_time = reduce_one(gpu_insert_time, op_fast_add, 0).wait() / rank_n();
+    auto max_gpu_insert_time = reduce_one(gpu_insert_time, op_fast_max, 0).wait();
     auto avg_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_add, 0).wait() / rank_n();
     auto max_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_max, 0).wait();
-    auto avg_buff_memcpy_time = reduce_one(buff_memcpy_time, op_fast_add, 0).wait() / rank_n();
-    auto max_buff_memcpy_time = reduce_one(buff_memcpy_time, op_fast_max, 0).wait();
-    auto avg_ht_memcpy_time = reduce_one(ht_memcpy_time, op_fast_add, 0).wait() / rank_n();
-    auto max_ht_memcpy_time = reduce_one(ht_memcpy_time, op_fast_max, 0).wait();
+    auto avg_gpu_memcpy_time = reduce_one(gpu_memcpy_time, op_fast_add, 0).wait() / rank_n();
+    auto max_gpu_memcpy_time = reduce_one(gpu_memcpy_time, op_fast_max, 0).wait();
     stage_timers.kernel_kmer_analysis->inc_elapsed(max_gpu_kernel_time);
     SLOG(KLMAGENTA "Elapsed GPU time for kmer hash tables:" KNORM "\n");
-    SLOG(KLMAGENTA "  overall: ", fixed, setprecision(3), avg_gpu_time, " avg, ", max_gpu_time, " max" KNORM "\n");
+    SLOG(KLMAGENTA "  insert: ", fixed, setprecision(3), avg_gpu_insert_time, " avg, ", max_gpu_insert_time, " max" KNORM "\n");
     SLOG(KLMAGENTA "  kernel: ", fixed, setprecision(3), avg_gpu_kernel_time, " avg, ", max_gpu_kernel_time, " max" KNORM "\n");
-    SLOG(KLMAGENTA "  buff memcpy: ", fixed, setprecision(3), avg_buff_memcpy_time, " avg, ", max_buff_memcpy_time,
-         " max" KNORM "\n");
-    SLOG(KLMAGENTA "  ht memcpy: ", fixed, setprecision(3), avg_ht_memcpy_time, " avg, ", max_ht_memcpy_time, " max" KNORM "\n");
+    SLOG(KLMAGENTA "  to cpu: ", fixed, setprecision(3), avg_gpu_memcpy_time, " avg, ", max_gpu_memcpy_time, " max" KNORM "\n");
   }
 #endif
   auto avg_kmers_processed = reduce_one(_num_kmers_counted, op_fast_add, 0).wait() / rank_n();
