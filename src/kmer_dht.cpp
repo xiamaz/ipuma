@@ -412,6 +412,7 @@ void KmerDHT<MAX_K>::flush_updates() {
         WARN("Found a kmer that should have been purged, count is ", kmer_counts.count);
       Kmer<MAX_K> kmer(reinterpret_cast<const uint64_t *>(kmer_array->longs));
       const auto it = kmers->find(kmer);
+      // FIXME: should only be in debug mode
       if (it != kmers->end())
         WARN("Found a duplicate kmer - shouldn't happen: existing count ", it->second.count, " new count ", kmer_counts.count);
       kmers->insert({kmer, kmer_counts});
