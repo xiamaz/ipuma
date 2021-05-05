@@ -390,27 +390,27 @@ void KmerDHT<MAX_K>::flush_updates() {
     int64_t num_slots = 0;
     while (true) {
       assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
-      auto next_entry = gpu_driver->get_next_entry();
-      if (!next_entry) break;
+      auto [kmer_array, kmer_counts_array] = gpu_driver->get_next_entry();
+      if (!kmer_array) break;
       num_slots++;
-      auto &counts_array = next_entry->val;
       // empty slot
-      if (!counts_array[0]) continue;
+      if (!kmer_counts_array->data[0]) continue;
       ExtCounts left_exts = {0}, right_exts = {0};
-      left_exts.set(counts_array + 1);
-      right_exts.set(counts_array + 5);
-      KmerCounts kmer_counts = {.left_exts = left_exts,
-                                .right_exts = right_exts,
-                                .uutig_frag = nullptr,
-                                .count = static_cast<kmer_count_t>(std::min(
-                                    static_cast<kcount_gpu::count_t>(std::numeric_limits<kmer_count_t>::max()), counts_array[0])),
-                                .left = 'X',
-                                .right = 'X',
-                                .from_ctg = false};
+      left_exts.set(kmer_counts_array->data + 1);
+      right_exts.set(kmer_counts_array->data + 5);
+      KmerCounts kmer_counts = {
+          .left_exts = left_exts,
+          .right_exts = right_exts,
+          .uutig_frag = nullptr,
+          .count = static_cast<kmer_count_t>(
+              min(static_cast<kcount_gpu::count_t>(std::numeric_limits<kmer_count_t>::max()), kmer_counts_array->data[0])),
+          .left = 'X',
+          .right = 'X',
+          .from_ctg = false};
       // purge out low freq kmers
       if ((kmer_counts.count < 2) || (kmer_counts.left_exts.is_zero() && kmer_counts.right_exts.is_zero()))
         WARN("Found a kmer that should have been purged, count is ", kmer_counts.count);
-      Kmer<MAX_K> kmer(reinterpret_cast<const uint64_t *>(next_entry->key.longs));
+      Kmer<MAX_K> kmer(reinterpret_cast<const uint64_t *>(kmer_array->longs));
       kmers->insert({kmer, kmer_counts});
     }
     insert_timer.stop();

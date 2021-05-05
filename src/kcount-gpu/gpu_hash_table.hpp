@@ -54,8 +54,12 @@ namespace kcount_gpu {
 
 using cu_uint64_t = unsigned long long int;
 static_assert(sizeof(cu_uint64_t) == 8);
+#define KMER_LONG_EMPTY (-1)
 using count_t = uint32_t;
-using KmerCountsArray = count_t[9];
+
+struct KmerCountsArray {
+  count_t data[9];
+};
 
 template <int MAX_K>
 struct KmerArray {
@@ -66,11 +70,13 @@ struct KmerArray {
   KmerArray(const uint64_t *x);
 };
 
+/*
 template <int MAX_K>
 struct KeyValue {
   KmerArray<MAX_K> key;
   KmerCountsArray val;
 };
+*/
 
 template <int MAX_K>
 struct KmerAndExts {
@@ -91,10 +97,12 @@ class HashTableGPUDriver {
   int upcxx_rank_n;
   int kmer_len;
   int num_buff_entries = 0;
-  std::vector<KeyValue<MAX_K>> output_elems;
+  std::vector<KmerArray<MAX_K>> output_keys;
+  std::vector<KmerCountsArray> output_vals;
   size_t output_index = 0;
-  // array of key-value pairs
-  KeyValue<MAX_K> *elems_dev = nullptr;
+  // Arrays for keys and values. They are separate because the keys get initialized with max number and the vals with zero
+  KmerArray<MAX_K> *keys_dev = nullptr;
+  KmerCountsArray *vals_dev = nullptr;
   // for buffering elements in the host memory
   KmerAndExts<MAX_K> *elem_buff_host = nullptr;
   // for transferring host memory buffer to device
@@ -107,8 +115,6 @@ class HashTableGPUDriver {
   int64_t num_purged = 0;
   int num_gpu_calls = 0;
 
-  std::thread *gpu_thread = nullptr;
-
   void insert_kmer_block();
 
  public:
@@ -118,10 +124,11 @@ class HashTableGPUDriver {
   void init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem, double &init_time,
             size_t &gpu_bytes_reqd);
 
+  // FIXME: this should be in kmer_dht and the insert_kmer_block should be public
   void insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right, bool is_last);
   void done_inserts();
 
-  KeyValue<MAX_K> *get_next_entry();
+  std::pair<KmerArray<MAX_K> *, KmerCountsArray *> get_next_entry();
 
   static int get_N_LONGS();
 
