@@ -165,7 +165,7 @@ __global__ void gpu_compact_ht(KeyValue<MAX_K> *elems, cu_uint64_t ht_capacity, 
                                unsigned int *num_dropped) {
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
   const int N_LONGS = KmerArray<MAX_K>::N_LONGS;
-  int dropped_insert = 0;
+  int dropped_inserts = 0;
   int num_threads = blockDim.x * gridDim.x;
   for (int i = threadid; i < ht_capacity; i += num_threads) {
     if (elems[i].val[0]) {
@@ -188,16 +188,16 @@ __global__ void gpu_compact_ht(KeyValue<MAX_K> *elems, cu_uint64_t ht_capacity, 
         // quadratic probing - worse cache but reduced clustering
         slot = (start_slot + (j + 1) * (j + 1)) % num_entries;
       }
-      if (j == MAX_PROBE) dropped_insert = 1;
+      if (j == MAX_PROBE) dropped_inserts++;
     }
   }
-  reduce(dropped_insert, num_entries, num_dropped);
+  reduce(dropped_inserts, num_entries, num_dropped);
 }
 
 template <int MAX_K>
 __global__ void gpu_purge_invalid(KeyValue<MAX_K> *elems, cu_uint64_t ht_capacity, unsigned int *num_purged) {
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
-  int is_purged = 0;
+  int purged = 0;
   int num_threads = blockDim.x * gridDim.x;
   for (int i = threadid; i < ht_capacity; i += num_threads) {
     if (elems[i].val[0]) {
@@ -206,11 +206,11 @@ __global__ void gpu_purge_invalid(KeyValue<MAX_K> *elems, cu_uint64_t ht_capacit
       for (int i = 1; i < 9; i++) ext_sum += counts[i];
       if ((counts[0] < 2) || !ext_sum) {
         counts[0] = 0;
-        is_purged = 1;
+        purged++;
       }
     }
   }
-  reduce(is_purged, ht_capacity, num_purged);
+  reduce(purged, ht_capacity, num_purged);
 }
 
 template <int MAX_K>
@@ -219,15 +219,16 @@ __global__ void gpu_insert_kmer_block(KeyValue<MAX_K> *elems, const KmerAndExts<
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
 
   int N_LONGS = KmerArray<MAX_K>::N_LONGS;
-  int attempted_insert = 0, dropped_insert = 0, new_insert = 0;
-  if (threadid < num_buff_entries) {
-    KmerArray<MAX_K> kmer = elem_buff[threadid].kmer;
-    count_t kmer_count = elem_buff[threadid].count;
-    char left_ext = elem_buff[threadid].left;
-    char right_ext = elem_buff[threadid].right;
+  int attempted_inserts = 0, dropped_inserts = 0, new_inserts = 0;
+  int num_threads = blockDim.x * gridDim.x;
+  for (int i = threadid; i < num_buff_entries; i += num_threads) {
+    KmerArray<MAX_K> kmer = elem_buff[i].kmer;
+    count_t kmer_count = elem_buff[i].count;
+    char left_ext = elem_buff[i].left;
+    char right_ext = elem_buff[i].right;
     cu_uint64_t slot = kmer_hash(kmer) % ht_capacity;
     auto start_slot = slot;
-    attempted_insert = 1;
+    attempted_inserts++;
     int j;
     // restricting the number of probes reduces computation (and imbalance) at the cost of some loss of completeness
     // for a good hash function, this should only kick in when the hash table load is getting really high
@@ -246,7 +247,7 @@ __global__ void gpu_insert_kmer_block(KeyValue<MAX_K> *elems, const KmerAndExts<
         }
         if (found) {
           count_t old_count = atomicAdd(&(elems[slot].val[0]), kmer_count);
-          if (!old_count) new_insert = 1;
+          if (!old_count) new_inserts++;
           switch (left_ext) {
             case 'A': atomicAdd(&(elems[slot].val[1]), kmer_count); break;
             case 'C': atomicAdd(&(elems[slot].val[2]), kmer_count); break;
@@ -268,11 +269,11 @@ __global__ void gpu_insert_kmer_block(KeyValue<MAX_K> *elems, const KmerAndExts<
       slot = (start_slot + (j + 1) * (j + 1)) % ht_capacity;
     }
     // this entry didn't get inserted because we ran out of probing time (and probably space)
-    if (j == MAX_PROBE) dropped_insert = 1;
+    if (j == MAX_PROBE) dropped_inserts++;
   }
-  reduce(attempted_insert, num_buff_entries, &(insert_counts[0]));
-  reduce(dropped_insert, num_buff_entries, &(insert_counts[1]));
-  reduce(new_insert, num_buff_entries, &(insert_counts[2]));
+  reduce(attempted_inserts, num_buff_entries, &(insert_counts[0]));
+  reduce(dropped_inserts, num_buff_entries, &(insert_counts[1]));
+  reduce(new_inserts, num_buff_entries, &(insert_counts[2]));
 }
 
 template <int MAX_K>
@@ -294,9 +295,10 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block() {
   cudaErrchk(cudaMalloc(&counts_gpu, NUM_COUNTS * sizeof(unsigned int)));
   cudaErrchk(cudaMemset(counts_gpu, 0, NUM_COUNTS * sizeof(unsigned int)));
 
-  int mingridsize = 0;
-  int threadblocksize = 0;
-  cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_insert_kmer_block<MAX_K>, 0, 0));
+  // int mingridsize = 0;
+  // int threadblocksize = 0;
+  // cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_insert_kmer_block<MAX_K>, 0, 0));
+  int threadblocksize = 512;
   int gridsize = ((uint32_t)num_buff_entries + threadblocksize - 1) / threadblocksize;
 
   GPUTimer t;
@@ -346,9 +348,10 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   // delete to make space before returning the hash table entries
   if (elem_buff_host) delete[] elem_buff_host;
   cudaFree(elem_buff_dev);
-  int mingridsize = 0;
-  int threadblocksize = 0;
-  cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_purge_invalid<MAX_K>, 0, 0));
+  // int mingridsize = 0;
+  // int threadblocksize = 0;
+  // cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_purge_invalid<MAX_K>, 0, 0));
+  int threadblocksize = 512;
   int gridsize = ((uint32_t)ht_capacity + threadblocksize - 1) / threadblocksize;
 
   unsigned int *num_purged_dev;
