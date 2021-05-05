@@ -166,9 +166,10 @@ __global__ void gpu_compact_ht(KeyValue<MAX_K> *elems, cu_uint64_t ht_capacity, 
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
   const int N_LONGS = KmerArray<MAX_K>::N_LONGS;
   int dropped_insert = 0;
-  if (threadid < ht_capacity) {
-    if (elems[threadid].val[0]) {
-      KmerArray<MAX_K> kmer = elems[threadid].key;
+  int num_threads = blockDim.x * gridDim.x;
+  for (int i = threadid; i < ht_capacity; i += num_threads) {
+    if (elems[i].val[0]) {
+      KmerArray<MAX_K> kmer = elems[i].key;
       cu_uint64_t slot = kmer_hash(kmer) % num_entries;
       auto start_slot = slot;
       // we set a constraint on the max probe to track whether we are getting excessive collisions and need a bigger default compact
@@ -180,8 +181,8 @@ __global__ void gpu_compact_ht(KeyValue<MAX_K> *elems, cu_uint64_t ht_capacity, 
         cu_uint64_t old_key = atomicCAS(&(compact_elems[slot].key.longs[0]), 0, kmer.longs[0]);
         if (!old_key) {
           // found empty slot, copy across
-          for (int i = 1; i < N_LONGS; i++) compact_elems[slot].key.longs[i] = kmer.longs[i];
-          for (int i = 0; i < 9; i++) compact_elems[slot].val[i] = elems[threadid].val[i];
+          for (int k = 1; k < N_LONGS; k++) compact_elems[slot].key.longs[k] = kmer.longs[k];
+          for (int k = 0; k < 9; k++) compact_elems[slot].val[k] = elems[threadid].val[k];
           break;
         }
         // quadratic probing - worse cache but reduced clustering
@@ -197,9 +198,10 @@ template <int MAX_K>
 __global__ void gpu_purge_invalid(KeyValue<MAX_K> *elems, cu_uint64_t ht_capacity, unsigned int *num_purged) {
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
   int is_purged = 0;
-  if (threadid < ht_capacity) {
-    if (elems[threadid].val[0]) {
-      KmerCountsArray &counts = elems[threadid].val;
+  int num_threads = blockDim.x * gridDim.x;
+  for (int i = threadid; i < ht_capacity; i += num_threads) {
+    if (elems[i].val[0]) {
+      KmerCountsArray &counts = elems[i].val;
       int ext_sum = 0;
       for (int i = 1; i < 9; i++) ext_sum += counts[i];
       if ((counts[0] < 2) || !ext_sum) {

@@ -381,12 +381,13 @@ void KmerDHT<MAX_K>::flush_updates() {
     barrier();
     // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
     gpu_driver->done_inserts();
+    barrier();
     auto num_entries = gpu_driver->get_num_entries();
     int64_t all_num_entries = reduce_one(gpu_driver->get_num_entries(), op_fast_add, 0).wait();
     // add some space for the ctg kmers
     SLOG(KLMAGENTA, "GPU hash table contains ", all_num_entries, " valid entries" KNORM "\n");
     kmers->reserve(num_entries * 1.5);
-    int num_slots = 0;
+    int64_t num_slots = 0;
     while (true) {
       assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
       auto next_entry = gpu_driver->get_next_entry();
@@ -408,7 +409,7 @@ void KmerDHT<MAX_K>::flush_updates() {
                                 .from_ctg = false};
       // purge out low freq kmers
       if ((kmer_counts.count < 2) || (kmer_counts.left_exts.is_zero() && kmer_counts.right_exts.is_zero()))
-        WARN("Found a kmer that should have been purge, count is ", kmer_counts.count);
+        WARN("Found a kmer that should have been purged, count is ", kmer_counts.count);
       Kmer<MAX_K> kmer(reinterpret_cast<const uint64_t *>(next_entry->key.longs));
       kmers->insert({kmer, kmer_counts});
     }
