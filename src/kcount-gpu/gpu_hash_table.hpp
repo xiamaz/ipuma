@@ -54,7 +54,7 @@ namespace kcount_gpu {
 
 using cu_uint64_t = unsigned long long int;
 static_assert(sizeof(cu_uint64_t) == 8);
-#define KMER_LONG_EMPTY (-1)
+#define KEY_EMPTY (-1)
 using count_t = uint32_t;
 
 struct KmerCountsArray {
@@ -69,14 +69,6 @@ struct KmerArray {
   KmerArray() {}
   KmerArray(const uint64_t *x);
 };
-
-/*
-template <int MAX_K>
-struct KeyValue {
-  KmerArray<MAX_K> key;
-  KmerCountsArray val;
-};
-*/
 
 template <int MAX_K>
 struct KmerAndExts {

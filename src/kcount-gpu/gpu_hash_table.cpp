@@ -71,7 +71,7 @@ KmerArray<MAX_K>::KmerArray(const uint64_t *kmer) {
 
 template <int MAX_K>
 __device__ bool kmers_equal(const KmerArray<MAX_K> &kmer1, const KmerArray<MAX_K> &kmer2) {
-  int n_longs = kmer1.N_LONGS;  // get_N_LONGS();
+  int n_longs = kmer1.N_LONGS;
   for (int i = 0; i < n_longs; i++) {
     if (kmer1.longs[i] != kmer2.longs[i]) return false;
   }
@@ -110,7 +110,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
     cout << KLMAGENTA << "Selecting GPU hash table capacity per rank of " << ht_capacity << " for " << max_elems << " elements\n";
 
   cudaErrchk(cudaMalloc(&keys_dev, ht_capacity * sizeof(KmerArray<MAX_K>)));
-  cudaErrchk(cudaMemset(keys_dev, 0, ht_capacity * sizeof(KmerArray<MAX_K>)));
+  cudaErrchk(cudaMemset(keys_dev, KEY_EMPTY, ht_capacity * sizeof(KmerArray<MAX_K>)));
   cudaErrchk(cudaMalloc(&vals_dev, ht_capacity * sizeof(KmerCountsArray)));
   cudaErrchk(cudaMemset(vals_dev, 0, ht_capacity * sizeof(KmerCountsArray)));
 
@@ -179,8 +179,8 @@ __global__ void gpu_compact_ht(KmerArray<MAX_K> *keys, KmerCountsArray *vals, cu
       // look for empty slot in compact hash table
       int j;
       for (j = 0; j < MAX_PROBE; j++) {
-        cu_uint64_t old_key = atomicCAS(&(compact_keys[slot].longs[0]), 0, kmer.longs[0]);
-        if (!old_key) {
+        cu_uint64_t old_key = atomicCAS(&(compact_keys[slot].longs[0]), KEY_EMPTY, kmer.longs[0]);
+        if (old_key == KEY_EMPTY) {
           // found empty slot, copy across
           for (int k = 1; k < N_LONGS; k++) compact_keys[slot].longs[k] = kmer.longs[k];
           for (int k = 0; k < 9; k++) compact_vals[slot].data[k] = vals[threadid].data[k];
@@ -236,12 +236,12 @@ __global__ void gpu_insert_kmer_block(KmerArray<MAX_K> *keys, KmerCountsArray *v
     // then we'll start to see the loss of inserts
     const int MAX_PROBE = (ht_capacity < 1000 ? ht_capacity : 1000);
     for (j = 0; j < MAX_PROBE; j++) {
-      cu_uint64_t old_key = atomicCAS(&(keys[slot].longs[0]), 0, kmer.longs[0]);
-      if (old_key == 0 || old_key == kmer.longs[0]) {
+      cu_uint64_t old_key = atomicCAS(&(keys[slot].longs[0]), KEY_EMPTY, kmer.longs[0]);
+      if (old_key == KEY_EMPTY || old_key == kmer.longs[0]) {
         bool found = true;
         for (int long_i = 1; long_i < N_LONGS; long_i++) {
-          cu_uint64_t old_key = atomicCAS(&(keys[slot].longs[long_i]), 0, kmer.longs[long_i]);
-          if (old_key != 0 && old_key != kmer.longs[long_i]) {
+          cu_uint64_t old_key = atomicCAS(&(keys[slot].longs[long_i]), KEY_EMPTY, kmer.longs[long_i]);
+          if (old_key != KEY_EMPTY && old_key != kmer.longs[long_i]) {
             found = false;
             break;
           }
@@ -365,7 +365,7 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   // overallocate to reduce collisions
   num_entries *= 1.3;
   cudaErrchk(cudaMalloc(&compact_keys_dev, num_entries * sizeof(KmerArray<MAX_K>)));
-  cudaErrchk(cudaMemset(compact_keys_dev, 0, num_entries * sizeof(KmerArray<MAX_K>)));
+  cudaErrchk(cudaMemset(compact_keys_dev, KEY_EMPTY, num_entries * sizeof(KmerArray<MAX_K>)));
   cudaErrchk(cudaMalloc(&compact_vals_dev, num_entries * sizeof(KmerCountsArray)));
   cudaErrchk(cudaMemset(compact_vals_dev, 0, num_entries * sizeof(KmerCountsArray)));
   GPUTimer compact_timer;
