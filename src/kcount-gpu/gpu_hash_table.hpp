@@ -54,7 +54,7 @@ namespace kcount_gpu {
 
 using cu_uint64_t = unsigned long long int;
 static_assert(sizeof(cu_uint64_t) == 8);
-#define KEY_EMPTY (-1)
+#define KEY_EMPTY UINT64_C(-1)
 using count_t = uint32_t;
 
 struct KmerCountsArray {

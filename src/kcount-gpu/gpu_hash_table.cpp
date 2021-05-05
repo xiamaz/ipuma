@@ -110,7 +110,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
     cout << KLMAGENTA << "Selecting GPU hash table capacity per rank of " << ht_capacity << " for " << max_elems << " elements\n";
 
   cudaErrchk(cudaMalloc(&keys_dev, ht_capacity * sizeof(KmerArray<MAX_K>)));
-  cudaErrchk(cudaMemset(keys_dev, KEY_EMPTY, ht_capacity * sizeof(KmerArray<MAX_K>)));
+  cudaErrchk(cudaMemset(keys_dev, 0xff, ht_capacity * sizeof(KmerArray<MAX_K>)));
   cudaErrchk(cudaMalloc(&vals_dev, ht_capacity * sizeof(KmerCountsArray)));
   cudaErrchk(cudaMemset(vals_dev, 0, ht_capacity * sizeof(KmerCountsArray)));
 
@@ -365,7 +365,7 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   // overallocate to reduce collisions
   num_entries *= 1.3;
   cudaErrchk(cudaMalloc(&compact_keys_dev, num_entries * sizeof(KmerArray<MAX_K>)));
-  cudaErrchk(cudaMemset(compact_keys_dev, KEY_EMPTY, num_entries * sizeof(KmerArray<MAX_K>)));
+  cudaErrchk(cudaMemset(compact_keys_dev, 0xff, num_entries * sizeof(KmerArray<MAX_K>)));
   cudaErrchk(cudaMalloc(&compact_vals_dev, num_entries * sizeof(KmerCountsArray)));
   cudaErrchk(cudaMemset(compact_vals_dev, 0, num_entries * sizeof(KmerCountsArray)));
   GPUTimer compact_timer;
