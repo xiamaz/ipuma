@@ -388,6 +388,8 @@ void KmerDHT<MAX_K>::flush_updates() {
     SLOG(KLMAGENTA, "GPU hash table contains ", all_num_entries, " valid entries" KNORM "\n");
     kmers->reserve(num_entries * 1.5);
     int64_t num_slots = 0;
+    int num_empty_key_drops = 0;
+    int sum_drop_depth = 0;
     while (true) {
       assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
       auto [kmer_array, kmer_counts_array] = gpu_driver->get_next_entry();
@@ -411,13 +413,36 @@ void KmerDHT<MAX_K>::flush_updates() {
       if ((kmer_counts.count < 2) || (kmer_counts.left_exts.is_zero() && kmer_counts.right_exts.is_zero()))
         WARN("Found a kmer that should have been purged, count is ", kmer_counts.count);
       Kmer<MAX_K> kmer(reinterpret_cast<const uint64_t *>(kmer_array->longs));
-      const auto it = kmers->find(kmer);
-      // FIXME: should only be in debug mode
-      if (it != kmers->end())
-        WARN("Found a duplicate kmer - shouldn't happen: existing count ", it->second.count, " new count ", kmer_counts.count);
-      kmers->insert({kmer, kmer_counts});
+      {
+        // FIXME: should only be done in debug mode
+        const auto it = kmers->find(kmer);
+        if (it != kmers->end())
+          WARN("Found a duplicate kmer ", kmer.to_string(), " - shouldn't happen: existing count ", it->second.count, 
+               " new count ", kmer_counts.count);
+      }
+      // drop all kmers that have values corresponding to the empty key as these are likely to be errors
+      bool drop_entry = false;
+      auto kmer_longs = kmer.get_longs();
+      for (int j = 0; j < kmer.get_N_LONGS(); j++) {
+        if (kmer_longs[j] == KEY_EMPTY) {
+          num_empty_key_drops++;
+          sum_drop_depth += kmer_counts.count;
+          //WARN("Found a kmer long at index ", j, " corresponding to an empty key, kmer is ", kmer.to_string(), 
+          //     " count ", kmer_counts.count);
+          drop_entry = true;
+          break;
+        }
+      }
+      if (!drop_entry) kmers->insert({kmer, kmer_counts});
     }
     insert_timer.stop();
+    auto all_num_empty_key_drops = reduce_one(num_empty_key_drops, op_fast_add, 0).wait();
+    auto all_drop_depth = reduce_one(sum_drop_depth, op_fast_add, 0).wait();
+    if (!rank_me() && all_num_empty_key_drops) 
+      SWARN("Dropped ", all_num_empty_key_drops, " kmer inserts because of empty key overlap, average depth ",
+            (double)all_drop_depth / all_num_empty_key_drops);
+
+    SLOG(KLMAGENTA, "CPU iterated through ", reduce_one(num_slots, op_fast_add, 0).wait(), " slots for GPU hash table" KNORM "\n");
     SLOG(KLMAGENTA, "CPU iterated through ", reduce_one(num_slots, op_fast_add, 0).wait(), " slots for GPU hash table" KNORM "\n");
     auto all_avg_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_add, 0).wait() / rank_n();
     auto all_max_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_max, 0).wait();
