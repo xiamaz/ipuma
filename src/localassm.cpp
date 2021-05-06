@@ -91,7 +91,7 @@ class ReadsToCtgsDHT {
       : reads_to_ctgs_map({})
       , rtc_store() {
     reads_to_ctgs_map->reserve(initial_size);
-    rtc_store.set_update_func([&reads_to_ctgs_map = this->reads_to_ctgs_map](bool last, ReadCtgInfo &&read_ctg_info) {
+    rtc_store.set_update_func([&reads_to_ctgs_map = this->reads_to_ctgs_map](ReadCtgInfo &&read_ctg_info) {
       const auto it = reads_to_ctgs_map->find(read_ctg_info.read_id);
       if (it == reads_to_ctgs_map->end())
         reads_to_ctgs_map->insert({std::move(read_ctg_info.read_id), {std::move(read_ctg_info.ctg_info)}});
@@ -216,7 +216,7 @@ class CtgsWithReadsDHT {
     // pad the local ctg count a bit for this estimate
     ctgs_map->reserve(num_ctgs * 1.2);
 
-    ctg_store.set_update_func([&ctgs_map = this->ctgs_map](bool last, CtgData &&ctg_data) {
+    ctg_store.set_update_func([&ctgs_map = this->ctgs_map](CtgData &&ctg_data) {
       auto it = ctgs_map->find(ctg_data.cid);
       if (it != ctgs_map->end()) DIE("Found duplicate ctg ", ctg_data.cid);
       ctgs_map_t::value_type record = {
@@ -232,7 +232,7 @@ class CtgsWithReadsDHT {
     int64_t mem_to_use = 0.05 * get_free_mem() / local_team().rank_n();
     auto max_store_bytes = max(mem_to_use, (int64_t)est_update_size * 100);
     ctg_store.set_size("CtgsWithReads add ctg", max_store_bytes);
-    ctg_read_store.set_update_func([&ctgs_map = this->ctgs_map](bool last, CtgReadData &&ctg_read_data) {
+    ctg_read_store.set_update_func([&ctgs_map = this->ctgs_map](CtgReadData &&ctg_read_data) {
       const auto it = ctgs_map->find(ctg_read_data.cid);
       if (it == ctgs_map->end()) DIE("Could not find ctg ", ctg_read_data.cid);
       ReadSeq &read_seq = ctg_read_data.read_seq;

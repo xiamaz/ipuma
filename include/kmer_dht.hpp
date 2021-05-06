@@ -202,10 +202,10 @@ class KmerDHT {
   int64_t bytes_sent = 0;
   int minimizer_len = 15;
 
-  static void update_count(bool last_elem, KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
+  static void update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
                            dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver);
 
-  static void update_ctg_kmers_count(bool last_elem, KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
+  static void update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
                                      dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver);
 
  public:

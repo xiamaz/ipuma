@@ -439,7 +439,7 @@ class KmerCtgDHT {
     this->aln_scoring = aln_scoring;
     ssw_filter.report_cigar = compute_cigar;
     kmer_store.set_size("insert ctg seeds", max_store_size, max_rpcs_in_flight);
-    kmer_store.set_update_func([](bool last, KmerAndCtgLoc<MAX_K> kmer_and_ctg_loc, kmer_map_t &kmer_map) {
+    kmer_store.set_update_func([](KmerAndCtgLoc<MAX_K> kmer_and_ctg_loc, kmer_map_t &kmer_map) {
       CtgLoc ctg_loc = kmer_and_ctg_loc.ctg_loc;
       const auto it = kmer_map->find(kmer_and_ctg_loc.kmer);
       if (it == kmer_map->end()) {

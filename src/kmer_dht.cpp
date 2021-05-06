@@ -68,19 +68,15 @@ using namespace upcxx_utils;
 
 // global variables to avoid passing dist objs to rpcs
 static int64_t _num_kmers_counted = 0;
-static int num_last_inserts = 0;
 static int num_inserts = 0;
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::update_count(bool last_elem, KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
+void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
                                   dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver) {
 #ifdef ENABLE_KCOUNT_GPUS_HT
-  if (last_elem)
-    num_last_inserts++;
-  else
-    num_inserts++;
+  num_inserts++;
   // FIXME: buffer hash table entries, and when full, copy across to
-  gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right, last_elem);
+  gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right);
 #else
   // find it - if it isn't found then insert it, otherwise increment the counts
   const auto it = kmers->find(kmer_and_ext.kmer);
@@ -112,7 +108,7 @@ void KmerDHT<MAX_K>::update_count(bool last_elem, KmerAndExt kmer_and_ext, dist_
 }
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::update_ctg_kmers_count(bool last_elem, KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
+void KmerDHT<MAX_K>::update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
                                             dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver) {
   // insert a new kmer derived from the previous round's contigs
   const auto it = kmers->find(kmer_and_ext.kmer);
@@ -375,13 +371,15 @@ void KmerDHT<MAX_K>::flush_updates() {
 
 #ifdef ENABLE_KCOUNT_GPUS_HT
   if (pass_type == READ_KMERS_PASS) {
+    barrier();
+    gpu_driver->flush_inserts();
+
+    // FIXME: everything below should be done in compute_kmer_exts, to ensure it's completed after processing both read kmers and
+    // ctg kmers
+
     Timer insert_timer("gpu insert to cpu timer");
     insert_timer.start();
-    // make sure every rank has finished
-    barrier();
-    // In this first attempt, we'll update from the GPU once only, which means we'll be limited by the GPU memory
     gpu_driver->done_inserts();
-    barrier();
     auto num_entries = gpu_driver->get_num_entries();
     int64_t all_num_entries = reduce_one(gpu_driver->get_num_entries(), op_fast_add, 0).wait();
     // add some space for the ctg kmers
@@ -417,8 +415,8 @@ void KmerDHT<MAX_K>::flush_updates() {
         // FIXME: should only be done in debug mode
         const auto it = kmers->find(kmer);
         if (it != kmers->end())
-          WARN("Found a duplicate kmer ", kmer.to_string(), " - shouldn't happen: existing count ", it->second.count, 
-               " new count ", kmer_counts.count);
+          WARN("Found a duplicate kmer ", kmer.to_string(), " - shouldn't happen: existing count ", it->second.count, " new count ",
+               kmer_counts.count);
       }
       // drop all kmers that have values corresponding to the empty key as these are likely to be errors
       bool drop_entry = false;
@@ -427,7 +425,7 @@ void KmerDHT<MAX_K>::flush_updates() {
         if (kmer_longs[j] == KEY_EMPTY) {
           num_empty_key_drops++;
           sum_drop_depth += kmer_counts.count;
-          //WARN("Found a kmer long at index ", j, " corresponding to an empty key, kmer is ", kmer.to_string(), 
+          // WARN("Found a kmer long at index ", j, " corresponding to an empty key, kmer is ", kmer.to_string(),
           //     " count ", kmer_counts.count);
           drop_entry = true;
           break;
@@ -438,7 +436,7 @@ void KmerDHT<MAX_K>::flush_updates() {
     insert_timer.stop();
     auto all_num_empty_key_drops = reduce_one(num_empty_key_drops, op_fast_add, 0).wait();
     auto all_drop_depth = reduce_one(sum_drop_depth, op_fast_add, 0).wait();
-    if (!rank_me() && all_num_empty_key_drops) 
+    if (!rank_me() && all_num_empty_key_drops)
       SWARN("Dropped ", all_num_empty_key_drops, " kmer inserts because of empty key overlap, average depth ",
             (double)all_drop_depth / all_num_empty_key_drops);
 
@@ -509,6 +507,8 @@ void KmerDHT<MAX_K>::purge_kmers(int threshold) {
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::compute_kmer_exts() {
+  // FIXME: this needs to be done in the GPU and then only the left and right selected exts need to be written back, further
+  // reducing the copy back (i.e. instead of 9 uint32_t we have 2 bytes, e.g for k=33 we have 2*8+2=18 bytes instead of 2*8+9*4=52)
   BarrierTimer timer(__FILEFUNC__);
   for (auto &elem : *kmers) {
     auto kmer_counts = &elem.second;

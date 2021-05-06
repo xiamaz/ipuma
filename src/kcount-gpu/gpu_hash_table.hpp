@@ -117,7 +117,8 @@ class HashTableGPUDriver {
             size_t &gpu_bytes_reqd);
 
   // FIXME: this should be in kmer_dht and the insert_kmer_block should be public
-  void insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right, bool is_last);
+  void insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right);
+  void flush_inserts();
   void done_inserts();
 
   std::pair<KmerArray<MAX_K> *, KmerCountsArray *> get_next_entry();

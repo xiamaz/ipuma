@@ -76,7 +76,7 @@ dist_object<cid_to_reads_map_t> process_alns(vector<PackedReads *> &packed_reads
   using read_to_cid_map_t = HASH_TABLE<int64_t, pair<int64_t, int>>;
   dist_object<read_to_cid_map_t> read_to_cid_map({});
   ThreeTierAggrStore<tuple<int64_t, int64_t, int>> read_cid_store;
-  read_cid_store.set_update_func([&read_to_cid_map](bool last, tuple<int64_t, int64_t, int> &&read_cid_info) {
+  read_cid_store.set_update_func([&read_to_cid_map](tuple<int64_t, int64_t, int> &&read_cid_info) {
     auto &[read_id, cid, score] = read_cid_info;
     auto it = read_to_cid_map->find(read_id);
     if (it == read_to_cid_map->end()) {
@@ -103,7 +103,7 @@ dist_object<cid_to_reads_map_t> process_alns(vector<PackedReads *> &packed_reads
   dist_object<cid_to_reads_map_t> cid_to_reads_map({});
   cid_to_reads_map->reserve(num_ctgs);
   ThreeTierAggrStore<pair<int64_t, int64_t>> cid_reads_store;
-  cid_reads_store.set_update_func([&cid_to_reads_map](bool last, pair<int64_t, int64_t> &&cid_reads_info) {
+  cid_reads_store.set_update_func([&cid_to_reads_map](pair<int64_t, int64_t> &&cid_reads_info) {
     auto &[cid, read_id] = cid_reads_info;
     auto it = cid_to_reads_map->find(cid);
     if (it == cid_to_reads_map->end())
@@ -170,7 +170,7 @@ dist_object<vector<PackedRead>> move_reads_to_targets(vector<PackedReads *> &pac
   int64_t num_not_found = 0;
   dist_object<vector<PackedRead>> new_packed_reads({});
   ThreeTierAggrStore<pair<PackedRead, PackedRead>> read_seq_store;
-  read_seq_store.set_update_func([&new_packed_reads](bool last, pair<PackedRead, PackedRead> &&read_pair_info) {
+  read_seq_store.set_update_func([&new_packed_reads](pair<PackedRead, PackedRead> &&read_pair_info) {
     new_packed_reads->push_back(read_pair_info.first);
     new_packed_reads->push_back(read_pair_info.second);
   });

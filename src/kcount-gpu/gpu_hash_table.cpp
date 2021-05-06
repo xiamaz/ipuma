@@ -214,71 +214,6 @@ __global__ void gpu_purge_invalid(KmerArray<MAX_K> *keys, KmerCountsArray *vals,
   reduce(purged, ht_capacity, num_purged);
 }
 
-/*
-template <int MAX_K>
-__global__ void gpu_insert_kmer_block(KmerArray<MAX_K> *keys, KmerCountsArray *vals, const KmerAndExts<MAX_K> *elem_buff,
-                                      uint32_t num_buff_entries, cu_uint64_t ht_capacity, unsigned int *insert_counts) {
-  unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
-
-  int N_LONGS = KmerArray<MAX_K>::N_LONGS;
-  int attempted_inserts = 0, dropped_inserts = 0, new_inserts = 0;
-  int num_threads = blockDim.x * gridDim.x;
-  for (int i = threadid; i < num_buff_entries; i += num_threads) {
-    KmerArray<MAX_K> kmer = elem_buff[i].kmer;
-    count_t kmer_count = elem_buff[i].count;
-    char left_ext = elem_buff[i].left;
-    char right_ext = elem_buff[i].right;
-    cu_uint64_t slot = kmer_hash(kmer) % ht_capacity;
-    auto start_slot = slot;
-    attempted_inserts++;
-    int j;
-    // restricting the number of probes reduces computation (and imbalance) at the cost of some loss of completeness
-    // for a good hash function, this should only kick in when the hash table load is getting really high
-    // then we'll start to see the loss of inserts
-    const int MAX_PROBE = (ht_capacity < 1000 ? ht_capacity : 1000);
-    for (j = 0; j < MAX_PROBE; j++) {
-      cu_uint64_t old_key = atomicCAS(&(keys[slot].longs[0]), KEY_EMPTY, kmer.longs[0]);
-      if (old_key == KEY_EMPTY || old_key == kmer.longs[0]) {
-        bool found_slot = true;
-        for (int long_i = 1; long_i < N_LONGS; long_i++) {
-          cu_uint64_t old_key = atomicCAS(&(keys[slot].longs[long_i]), KEY_EMPTY, kmer.longs[long_i]);
-          if (old_key != KEY_EMPTY && old_key != kmer.longs[long_i]) {
-            found_slot = false;
-            break;
-          }
-        }
-        if (found_slot) {
-          count_t old_count = atomicAdd(&(vals[slot].data[0]), kmer_count);
-          if (!old_count) new_inserts++;
-          switch (left_ext) {
-            case 'A': atomicAdd(&(vals[slot].data[1]), kmer_count); break;
-            case 'C': atomicAdd(&(vals[slot].data[2]), kmer_count); break;
-            case 'G': atomicAdd(&(vals[slot].data[3]), kmer_count); break;
-            case 'T': atomicAdd(&(vals[slot].data[4]), kmer_count); break;
-          }
-          switch (right_ext) {
-            case 'A': atomicAdd(&(vals[slot].data[5]), kmer_count); break;
-            case 'C': atomicAdd(&(vals[slot].data[6]), kmer_count); break;
-            case 'G': atomicAdd(&(vals[slot].data[7]), kmer_count); break;
-            case 'T': atomicAdd(&(vals[slot].data[8]), kmer_count); break;
-          }
-          break;
-        }
-      }
-      // linear probing
-      // slot = (start_slot + j) % ht_capacity;
-      // quadratic probing - worse cache but reduced clustering
-      slot = (start_slot + (j + 1) * (j + 1)) % ht_capacity;
-    }
-    // this entry didn't get inserted because we ran out of probing time (and probably space)
-    if (j == MAX_PROBE) dropped_inserts++;
-  }
-  reduce(attempted_inserts, num_buff_entries, &(insert_counts[0]));
-  reduce(dropped_inserts, num_buff_entries, &(insert_counts[1]));
-  reduce(new_inserts, num_buff_entries, &(insert_counts[2]));
-}
-*/
-
 template <int MAX_K>
 __global__ void gpu_insert_kmer_block(KmerArray<MAX_K> *keys, KmerCountsArray *vals, const KmerAndExts<MAX_K> *elem_buff,
                                       uint32_t num_buff_entries, cu_uint64_t ht_capacity, unsigned int *insert_counts,
@@ -314,7 +249,9 @@ __global__ void gpu_insert_kmer_block(KmerArray<MAX_K> *keys, KmerCountsArray *v
         }
         if (found_slot) {
           if (is_empty || !is_ctg_kmer) {
-            // only update values if slot is empty
+            // for kmers from ctgs, we don't permit more than one entry; for kmers from reads, we accumulate
+            // FIXME: for duplicate kmers from ctgs, we should be dropping them if there is a conflict in the extensions but this is
+            // tricky to do within this context of atomic ops
             count_t old_count = atomicAdd(&(vals[slot].data[0]), kmer_count);
             if (is_empty) new_inserts++;
             switch (left_ext) {
@@ -383,7 +320,7 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block() {
 }
 
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right, bool is_last) {
+void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right) {
   elem_buff_host[num_buff_entries].kmer = kmer;
   elem_buff_host[num_buff_entries].count = kmer_count;
   elem_buff_host[num_buff_entries].left = left;
@@ -397,14 +334,17 @@ void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, count_t kmer_c
 }
 
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::done_inserts() {
+void HashTableGPUDriver<MAX_K>::flush_inserts() {
   if (num_buff_entries) {
     insert_kmer_block();
     num_buff_entries = 0;
   }
-  // delete to make space before returning the hash table entries
   if (elem_buff_host) delete[] elem_buff_host;
   cudaFree(elem_buff_dev);
+}
+
+template <int MAX_K>
+void HashTableGPUDriver<MAX_K>::done_inserts() {
   // int mingridsize = 0;
   // int threadblocksize = 0;
   // cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_purge_invalid<MAX_K>, 0, 0));
@@ -423,12 +363,12 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   cudaErrchk(cudaMemcpy(&num_purged_host, num_purged_dev, sizeof(unsigned int), cudaMemcpyDeviceToHost));
   cudaFree(num_purged_dev);
   num_purged += num_purged_host;
+  auto num_entries = num_new_inserts - num_purged;
 
   // now compact the hash table entries
   unsigned int *num_dropped_dev;
   cudaErrchk(cudaMalloc(&num_dropped_dev, sizeof(unsigned int)));
   cudaErrchk(cudaMemset(num_dropped_dev, 0, sizeof(unsigned int)));
-  int num_entries = get_num_entries();
   KmerArray<MAX_K> *compact_keys_dev;
   KmerCountsArray *compact_vals_dev;
   // overallocate to reduce collisions
@@ -458,7 +398,6 @@ void HashTableGPUDriver<MAX_K>::done_inserts() {
   output_vals.resize(num_entries);
   output_index = 0;
   // FIXME: can do this async - also
-  // FIXME: call kernel to reduce sparse elems array to compact before copying
   cudaErrchk(cudaMemcpy(output_keys.data(), compact_keys_dev, num_entries * sizeof(KmerArray<MAX_K>), cudaMemcpyDeviceToHost));
   cudaErrchk(cudaMemcpy(output_vals.data(), compact_vals_dev, num_entries * sizeof(KmerCountsArray), cudaMemcpyDeviceToHost));
   dstate->memcpy_timer.stop();

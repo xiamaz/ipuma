@@ -383,8 +383,10 @@ void analyze_kmers(unsigned kmer_len, unsigned prev_kmer_len, int qual_offset, v
   if (fut_has_contigs.wait()) {
     add_ctg_kmers(kmer_len, prev_kmer_len, ctgs, kmer_dht);
     barrier();
+    //#ifndef ENABLE_KCOUNT_GPUS
     kmer_dht->purge_kmers(1);
     barrier();
+    //#endif
   }
   kmer_dht->compute_kmer_exts();
   if (dump_kmers) kmer_dht->dump_kmers();
