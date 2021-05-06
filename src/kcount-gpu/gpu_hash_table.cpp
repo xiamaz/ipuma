@@ -214,6 +214,7 @@ __global__ void gpu_purge_invalid(KmerArray<MAX_K> *keys, KmerCountsArray *vals,
   reduce(purged, ht_capacity, num_purged);
 }
 
+/*
 template <int MAX_K>
 __global__ void gpu_insert_kmer_block(KmerArray<MAX_K> *keys, KmerCountsArray *vals, const KmerAndExts<MAX_K> *elem_buff,
                                       uint32_t num_buff_entries, cu_uint64_t ht_capacity, unsigned int *insert_counts) {
@@ -238,15 +239,15 @@ __global__ void gpu_insert_kmer_block(KmerArray<MAX_K> *keys, KmerCountsArray *v
     for (j = 0; j < MAX_PROBE; j++) {
       cu_uint64_t old_key = atomicCAS(&(keys[slot].longs[0]), KEY_EMPTY, kmer.longs[0]);
       if (old_key == KEY_EMPTY || old_key == kmer.longs[0]) {
-        bool found = true;
+        bool found_slot = true;
         for (int long_i = 1; long_i < N_LONGS; long_i++) {
           cu_uint64_t old_key = atomicCAS(&(keys[slot].longs[long_i]), KEY_EMPTY, kmer.longs[long_i]);
           if (old_key != KEY_EMPTY && old_key != kmer.longs[long_i]) {
-            found = false;
+            found_slot = false;
             break;
           }
         }
-        if (found) {
+        if (found_slot) {
           count_t old_count = atomicAdd(&(vals[slot].data[0]), kmer_count);
           if (!old_count) new_inserts++;
           switch (left_ext) {
@@ -260,6 +261,74 @@ __global__ void gpu_insert_kmer_block(KmerArray<MAX_K> *keys, KmerCountsArray *v
             case 'C': atomicAdd(&(vals[slot].data[6]), kmer_count); break;
             case 'G': atomicAdd(&(vals[slot].data[7]), kmer_count); break;
             case 'T': atomicAdd(&(vals[slot].data[8]), kmer_count); break;
+          }
+          break;
+        }
+      }
+      // linear probing
+      // slot = (start_slot + j) % ht_capacity;
+      // quadratic probing - worse cache but reduced clustering
+      slot = (start_slot + (j + 1) * (j + 1)) % ht_capacity;
+    }
+    // this entry didn't get inserted because we ran out of probing time (and probably space)
+    if (j == MAX_PROBE) dropped_inserts++;
+  }
+  reduce(attempted_inserts, num_buff_entries, &(insert_counts[0]));
+  reduce(dropped_inserts, num_buff_entries, &(insert_counts[1]));
+  reduce(new_inserts, num_buff_entries, &(insert_counts[2]));
+}
+*/
+
+template <int MAX_K>
+__global__ void gpu_insert_kmer_block(KmerArray<MAX_K> *keys, KmerCountsArray *vals, const KmerAndExts<MAX_K> *elem_buff,
+                                      uint32_t num_buff_entries, cu_uint64_t ht_capacity, unsigned int *insert_counts,
+                                      bool is_ctg_kmer) {
+  unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
+
+  int N_LONGS = KmerArray<MAX_K>::N_LONGS;
+  int attempted_inserts = 0, dropped_inserts = 0, new_inserts = 0;
+  int num_threads = blockDim.x * gridDim.x;
+  for (int i = threadid; i < num_buff_entries; i += num_threads) {
+    KmerArray<MAX_K> kmer = elem_buff[i].kmer;
+    count_t kmer_count = elem_buff[i].count;
+    char left_ext = elem_buff[i].left;
+    char right_ext = elem_buff[i].right;
+    cu_uint64_t slot = kmer_hash(kmer) % ht_capacity;
+    auto start_slot = slot;
+    attempted_inserts++;
+    int j;
+    const int MAX_PROBE = (ht_capacity < 1000 ? ht_capacity : 1000);
+    for (j = 0; j < MAX_PROBE; j++) {
+      cu_uint64_t old_key = atomicCAS(&(keys[slot].longs[0]), KEY_EMPTY, kmer.longs[0]);
+      // only insert new kmers; drop duplicates
+      if (old_key == KEY_EMPTY || old_key == kmer.longs[0]) {
+        bool found_slot = true;
+        bool is_empty = (old_key == KEY_EMPTY);
+        for (int long_i = 1; long_i < N_LONGS; long_i++) {
+          cu_uint64_t old_key = atomicCAS(&(keys[slot].longs[long_i]), KEY_EMPTY, kmer.longs[long_i]);
+          if (old_key != KEY_EMPTY && old_key != kmer.longs[long_i]) {
+            found_slot = false;
+            break;
+          }
+          if (old_key != KEY_EMPTY) is_empty = false;
+        }
+        if (found_slot) {
+          if (is_empty || !is_ctg_kmer) {
+            // only update values if slot is empty
+            count_t old_count = atomicAdd(&(vals[slot].data[0]), kmer_count);
+            if (is_empty) new_inserts++;
+            switch (left_ext) {
+              case 'A': atomicAdd(&(vals[slot].data[1]), kmer_count); break;
+              case 'C': atomicAdd(&(vals[slot].data[2]), kmer_count); break;
+              case 'G': atomicAdd(&(vals[slot].data[3]), kmer_count); break;
+              case 'T': atomicAdd(&(vals[slot].data[4]), kmer_count); break;
+            }
+            switch (right_ext) {
+              case 'A': atomicAdd(&(vals[slot].data[5]), kmer_count); break;
+              case 'C': atomicAdd(&(vals[slot].data[6]), kmer_count); break;
+              case 'G': atomicAdd(&(vals[slot].data[7]), kmer_count); break;
+              case 'T': atomicAdd(&(vals[slot].data[8]), kmer_count); break;
+            }
           }
           break;
         }
@@ -295,8 +364,8 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block() {
 
   GPUTimer t;
   t.start();
-  gpu_insert_kmer_block<<<gridsize, threadblocksize>>>(keys_dev, vals_dev, elem_buff_dev, num_buff_entries, ht_capacity,
-                                                       counts_gpu);
+  gpu_insert_kmer_block<<<gridsize, threadblocksize>>>(keys_dev, vals_dev, elem_buff_dev, num_buff_entries, ht_capacity, counts_gpu,
+                                                       false);
   t.stop();
   dstate->kernel_timer.inc(t.get_elapsed());
 
