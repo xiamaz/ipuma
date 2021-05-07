@@ -125,8 +125,6 @@ void KmerDHT<MAX_K>::update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object
       if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F') {
         // non-UU, replace
         insert = true;
-        // but keep the count from the read kmer
-        // or could sum the depths
         DBG_INS_CTG_KMER("replace non-UU read kmer\n");
       }
     } else {
@@ -440,7 +438,6 @@ void KmerDHT<MAX_K>::flush_updates() {
       SWARN("Dropped ", all_num_empty_key_drops, " kmer inserts because of empty key overlap, average depth ",
             (double)all_drop_depth / all_num_empty_key_drops);
 
-    SLOG(KLMAGENTA, "CPU iterated through ", reduce_one(num_slots, op_fast_add, 0).wait(), " slots for GPU hash table" KNORM "\n");
     SLOG(KLMAGENTA, "CPU iterated through ", reduce_one(num_slots, op_fast_add, 0).wait(), " slots for GPU hash table" KNORM "\n");
     auto all_avg_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_add, 0).wait() / rank_n();
     auto all_max_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_max, 0).wait();

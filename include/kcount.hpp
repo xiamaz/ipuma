@@ -54,11 +54,11 @@ using upcxx::dist_object;
 
 template <int MAX_K>
 void analyze_kmers(unsigned kmer_len, unsigned prev_kmer_len, int qual_offset, vector<PackedReads *> &packed_reads_list,
-                   int dmin_thres, Contigs &ctgs, dist_object<KmerDHT<MAX_K>> &kmer_dht, int ranks_per_gpu, bool dump_kmers);
+                   int dmin_thres, Contigs &ctgs, dist_object<KmerDHT<MAX_K>> &kmer_dht, bool dump_kmers);
 
 #define __MACRO_KCOUNT__(KMER_LEN, MODIFIER)                                                              \
   MODIFIER void analyze_kmers<KMER_LEN>(unsigned, unsigned, int, vector<PackedReads *> &, int, Contigs &, \
-                                        dist_object<KmerDHT<KMER_LEN>> &, int, bool)
+                                        dist_object<KmerDHT<KMER_LEN>> &, bool)
 
 // Reduce compile time by instantiating templates of common types
 // extern template declarations are in in kcount.hpp
