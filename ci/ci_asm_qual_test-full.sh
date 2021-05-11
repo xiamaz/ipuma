@@ -49,7 +49,7 @@ then
   echo "MHM2 failed! - $status"
   exit $status
 fi
-$mhm2_install_dir/bin/check_asm_quality.py --asm-dir $test_dir --expected-quals $mhm2_install_dir/share/good-arcticsynth.txt --refs $wd/$refs 2>&1 \
+$mhm2_install_dir/bin/check_asm_quality.py --thres 0.02 --rna --asm-dir $test_dir --expected-quals $mhm2_install_dir/share/good-arcticsynth.txt --refs $wd/$refs 2>&1 \
    | tee $test_dir/check_asm_quality_test.log
 status=$?
 if [ $status -ne 0 ]
