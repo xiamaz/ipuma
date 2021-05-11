@@ -182,7 +182,7 @@ class KmerDHT {
 
  private:
   upcxx::dist_object<KmerMap> kmers;
-  dist_object<HashTableGPUDriver<MAX_K>> gpu_driver;
+  dist_object<HashTableGPUDriver<MAX_K>> ht_gpu_driver;
 
   upcxx_utils::ThreeTierAggrStore<KmerAndExt, dist_object<KmerMap> &, dist_object<HashTableGPUDriver<MAX_K>> &> kmer_store;
   int64_t max_kmer_store_bytes;
@@ -196,10 +196,10 @@ class KmerDHT {
   int minimizer_len = 15;
 
   static void update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
-                           dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver);
+                           dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver);
 
   static void update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
-                                     dist_object<HashTableGPUDriver<MAX_K>> &gpu_driver);
+                                     dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver);
 
  public:
   KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS);
