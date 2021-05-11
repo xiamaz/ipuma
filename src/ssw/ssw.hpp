@@ -157,6 +157,8 @@ namespace StripedSmithWaterman {
     //                     will NOT return the suboptimal alignment information.
     // @return   True: succeed; false: fail.
     // =========
+    bool Align(const char* query, const int& query_len, const char* ref, const int& ref_len,
+               const Filter& filter, Alignment* alignment, const int32_t maskLen) const;
     bool Align(const char* query, const char* ref, const int& ref_len,
                const Filter& filter, Alignment* alignment, const int32_t maskLen) const;
 
@@ -194,6 +196,7 @@ namespace StripedSmithWaterman {
       const int8_t* translation_matrix,
       const int&    translation_matrix_size);
 
+    uint8_t get_match_score() const { return match_score_; }
   private:
     int8_t* score_matrix_;
     int     score_matrix_size_;

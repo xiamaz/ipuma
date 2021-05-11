@@ -39,9 +39,8 @@ $stats{'StageTime'} = 0;
 
 
 sub printStats {
-
-   print join(";", @fields) . "\n";
-   print join(";", @stats{@fields}) . "\n";
+   print join("\t", @fields) . "\n";
+   print join("\t", @stats{@fields}) . "\n";
 }
 
 $stats{"Operator"} = $ENV{"USER"};
@@ -206,5 +205,7 @@ $stats{"GBofFASTQ"} =~ s/(\.\d)\d*/$1/;
 
 printStats();
 
-print "MHM2, version " . $stats{"Version"} . ", was executed on " . $stats{"NumReads"} . " reads" . " and " . $stats{"GBofFASTQ"} . " GB of fastq " . "for " . $stats{"TotalTime"} . " seconds in a job over " . $stats{"Nodes"} . " nodes (" . $stats{"Threads"} . " threads) using the " . $stats{"HipmerWorkflow"} . " workflow.\n";
+print "MHM2, version " . $stats{"Version"} . ", was executed on " . $stats{"NumReads"} . " reads" . " and " 
+       . $stats{"GBofFASTQ"} . " GB of fastq " . "for " . $stats{"TotalTime"} . " seconds in a job over " 
+       . $stats{"Nodes"} . " nodes (" . $stats{"Threads"} . " threads) using the " . $stats{"HipmerWorkflow"} . " workflow.\n";
 

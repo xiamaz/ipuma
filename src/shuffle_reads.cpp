@@ -147,8 +147,7 @@ dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_to_read
   for (auto &[cid, read_ids] : *cid_to_reads_map) {
     progress();
     for (auto read_id : read_ids) {
-      rpc(
-          get_target_rank(read_id),
+      rpc(get_target_rank(read_id),
           [](dist_object<read_to_target_map_t> &read_to_target_map, int64_t read_id, int target) {
             read_to_target_map->insert({read_id, target});
           },
@@ -170,6 +169,7 @@ dist_object<vector<PackedRead>> move_reads_to_targets(vector<PackedReads *> &pac
   int64_t num_not_found = 0;
   dist_object<vector<PackedRead>> new_packed_reads({});
   ThreeTierAggrStore<pair<PackedRead, PackedRead>> read_seq_store;
+  // FIXME read_seq_store.set_restricted_updates();
   read_seq_store.set_update_func([&new_packed_reads](pair<PackedRead, PackedRead> &&read_pair_info) {
     new_packed_reads->push_back(read_pair_info.first);
     new_packed_reads->push_back(read_pair_info.second);
@@ -186,8 +186,7 @@ dist_object<vector<PackedRead>> move_reads_to_targets(vector<PackedReads *> &pac
       auto &packed_read1 = (*packed_reads)[i];
       auto &packed_read2 = (*packed_reads)[i + 1];
       auto read_id = abs(packed_read1.get_id());
-      auto fut = rpc(
-                     get_target_rank(read_id),
+      auto fut = rpc(get_target_rank(read_id),
                      [](dist_object<read_to_target_map_t> &read_to_target_map, int64_t read_id) -> int {
                        const auto it = read_to_target_map->find(read_id);
                        if (it == read_to_target_map->end()) return -1;
