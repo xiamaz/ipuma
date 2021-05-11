@@ -48,7 +48,7 @@
 #include "gpu-utils/gpu_utils.hpp"
 #include "kcount-gpu/parse_and_pack.hpp"
 
-static kcount_gpu::ParseAndPackGPUDriver *gpu_driver;
+static kcount_gpu::ParseAndPackGPUDriver *pnp_gpu_driver;
 
 #endif
 
@@ -67,16 +67,16 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
                               int64_t &num_kmers, int64_t &num_gpu_waits) {
   bool from_ctgs = quals_block.empty();
   int qual_cutoff = KCOUNT_QUAL_CUTOFF;
-  if (!gpu_driver->process_seq_block(seq_block, num_Ns))
+  if (!pnp_gpu_driver->process_seq_block(seq_block, num_Ns))
     DIE("seq length is too high, ", seq_block.length(), " >= ", KCOUNT_GPU_SEQ_BLOCK_SIZE);
-  while (!gpu_driver->kernel_is_done()) {
+  while (!pnp_gpu_driver->kernel_is_done()) {
     num_gpu_waits++;
     progress();
   }
   int num_kmer_longs = Kmer<MAX_K>::get_N_LONGS();
-  for (int i = 0; i < (int)gpu_driver->host_kmer_targets.size(); i++) {
+  for (int i = 0; i < (int)pnp_gpu_driver->host_kmer_targets.size(); i++) {
     // invalid kmer
-    if (gpu_driver->host_kmer_targets[i] == -1) continue;
+    if (pnp_gpu_driver->host_kmer_targets[i] == -1) continue;
     char left_base = '0', right_base = '0';
     kmer_count_t depth = 1;
     if (from_ctgs) {
@@ -90,18 +90,18 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
       if (i + kmer_len < quals_block.size() && quals_block[i + kmer_len] >= qthres && seq_block[i + kmer_len] != '_')
         right_base = seq_block[i + kmer_len];
     }
-    if (gpu_driver->host_is_rcs[i]) {
+    if (pnp_gpu_driver->host_is_rcs[i]) {
       swap(left_base, right_base);
       left_base = comp_nucleotide(left_base);
       right_base = comp_nucleotide(right_base);
     }
-    Kmer<MAX_K> kmer(&(gpu_driver->host_kmers[i * num_kmer_longs]));
+    Kmer<MAX_K> kmer(&(pnp_gpu_driver->host_kmers[i * num_kmer_longs]));
 #ifdef DEBUG
     auto cpu_target = kmer_dht->get_kmer_target_rank(kmer);
-    if (cpu_target != gpu_driver->host_kmer_targets[i])
-      DIE("cpu target is ", cpu_target, " but gpu target is ", gpu_driver->host_kmer_targets[i]);
+    if (cpu_target != pnp_gpu_driver->host_kmer_targets[i])
+      DIE("cpu target is ", cpu_target, " but gpu target is ", pnp_gpu_driver->host_kmer_targets[i]);
 #endif
-    kmer_dht->add_kmer(kmer, left_base, right_base, depth, gpu_driver->host_kmer_targets[i]);
+    kmer_dht->add_kmer(kmer, left_base, right_base, depth, pnp_gpu_driver->host_kmer_targets[i]);
     DBG_ADD_KMER("kcount add_kmer ", kmer.to_string(), " count ", 1, "\n");
     num_kmers++;
   }
@@ -185,8 +185,8 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     DIE("GPUs are enabled but no GPU could be configured for kmer counting");
   } else {
     double init_time;
-    gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
-                                                       kmer_dht->get_minimizer_len(), init_time);
+    pnp_gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
+                                                           kmer_dht->get_minimizer_len(), init_time);
     SLOG(KLMAGENTA, "Initialized PnP GPU driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
   }
 #else
@@ -231,12 +231,12 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   }
   progbar.done();
   SLOG(KLMAGENTA, "Number of calls to progress while PnP GPU driver was running: ", num_gpu_waits, KNORM, "\n");
-  auto [gpu_time_tot, gpu_time_malloc, gpu_time_cp, gpu_time_kernel] = gpu_driver->get_elapsed_times();
+  auto [gpu_time_tot, gpu_time_malloc, gpu_time_cp, gpu_time_kernel] = pnp_gpu_driver->get_elapsed_times();
   SLOG(KLMAGENTA, "Number of calls to PnP GPU kernel: ", num_read_blocks, KNORM, "\n");
   SLOG(KLMAGENTA, "Elapsed times for PnP GPU: ", fixed, setprecision(3), " total ", gpu_time_tot, ", malloc ", gpu_time_malloc,
        ", cp ", gpu_time_cp, ", kernel ", gpu_time_kernel, KNORM, "\n");
-  delete gpu_driver;
-  gpu_driver = nullptr;
+  delete pnp_gpu_driver;
+  pnp_gpu_driver = nullptr;
 #else
   progbar.done();
 #endif
@@ -282,8 +282,8 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     DIE("GPUs are enabled but no GPU could be configured for kmer counting");
   } else {
     double init_time;
-    gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
-                                                       kmer_dht->get_minimizer_len(), init_time);
+    pnp_gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
+                                                           kmer_dht->get_minimizer_len(), init_time);
     SLOG(KLMAGENTA, "Initialized parse and pack GPU driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
   }
 #else
@@ -319,7 +319,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     num_ctg_blocks++;
   }
   SLOG(KLMAGENTA, "Number of calls to progress while GPU PnP driver was running: ", num_gpu_waits, KNORM, "\n");
-  auto [gpu_time_tot, gpu_time_malloc, gpu_time_cp, gpu_time_kernel] = gpu_driver->get_elapsed_times();
+  auto [gpu_time_tot, gpu_time_malloc, gpu_time_cp, gpu_time_kernel] = pnp_gpu_driver->get_elapsed_times();
   SLOG(KLMAGENTA, "Number of calls to GPU PnP kernel ", num_ctg_blocks, " times", KNORM, "\n");
   SLOG(KLMAGENTA, "PnP GPU times (secs): ", fixed, setprecision(3), " total ", gpu_time_tot, ", malloc ", gpu_time_malloc, ", cp ",
        gpu_time_cp, ", kernel ", gpu_time_kernel, KNORM, "\n");
@@ -339,8 +339,8 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
                  (double)avg_kmers_stored / max_kmers_stored, "\n");
   }
 #ifdef ENABLE_KCOUNT_GPUS
-  delete gpu_driver;
-  gpu_driver = nullptr;
+  delete pnp_gpu_driver;
+  pnp_gpu_driver = nullptr;
 #endif
 };
 
