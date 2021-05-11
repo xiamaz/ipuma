@@ -355,21 +355,9 @@ void analyze_kmers(unsigned kmer_len, unsigned prev_kmer_len, int qual_offset, v
 
   count_kmers(kmer_len, qual_offset, packed_reads_list, kmer_dht);
   barrier();
-  kmer_dht->print_load_factor();
-#ifndef ENABLE_KCOUNT_GPUS
-  barrier();
-  kmer_dht->purge_kmers(2);
-#endif
-  int64_t new_count = kmer_dht->get_num_kmers();
-  SLOG_VERBOSE("After purge of kmers < 2, there are ", new_count, " unique kmers\n");
-  barrier();
   if (fut_has_contigs.wait()) {
     add_ctg_kmers(kmer_len, prev_kmer_len, ctgs, kmer_dht);
     barrier();
-    //#ifndef ENABLE_KCOUNT_GPUS
-    kmer_dht->purge_kmers(1);
-    barrier();
-    //#endif
   }
   kmer_dht->compute_kmer_exts();
   if (dump_kmers) kmer_dht->dump_kmers();

@@ -477,6 +477,18 @@ void KmerDHT<MAX_K>::flush_updates() {
     SLOG(KLMAGENTA "  kernel: ", fixed, setprecision(3), avg_gpu_kernel_time, " avg, ", max_gpu_kernel_time, " max" KNORM "\n");
     SLOG(KLMAGENTA "  to cpu: ", fixed, setprecision(3), avg_gpu_memcpy_time, " avg, ", max_gpu_memcpy_time, " max" KNORM "\n");
   }
+#else
+  if (pass_type == READ_KMERS_PASS) {
+    barrier();
+    print_load_factor();
+    barrier();
+    purge_kmers(2);
+    int64_t new_count = get_num_kmers();
+    SLOG_VERBOSE("After purge of kmers < 2, there are ", new_count, " unique kmers\n");
+  } else {
+    purge_kmers(1);
+  }
+  barrier();
 #endif
   auto avg_kmers_processed = reduce_one(_num_kmers_counted, op_fast_add, 0).wait() / rank_n();
   auto max_kmers_processed = reduce_one(_num_kmers_counted, op_fast_max, 0).wait();

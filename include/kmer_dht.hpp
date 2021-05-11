@@ -201,6 +201,8 @@ class KmerDHT {
   static void update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
                                      dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver);
 
+  void purge_kmers(int threshold);
+
  public:
   KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS);
 
@@ -237,8 +239,6 @@ class KmerDHT {
   void add_kmer(Kmer<MAX_K> kmer, char left_ext, char right_ext, kmer_count_t count, int target_rank = -1);
 
   void flush_updates();
-
-  void purge_kmers(int threshold);
 
   void compute_kmer_exts();
 
