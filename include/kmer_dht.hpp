@@ -194,6 +194,7 @@ class KmerDHT {
   PASS_TYPE pass_type;
   int64_t bytes_sent = 0;
   int minimizer_len = 15;
+  bool using_ctg_kmers = false;
 
   static void update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
                            dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver);
@@ -202,6 +203,8 @@ class KmerDHT {
                                      dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver);
 
   void purge_kmers(int threshold);
+
+  void insert_from_gpu_hashtable();
 
  public:
   KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS);
@@ -213,6 +216,8 @@ class KmerDHT {
   ~KmerDHT();
 
   pair<int64_t, int64_t> get_bytes_sent();
+
+  void init_ctg_kmers(int max_elems);
 
   void set_pass(PASS_TYPE pass_type);
 

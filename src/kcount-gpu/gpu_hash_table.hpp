@@ -107,6 +107,8 @@ class HashTableGPUDriver {
   size_t output_index = 0;
 
   ElemsArray<MAX_K> read_kmers_dev;
+  ElemsArray<MAX_K> ctg_kmers_dev;
+
   // for buffering elements in the host memory
   KmerAndExts<MAX_K> *elem_buff_host = nullptr;
   // for transferring host memory buffer to device
@@ -121,7 +123,7 @@ class HashTableGPUDriver {
 
   PASS_TYPE pass_type;
 
-  void insert_kmer_block();
+  void insert_kmer_block(ElemsArray<MAX_K> &elems_array);
 
  public:
   HashTableGPUDriver();
@@ -130,12 +132,14 @@ class HashTableGPUDriver {
   void init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem, double &init_time,
             size_t &gpu_bytes_reqd);
 
+  void init_ctg_kmers(int max_elems, size_t gpu_avail_mem);
+
   void set_pass(PASS_TYPE pass_type);
 
-  // FIXME: this should be in kmer_dht and the insert_kmer_block should be public
   void insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right);
   void flush_inserts();
-  void done_inserts();
+  void done_ctg_kmer_inserts();
+  void done_all_inserts();
 
   std::pair<KmerArray<MAX_K> *, KmerCountsArray *> get_next_entry();
 

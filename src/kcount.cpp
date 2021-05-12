@@ -247,11 +247,12 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   auto all_num_reads = reduce_one(num_reads, op_fast_add, 0).wait();
   auto all_num_bad_quals = reduce_one(num_bad_quals, op_fast_add, 0).wait();
   auto all_num_Ns = reduce_one(num_Ns, op_fast_add, 0).wait();
+  if (all_num_bad_quals) SLOG_VERBOSE("Found ", perc_str(all_num_bad_quals, all_num_kmers), " bad quality positions\n");
+  if (all_num_Ns) SLOG_VERBOSE("Found ", perc_str(all_num_Ns, all_num_kmers), " kmers with Ns\n");
+#if !defined(ENABLE_KCOUNT_GPUS)
   auto all_distinct_kmers = kmer_dht->get_num_kmers();
   SLOG_VERBOSE("Processed a total of ", all_num_reads, " reads\n");
   SLOG_VERBOSE("Found ", perc_str(all_distinct_kmers, all_num_kmers), " unique kmers\n");
-  if (all_num_bad_quals) SLOG_VERBOSE("Found ", perc_str(all_num_bad_quals, all_num_kmers), " bad quality positions\n");
-  if (all_num_Ns) SLOG_VERBOSE("Found ", perc_str(all_num_Ns, all_num_kmers), " kmers with Ns\n");
   auto tot_kmers_stored = reduce_one(kmer_dht->get_local_num_kmers(), op_fast_add, 0).wait();
   auto max_kmers_stored = reduce_one(kmer_dht->get_local_num_kmers(), op_fast_max, 0).wait();
   if (!rank_me()) {
@@ -259,6 +260,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     SLOG_VERBOSE("Avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
                  (double)avg_kmers_stored / max_kmers_stored, "\n");
   }
+#endif
 };
 
 template <int MAX_K>
@@ -286,6 +288,11 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
                                                            kmer_dht->get_minimizer_len(), init_time);
     SLOG(KLMAGENTA, "Initialized parse and pack GPU driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
   }
+  // estimate number of kmers from ctgs
+  int64_t max_kmers = 0;
+  for (auto &ctg : ctgs) max_kmers += ctg.seq.length() - kmer_len + 1;
+  kmer_dht->init_ctg_kmers(max_kmers / rank_n());
+
 #else
   vector<Kmer<MAX_K>> kmers;
 #endif
