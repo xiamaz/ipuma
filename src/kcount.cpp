@@ -323,6 +323,8 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   SLOG(KLMAGENTA, "Number of calls to GPU PnP kernel ", num_ctg_blocks, " times", KNORM, "\n");
   SLOG(KLMAGENTA, "PnP GPU times (secs): ", fixed, setprecision(3), " total ", gpu_time_tot, ", malloc ", gpu_time_malloc, ", cp ",
        gpu_time_cp, ", kernel ", gpu_time_kernel, KNORM, "\n");
+  delete pnp_gpu_driver;
+  pnp_gpu_driver = nullptr;
 #endif
   kmer_dht->flush_updates();
   DBG("This rank processed ", ctgs.size(), " contigs and ", num_kmers, " kmers\n");
@@ -338,10 +340,6 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     SLOG_VERBOSE("add ctgs: avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
                  (double)avg_kmers_stored / max_kmers_stored, "\n");
   }
-#ifdef ENABLE_KCOUNT_GPUS
-  delete pnp_gpu_driver;
-  pnp_gpu_driver = nullptr;
-#endif
 };
 
 template <int MAX_K>

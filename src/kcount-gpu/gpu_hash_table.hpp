@@ -52,6 +52,8 @@
 
 namespace kcount_gpu {
 
+enum PASS_TYPE { READ_KMERS_PASS, CTG_KMERS_PASS };
+
 using cu_uint64_t = unsigned long long int;
 static_assert(sizeof(cu_uint64_t) == 8);
 #define KEY_EMPTY UINT64_C(-1)
@@ -78,6 +80,17 @@ struct KmerAndExts {
 };
 
 template <int MAX_K>
+struct ElemsArray {
+  // Arrays for keys and values. They are separate because the keys get initialized with max number and the vals with zero
+  KmerArray<MAX_K> *keys = nullptr;
+  KmerCountsArray *vals = nullptr;
+  int64_t capacity = 0;
+
+  void init(int64_t ht_capacity);
+  void clear();
+};
+
+template <int MAX_K>
 class HashTableGPUDriver {
   static const int N_LONGS = (MAX_K + 31) / 32;
   struct HashTableDriverState;
@@ -92,20 +105,21 @@ class HashTableGPUDriver {
   std::vector<KmerArray<MAX_K>> output_keys;
   std::vector<KmerCountsArray> output_vals;
   size_t output_index = 0;
-  // Arrays for keys and values. They are separate because the keys get initialized with max number and the vals with zero
-  KmerArray<MAX_K> *keys_dev = nullptr;
-  KmerCountsArray *vals_dev = nullptr;
+
+  ElemsArray<MAX_K> read_kmers_dev;
   // for buffering elements in the host memory
   KmerAndExts<MAX_K> *elem_buff_host = nullptr;
   // for transferring host memory buffer to device
   KmerAndExts<MAX_K> *elem_buff_dev = nullptr;
 
-  int64_t ht_capacity = 0;
   int64_t num_dropped_inserts = 0;
   int64_t num_attempted_inserts = 0;
   int64_t num_new_inserts = 0;
   int64_t num_purged = 0;
+  int64_t num_unique_elems = 0;
   int num_gpu_calls = 0;
+
+  PASS_TYPE pass_type;
 
   void insert_kmer_block();
 
@@ -115,6 +129,8 @@ class HashTableGPUDriver {
 
   void init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem, double &init_time,
             size_t &gpu_bytes_reqd);
+
+  void set_pass(PASS_TYPE pass_type);
 
   // FIXME: this should be in kmer_dht and the insert_kmer_block should be public
   void insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right);
@@ -129,7 +145,7 @@ class HashTableGPUDriver {
   int64_t get_capacity();
   int64_t get_num_attempted_inserts();
   int64_t get_num_dropped();
-  int64_t get_num_entries();
+  int64_t get_num_unique_elems();
   int64_t get_num_purged();
   int get_num_gpu_calls();
 };
