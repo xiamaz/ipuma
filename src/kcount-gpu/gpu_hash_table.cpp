@@ -58,100 +58,6 @@ using namespace std;
 using namespace gpu_common;
 using namespace kcount_gpu;
 
-template <int MAX_K>
-struct HashTableGPUDriver<MAX_K>::HashTableDriverState {
-  cudaEvent_t event;
-  QuickTimer insert_timer, kernel_timer, memcpy_timer;
-};
-
-template <int MAX_K>
-KmerArray<MAX_K>::KmerArray(const uint64_t *kmer) {
-  memcpy(longs, kmer, N_LONGS * sizeof(cu_uint64_t));
-}
-
-template <int MAX_K>
-__device__ bool kmers_equal(const KmerArray<MAX_K> &kmer1, const KmerArray<MAX_K> &kmer2) {
-  int n_longs = kmer1.N_LONGS;
-  for (int i = 0; i < n_longs; i++) {
-    if (kmer1.longs[i] != kmer2.longs[i]) return false;
-  }
-  return true;
-}
-
-template <int MAX_K>
-__device__ size_t kmer_hash(const KmerArray<MAX_K> &kmer) {
-  return gpu_murmurhash3_64(reinterpret_cast<const void *>(kmer.longs), kmer.N_LONGS * sizeof(cu_uint64_t));
-}
-
-template <int MAX_K>
-void ElemsArray<MAX_K>::init(int64_t ht_capacity) {
-  capacity = ht_capacity;
-  cudaErrchk(cudaMalloc(&keys, capacity * sizeof(KmerArray<MAX_K>)));
-  cudaErrchk(cudaMemset(keys, 0xff, capacity * sizeof(KmerArray<MAX_K>)));
-  cudaErrchk(cudaMalloc(&vals, capacity * sizeof(KmerCountsArray)));
-  cudaErrchk(cudaMemset(vals, 0, capacity * sizeof(KmerCountsArray)));
-}
-
-template <int MAX_K>
-void ElemsArray<MAX_K>::clear() {
-  cudaFree(keys);
-  cudaFree(vals);
-}
-
-template <int MAX_K>
-HashTableGPUDriver<MAX_K>::HashTableGPUDriver() {}
-
-template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem,
-                                     double &init_time, size_t &gpu_bytes_reqd) {
-  QuickTimer init_timer;
-  init_timer.start();
-  this->upcxx_rank_me = upcxx_rank_me;
-  this->upcxx_rank_n = upcxx_rank_n;
-  this->kmer_len = kmer_len;
-  int device_count = 0;
-  cudaErrchk(cudaGetDeviceCount(&device_count));
-  int my_gpu_id = upcxx_rank_me % device_count;
-  cudaErrchk(cudaSetDevice(my_gpu_id));
-
-  // now check that we have sufficient memory for the required capacity
-  size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * sizeof(KmerAndExts<MAX_K>);
-  size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(KmerCountsArray);
-  // save 1/5 of avail gpu memory for possible ctg kmers
-  // set capacity to max avail remaining from gpu memory - more slots means lower load
-  prime.set(0.8 * (gpu_avail_mem - elem_buff_size) / elem_size, false);
-  auto ht_capacity = prime.get();
-  gpu_bytes_reqd = max_elems * elem_size + elem_buff_size;
-  if (!upcxx_rank_me)
-    cout << KLMAGENTA << "Selecting GPU hash table capacity per rank of " << ht_capacity << " for " << max_elems << " elements\n";
-
-  read_kmers_dev.init(ht_capacity);
-  // for transferring elements from host to gpu
-  elem_buff_host = new KmerAndExts<MAX_K>[KCOUNT_GPU_HASHTABLE_BLOCK_SIZE];
-  // buffer on the device
-  cudaErrchk(cudaMalloc(&elem_buff_dev, KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * sizeof(KmerAndExts<MAX_K>)));
-
-  dstate = new HashTableDriverState();
-  init_timer.stop();
-  init_time = init_timer.get_elapsed();
-}
-
-template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::init_ctg_kmers(int max_elems, size_t gpu_avail_mem) {
-  size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * sizeof(KmerAndExts<MAX_K>);
-  size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(KmerCountsArray);
-  prime.set((gpu_avail_mem - elem_buff_size) / elem_size, false);
-  auto ht_capacity = prime.get();
-  if (!upcxx_rank_me)
-    cout << KLMAGENTA << "Selecting GPU hash table capacity per rank of " << ht_capacity << " for " << max_elems << " elements\n";
-  ctg_kmers_dev.init(ht_capacity);
-}
-
-template <int MAX_K>
-HashTableGPUDriver<MAX_K>::~HashTableGPUDriver() {
-  if (dstate) delete dstate;
-}
-
 __device__ int warpReduceSum(int val, int n) {
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
   unsigned mask = __ballot_sync(0xffffffff, threadid < n);
@@ -181,6 +87,20 @@ __device__ int blockReduceSum(int val, int n) {
 __device__ void reduce(int count, int num, unsigned int *result) {
   int block_num = blockReduceSum(count, num);
   if (threadIdx.x == 0) atomicAdd(result, block_num);
+}
+
+template <int MAX_K>
+__device__ bool kmers_equal(const KmerArray<MAX_K> &kmer1, const KmerArray<MAX_K> &kmer2) {
+  int n_longs = kmer1.N_LONGS;
+  for (int i = 0; i < n_longs; i++) {
+    if (kmer1.longs[i] != kmer2.longs[i]) return false;
+  }
+  return true;
+}
+
+template <int MAX_K>
+__device__ size_t kmer_hash(const KmerArray<MAX_K> &kmer) {
+  return gpu_murmurhash3_64(reinterpret_cast<const void *>(kmer.longs), kmer.N_LONGS * sizeof(cu_uint64_t));
 }
 
 template <int MAX_K>
@@ -258,7 +178,7 @@ __global__ void gpu_insert_kmer_block(ElemsArray<MAX_K> elems, const KmerAndExts
     auto start_slot = slot;
     attempted_inserts++;
     int j;
-    const int MAX_PROBE = (elems.capacity < 1000 ? elems.capacity : 1000);
+    const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
     for (j = 0; j < MAX_PROBE; j++) {
       cu_uint64_t old_key = atomicCAS(&(elems.keys[slot].longs[0]), KEY_EMPTY, kmer.longs[0]);
       // only insert new kmers; drop duplicates
@@ -304,7 +224,83 @@ __global__ void gpu_insert_kmer_block(ElemsArray<MAX_K> elems, const KmerAndExts
 }
 
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::insert_kmer_block(ElemsArray<MAX_K> &elems_array) {
+struct HashTableGPUDriver<MAX_K>::HashTableDriverState {
+  cudaEvent_t event;
+  QuickTimer insert_timer, kernel_timer, memcpy_timer;
+};
+
+template <int MAX_K>
+KmerArray<MAX_K>::KmerArray(const uint64_t *kmer) {
+  memcpy(longs, kmer, N_LONGS * sizeof(cu_uint64_t));
+}
+
+template <int MAX_K>
+void ElemsArray<MAX_K>::init(int64_t ht_capacity) {
+  capacity = ht_capacity;
+  cudaErrchk(cudaMalloc(&keys, capacity * sizeof(KmerArray<MAX_K>)));
+  cudaErrchk(cudaMemset(keys, 0xff, capacity * sizeof(KmerArray<MAX_K>)));
+  cudaErrchk(cudaMalloc(&vals, capacity * sizeof(KmerCountsArray)));
+  cudaErrchk(cudaMemset(vals, 0, capacity * sizeof(KmerCountsArray)));
+}
+
+template <int MAX_K>
+void ElemsArray<MAX_K>::clear() {
+  cudaFree(keys);
+  cudaFree(vals);
+}
+
+template <int MAX_K>
+HashTableGPUDriver<MAX_K>::HashTableGPUDriver() {}
+
+template <int MAX_K>
+void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem,
+                                     double &init_time, size_t &gpu_bytes_reqd) {
+  QuickTimer init_timer;
+  init_timer.start();
+  this->upcxx_rank_me = upcxx_rank_me;
+  this->upcxx_rank_n = upcxx_rank_n;
+  this->kmer_len = kmer_len;
+  int device_count = 0;
+  cudaErrchk(cudaGetDeviceCount(&device_count));
+  int my_gpu_id = upcxx_rank_me % device_count;
+  cudaErrchk(cudaSetDevice(my_gpu_id));
+
+  // now check that we have sufficient memory for the required capacity
+  size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * sizeof(KmerAndExts<MAX_K>);
+  size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(KmerCountsArray);
+  // save 1/5 of avail gpu memory for possible ctg kmers - probably excessive
+  // set capacity to max avail remaining from gpu memory - more slots means lower load
+  prime.set(0.8 * (gpu_avail_mem - elem_buff_size) / elem_size, false);
+  auto ht_capacity = prime.get();
+  gpu_bytes_reqd = max_elems * elem_size + elem_buff_size;
+  read_kmers_dev.init(ht_capacity);
+  // for transferring elements from host to gpu
+  elem_buff_host = new KmerAndExts<MAX_K>[KCOUNT_GPU_HASHTABLE_BLOCK_SIZE];
+  // buffer on the device
+  cudaErrchk(cudaMalloc(&elem_buff_dev, KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * sizeof(KmerAndExts<MAX_K>)));
+
+  dstate = new HashTableDriverState();
+  init_timer.stop();
+  init_time = init_timer.get_elapsed();
+}
+
+template <int MAX_K>
+void HashTableGPUDriver<MAX_K>::init_ctg_kmers(int max_elems, size_t gpu_avail_mem) {
+  size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * sizeof(KmerAndExts<MAX_K>);
+  size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(KmerCountsArray);
+  size_t max_slots = 0.9 * (gpu_avail_mem - elem_buff_size) / elem_size;
+  prime.set(min(max_slots, (size_t)(max_elems * 3)), false);
+  auto ht_capacity = prime.get();
+  ctg_kmers_dev.init(ht_capacity);
+}
+
+template <int MAX_K>
+HashTableGPUDriver<MAX_K>::~HashTableGPUDriver() {
+  if (dstate) delete dstate;
+}
+
+template <int MAX_K>
+void HashTableGPUDriver<MAX_K>::insert_kmer_block(ElemsArray<MAX_K> &elems_array, InsertStats &stats) {
   dstate->insert_timer.start();
   // copy across outside of thread so that we can reuse the elem_buff_host to carry on with inserts while the gpu is running
   cudaErrchk(cudaMemcpy(elem_buff_dev, elem_buff_host, num_buff_entries * sizeof(KmerAndExts<MAX_K>), cudaMemcpyHostToDevice));
@@ -328,13 +324,13 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block(ElemsArray<MAX_K> &elems_array
   unsigned int counts_host[NUM_COUNTS];
   cudaErrchk(cudaMemcpy(&counts_host, counts_gpu, NUM_COUNTS * sizeof(unsigned int), cudaMemcpyDeviceToHost));
   cudaFree(counts_gpu);
-  num_attempted_inserts += counts_host[0];
-  num_dropped_inserts += counts_host[1];
-  num_new_inserts += counts_host[2];
+  stats.attempted += counts_host[0];
+  stats.dropped += counts_host[1];
+  stats.new_inserts += counts_host[2];
   if (static_cast<unsigned int>(num_buff_entries) != counts_host[0])
     cerr << KLRED << "[" << upcxx_rank_me << "] WARNING: " << KNORM
          << "mismatch in GPU entries processed vs input: " << counts_host[0] << " != " << num_buff_entries << endl;
-  num_gpu_calls++;
+  stats.num_gpu_calls++;
   dstate->insert_timer.stop();
 }
 
@@ -347,7 +343,10 @@ void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, count_t kmer_c
   num_buff_entries++;
   if (num_buff_entries == KCOUNT_GPU_HASHTABLE_BLOCK_SIZE) {
     // cp to dev and run kernel
-    insert_kmer_block(pass_type == READ_KMERS_PASS ? read_kmers_dev : ctg_kmers_dev);
+    if (pass_type == READ_KMERS_PASS)
+      insert_kmer_block(read_kmers_dev, read_kmers_stats);
+    else
+      insert_kmer_block(ctg_kmers_dev, ctg_kmers_stats);
     num_buff_entries = 0;
   }
 }
@@ -355,7 +354,10 @@ void HashTableGPUDriver<MAX_K>::insert_kmer(const uint64_t *kmer, count_t kmer_c
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::flush_inserts() {
   if (num_buff_entries) {
-    insert_kmer_block(pass_type == READ_KMERS_PASS ? read_kmers_dev : ctg_kmers_dev);
+    if (pass_type == READ_KMERS_PASS)
+      insert_kmer_block(read_kmers_dev, read_kmers_stats);
+    else
+      insert_kmer_block(ctg_kmers_dev, ctg_kmers_stats);
     num_buff_entries = 0;
   }
 }
@@ -384,9 +386,10 @@ void HashTableGPUDriver<MAX_K>::done_all_inserts() {
   cudaErrchk(cudaMemcpy(&counts_host, counts_gpu, NUM_COUNTS * sizeof(unsigned int), cudaMemcpyDeviceToHost));
   num_purged += counts_host[0];
   auto num_entries = counts_host[1];
-  if (num_entries != num_new_inserts - num_purged)
-    cout << KLRED << "WARNING mismatch " << num_entries << " != " << (num_new_inserts - num_purged) << " diff "
-         << (num_entries - (num_new_inserts - num_purged)) << KNORM << endl;
+  auto expected_num_entries = read_kmers_stats.new_inserts - num_purged;
+  if (num_entries != expected_num_entries)
+    cout << KLRED << "WARNING mismatch " << num_entries << " != " << expected_num_entries << " diff "
+         << (num_entries - expected_num_entries) << KNORM << endl;
   auto orig_num_entries = num_entries;
   // overallocate to reduce collisions
   num_entries *= 1.3;
@@ -427,11 +430,13 @@ void HashTableGPUDriver<MAX_K>::done_all_inserts() {
 }
 
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::done_ctg_kmer_inserts() {}
+void HashTableGPUDriver<MAX_K>::done_ctg_kmer_inserts() {
+  ctg_kmers_dev.clear();
+}
 
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::set_pass(PASS_TYPE pass_type) {
-  this->pass_type = pass_type;
+void HashTableGPUDriver<MAX_K>::set_pass(PASS_TYPE p) {
+  pass_type = p;
 }
 
 template <int MAX_K>
@@ -449,23 +454,19 @@ pair<KmerArray<MAX_K> *, KmerCountsArray *> HashTableGPUDriver<MAX_K>::get_next_
 }
 
 template <int MAX_K>
-int64_t HashTableGPUDriver<MAX_K>::get_capacity() {
-  return read_kmers_dev.capacity;
+int64_t HashTableGPUDriver<MAX_K>::get_capacity(PASS_TYPE p) {
+  if (p == READ_KMERS_PASS)
+    return read_kmers_dev.capacity;
+  else
+    return ctg_kmers_dev.capacity;
 }
 
 template <int MAX_K>
-int64_t HashTableGPUDriver<MAX_K>::get_num_dropped() {
-  return num_dropped_inserts;
-}
-
-template <int MAX_K>
-int64_t HashTableGPUDriver<MAX_K>::get_num_attempted_inserts() {
-  return num_attempted_inserts;
-}
-
-template <int MAX_K>
-int64_t HashTableGPUDriver<MAX_K>::get_num_purged() {
-  return num_purged;
+InsertStats &HashTableGPUDriver<MAX_K>::get_stats(PASS_TYPE p) {
+  if (p == READ_KMERS_PASS)
+    return read_kmers_stats;
+  else
+    return ctg_kmers_stats;
 }
 
 template <int MAX_K>
@@ -474,8 +475,8 @@ int64_t HashTableGPUDriver<MAX_K>::get_num_unique_elems() {
 }
 
 template <int MAX_K>
-int HashTableGPUDriver<MAX_K>::get_num_gpu_calls() {
-  return num_gpu_calls;
+int64_t HashTableGPUDriver<MAX_K>::get_num_purged() {
+  return num_purged;
 }
 
 template class kcount_gpu::HashTableGPUDriver<32>;

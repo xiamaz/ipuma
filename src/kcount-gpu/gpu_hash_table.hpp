@@ -90,6 +90,13 @@ struct ElemsArray {
   void clear();
 };
 
+struct InsertStats {
+  int64_t dropped = 0;
+  int64_t attempted = 0;
+  int64_t new_inserts = 0;
+  int num_gpu_calls = 0;
+};
+
 template <int MAX_K>
 class HashTableGPUDriver {
   static const int N_LONGS = (MAX_K + 31) / 32;
@@ -114,16 +121,14 @@ class HashTableGPUDriver {
   // for transferring host memory buffer to device
   KmerAndExts<MAX_K> *elem_buff_dev = nullptr;
 
-  int64_t num_dropped_inserts = 0;
-  int64_t num_attempted_inserts = 0;
-  int64_t num_new_inserts = 0;
+  InsertStats read_kmers_stats;
+  InsertStats ctg_kmers_stats;
+  int64_t num_unique_elems;
   int64_t num_purged = 0;
-  int64_t num_unique_elems = 0;
-  int num_gpu_calls = 0;
 
   PASS_TYPE pass_type;
 
-  void insert_kmer_block(ElemsArray<MAX_K> &elems_array);
+  void insert_kmer_block(ElemsArray<MAX_K> &elems_array, InsertStats &stats);
 
  public:
   HashTableGPUDriver();
@@ -134,7 +139,7 @@ class HashTableGPUDriver {
 
   void init_ctg_kmers(int max_elems, size_t gpu_avail_mem);
 
-  void set_pass(PASS_TYPE pass_type);
+  void set_pass(PASS_TYPE p);
 
   void insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right);
   void flush_inserts();
@@ -146,12 +151,10 @@ class HashTableGPUDriver {
   static int get_N_LONGS();
 
   void get_elapsed_time(double &insert_time, double &kernel_time, double &memcpy_time);
-  int64_t get_capacity();
-  int64_t get_num_attempted_inserts();
-  int64_t get_num_dropped();
+  int64_t get_capacity(PASS_TYPE p);
+  InsertStats &get_stats(PASS_TYPE p);
   int64_t get_num_unique_elems();
   int64_t get_num_purged();
-  int get_num_gpu_calls();
 };
 
 }  // namespace kcount_gpu
