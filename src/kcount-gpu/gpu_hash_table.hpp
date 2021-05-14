@@ -59,8 +59,13 @@ static_assert(sizeof(cu_uint64_t) == 8);
 #define KEY_EMPTY UINT64_C(-1)
 using count_t = uint32_t;
 
-struct KmerCountsArray {
+struct CountsArray {
   count_t data[9];
+};
+
+struct CountExts {
+  count_t count;
+  int8_t left, right;
 };
 
 template <int MAX_K>
@@ -76,14 +81,24 @@ template <int MAX_K>
 struct KmerAndExts {
   KmerArray<MAX_K> kmer;
   count_t count;
-  uint8_t left, right;
+  int8_t left, right;
 };
 
 template <int MAX_K>
-struct ElemsArray {
+struct KmerCountsMap {
   // Arrays for keys and values. They are separate because the keys get initialized with max number and the vals with zero
   KmerArray<MAX_K> *keys = nullptr;
-  KmerCountsArray *vals = nullptr;
+  CountsArray *vals = nullptr;
+  int64_t capacity = 0;
+
+  void init(int64_t ht_capacity);
+  void clear();
+};
+
+template <int MAX_K>
+struct KmerExtsMap {
+  KmerArray<MAX_K> *keys = nullptr;
+  CountExts *vals = nullptr;
   int64_t capacity = 0;
 
   void init(int64_t ht_capacity);
@@ -110,11 +125,11 @@ class HashTableGPUDriver {
   int kmer_len;
   int num_buff_entries = 0;
   std::vector<KmerArray<MAX_K>> output_keys;
-  std::vector<KmerCountsArray> output_vals;
+  std::vector<CountExts> output_vals;
   size_t output_index = 0;
 
-  ElemsArray<MAX_K> read_kmers_dev;
-  ElemsArray<MAX_K> ctg_kmers_dev;
+  KmerCountsMap<MAX_K> read_kmers_dev;
+  KmerCountsMap<MAX_K> ctg_kmers_dev;
 
   // for buffering elements in the host memory
   KmerAndExts<MAX_K> *elem_buff_host = nullptr;
@@ -128,7 +143,7 @@ class HashTableGPUDriver {
 
   PASS_TYPE pass_type;
 
-  void insert_kmer_block(ElemsArray<MAX_K> &elems_array, InsertStats &stats);
+  void insert_kmer_block(KmerCountsMap<MAX_K> &kmer_counts_map, InsertStats &stats);
 
  public:
   HashTableGPUDriver();
@@ -146,7 +161,8 @@ class HashTableGPUDriver {
   void done_ctg_kmer_inserts();
   void done_all_inserts();
 
-  std::pair<KmerArray<MAX_K> *, KmerCountsArray *> get_next_entry();
+  // FIXME: return a pair of kmerarr and a struct of int, char, char whiich is the count and left and right exts
+  std::pair<KmerArray<MAX_K> *, CountExts *> get_next_entry();
 
   static int get_N_LONGS();
 

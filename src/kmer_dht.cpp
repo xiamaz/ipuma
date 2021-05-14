@@ -478,24 +478,21 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
   int sum_drop_depth = 0;
   while (true) {
     assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
-    auto [kmer_array, kmer_counts_array] = ht_gpu_driver->get_next_entry();
+
+    // FIXME: this should be returning the kmer_array, kmer count, and a pair of selected chars, left and right exts
+    auto [kmer_array, count_exts] = ht_gpu_driver->get_next_entry();
     if (!kmer_array) break;
     // empty slot
-    if (!kmer_counts_array->data[0]) continue;
-    ExtCounts left_exts = {0}, right_exts = {0};
-    left_exts.set(kmer_counts_array->data + 1);
-    right_exts.set(kmer_counts_array->data + 5);
-    KmerCounts kmer_counts = {
-        .left_exts = left_exts,
-        .right_exts = right_exts,
-        .uutig_frag = nullptr,
-        .count = static_cast<kmer_count_t>(
-            min(static_cast<kcount_gpu::count_t>(std::numeric_limits<kmer_count_t>::max()), kmer_counts_array->data[0])),
-        .left = 'X',
-        .right = 'X',
-        .from_ctg = false};
-    // purge out low freq kmers
-    if ((kmer_counts.count < 2) || (kmer_counts.left_exts.is_zero() && kmer_counts.right_exts.is_zero()))
+    if (!count_exts->count) continue;
+    KmerCounts kmer_counts = {.left_exts = {0},
+                              .right_exts = {0},
+                              .uutig_frag = nullptr,
+                              .count = static_cast<kmer_count_t>(min(
+                                  static_cast<kcount_gpu::count_t>(std::numeric_limits<kmer_count_t>::max()), count_exts->count)),
+                              .left = count_exts->left,
+                              .right = count_exts->right,
+                              .from_ctg = false};
+    if ((kmer_counts.count < 2) || (kmer_counts.left == 'X' && kmer_counts.right == 'X'))
       WARN("Found a kmer that should have been purged, count is ", kmer_counts.count);
     Kmer<MAX_K> kmer(reinterpret_cast<const uint64_t *>(kmer_array->longs));
 
@@ -553,17 +550,16 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::compute_kmer_exts() {
-  // FIXME: if ctg kmers were processed, call gpu code that inserts ctg kmers into the read kmers hashtable
   if (using_ctg_kmers) ht_gpu_driver->done_ctg_kmer_inserts();
   insert_from_gpu_hashtable();
-  // FIXME: this needs to be done in the GPU and then only the left and right selected exts need to be written back, further
-  // reducing the copy back (i.e. instead of 9 uint32_t we have 2 bytes, e.g for k=33 we have 2*8+2=18 bytes instead of 2*8+9*4=52)
+#if !defined(ENABLE_KCOUNT_GPUS_HT)
   BarrierTimer timer(__FILEFUNC__);
   for (auto &elem : *kmers) {
     auto kmer_counts = &elem.second;
     kmer_counts->left = kmer_counts->get_left_ext();
     kmer_counts->right = kmer_counts->get_right_ext();
   }
+#endif
 }
 
 // one line per kmer, format:
