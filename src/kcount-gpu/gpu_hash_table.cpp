@@ -70,6 +70,8 @@ __device__ int blockReduceSum(int val, int n) {
   int lane_id = threadIdx.x % warpSize;
   int warp_id = threadIdx.x / warpSize;
 
+  __syncthreads(); // FIXME: do we need this?
+
   val = warpReduceSum(val, n);  // Each warp performs partial reduction
 
   if (lane_id == 0) shared[warp_id] = val;  // Write reduced value to shared memory
@@ -297,8 +299,11 @@ __global__ void gpu_insert_kmer_block(KmerCountsMap<MAX_K> elems, const KmerAndE
           }
         }
         if (found_slot) {
-          atomicAdd(&(elems.vals[slot].data[0]), kmer_count);
-          if (is_empty) new_inserts++;
+          int prev_count = atomicAdd(&(elems.vals[slot].data[0]), kmer_count);
+          if (is_empty) {
+            if (prev_count != 0) printf("prev_count is %d but is empty\n", prev_count);
+            new_inserts++;
+          }
           switch (left_ext) {
             case 'A': atomicAdd(&(elems.vals[slot].data[1]), kmer_count); break;
             case 'C': atomicAdd(&(elems.vals[slot].data[2]), kmer_count); break;
@@ -387,11 +392,10 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   gpu_bytes_reqd = (max_elems * elem_size) / 0.85 + elem_buff_size;
   // save 1/10 of avail gpu memory for possible ctg kmers and compact hash table
   // set capacity to max avail remaining from gpu memory - more slots means lower load
-  auto adjusted_max_elems = 0.85 * (gpu_avail_mem - elem_buff_size) / elem_size;
+  auto max_slots = 0.85 * (gpu_avail_mem - elem_buff_size) / elem_size;
   // find the first prime number lower than this value
-  prime.set(adjusted_max_elems, false);
+  prime.set(min((size_t)max_slots, (size_t)(max_elems * 3)), false);
   auto ht_capacity = prime.get();
-  // if (!upcxx_rank_me) cout << "Adjusted max elems " << adjusted_max_elems << ", chosen prime " << ht_capacity << endl;
   read_kmers_dev.init(ht_capacity);
   // for transferring elements from host to gpu
   elem_buff_host = new KmerAndExts<MAX_K>[KCOUNT_GPU_HASHTABLE_BLOCK_SIZE];
@@ -499,8 +503,9 @@ void HashTableGPUDriver<MAX_K>::flush_inserts(int &num_purged, int &num_entries)
     num_entries = counts_host[1];
     auto expected_num_entries = read_kmers_stats.new_inserts - num_purged;
     if (num_entries != expected_num_entries)
-      cout << KLRED << "WARNING mismatch " << num_entries << " != " << expected_num_entries << " diff "
-           << (num_entries - expected_num_entries) << KNORM << endl;
+      cout << KLRED << "[" << upcxx_rank_me << "] WARNING mismatch " << num_entries << " != " << expected_num_entries << " diff "
+           << (num_entries - expected_num_entries) << " new inserts " << read_kmers_stats.new_inserts 
+           << " num purged " << num_purged << KNORM << endl;
     read_kmers_dev.num = num_entries;
   }
 }

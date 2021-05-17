@@ -412,10 +412,10 @@ void KmerDHT<MAX_K>::flush_updates() {
   auto max_num_gpu_calls = reduce_one(insert_stats.num_gpu_calls, op_fast_max, 0).wait();
   SLOG(KLMAGENTA "Number of calls to ", (pass_type == READ_KMERS_PASS ? "read" : "ctg"),
        " hash table GPU driver: ", avg_num_gpu_calls, " avg, ", max_num_gpu_calls, " max" KNORM "\n");
-  auto num_dropped_elems = reduce_one(insert_stats.dropped, op_fast_add, 0).wait();
-  auto num_attempted_inserts = reduce_one(insert_stats.attempted, op_fast_add, 0).wait();
-  auto capacity = ht_gpu_driver->get_capacity(static_cast<kcount_gpu::PASS_TYPE>(pass_type));
-  auto all_capacity = reduce_one(capacity, op_fast_add, 0).wait();
+  int64_t num_dropped_elems = reduce_one(insert_stats.dropped, op_fast_add, 0).wait();
+  int64_t num_attempted_inserts = reduce_one(insert_stats.attempted, op_fast_add, 0).wait();
+  int64_t capacity = ht_gpu_driver->get_capacity(static_cast<kcount_gpu::PASS_TYPE>(pass_type));
+  int64_t all_capacity = reduce_one(capacity, op_fast_add, 0).wait();
   if (num_dropped_elems)
     SWARN("GPU ", (pass_type == READ_KMERS_PASS ? "read" : "ctg"), " hash table: failed to insert ",
           perc_str(num_dropped_elems, num_attempted_inserts), " elements; capacity ", all_capacity, " \n");
@@ -425,9 +425,9 @@ void KmerDHT<MAX_K>::flush_updates() {
   SLOG(KLMAGENTA "GPU ", (pass_type == READ_KMERS_PASS ? "read" : "ctg"), " kmer hash table load factor ", fixed, setprecision(3),
        avg_load_factor, " avg, ", max_load_factor, " max" KNORM "\n");
   if (pass_type == READ_KMERS_PASS) {
-    auto all_num_purged = reduce_one(num_purged, op_fast_add, 0).wait();
-    int64_t all_num_entries = reduce_one(num_entries, op_fast_add, 0).wait();
-    auto prepurge_num_entries = all_num_entries + all_num_purged;
+    int64_t all_num_purged = reduce_one((int64_t)num_purged, op_fast_add, 0).wait();
+    int64_t all_num_entries = reduce_one((int64_t)num_entries, op_fast_add, 0).wait();
+    int64_t prepurge_num_entries = all_num_entries + all_num_purged;
     SLOG(KLMAGENTA "GPU read kmers hash table: purged ", perc_str(all_num_purged, prepurge_num_entries), " singleton kmers out of ",
          prepurge_num_entries, KNORM "\n");
     SLOG(KLMAGENTA "GPU read kmers hash table final size per rank is ", num_entries, " entries and final load factor is ",
@@ -480,7 +480,8 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
   int num_dropped, num_entries;
   ht_gpu_driver->done_all_inserts(num_dropped, num_entries);
   if (num_dropped) WARN("GPU dropped ", num_dropped, " entries when compacting to output hash table" KNORM "\n");
-  int64_t all_num_entries = reduce_one(num_entries, op_fast_add, 0).wait();
+  barrier();
+  int64_t all_num_entries = reduce_one((int64_t)num_entries, op_fast_add, 0).wait();
   SLOG(KLMAGENTA, "GPU hash table contains ", all_num_entries, " valid entries" KNORM "\n");
 
   // add some space for the ctg kmers
@@ -504,8 +505,8 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
                               .uutig_frag = nullptr,
                               .count = static_cast<kmer_count_t>(min(
                                   static_cast<kcount_gpu::count_t>(std::numeric_limits<kmer_count_t>::max()), count_exts->count)),
-                              .left = count_exts->left,
-                              .right = count_exts->right,
+                              .left = (char)count_exts->left,
+                              .right = (char)count_exts->right,
                               .from_ctg = false};
     if ((kmer_counts.count < 2)) WARN("Found a kmer that should have been purged, count is ", kmer_counts.count);
     Kmer<MAX_K> kmer(reinterpret_cast<const uint64_t *>(kmer_array->longs));
@@ -544,7 +545,7 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
   auto all_kmers_size = reduce_one(kmers->size(), op_fast_add, 0).wait();
   if (kmers->size() != (num_entries - invalid))
     WARN("kmers->size() is ", kmers->size(), " != ", (num_entries - invalid), " num_entries");
-  auto all_invalid = reduce_one(invalid, op_fast_add, 0).wait();
+  int64_t all_invalid = reduce_one(invalid, op_fast_add, 0).wait();
   if (!rank_me() && all_kmers_size != all_num_entries - all_invalid)
     SWARN("CPU kmer counts not equal to gpu kmer counts: ", all_kmers_size, " != ", (all_num_entries - all_invalid));
 
