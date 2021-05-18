@@ -403,8 +403,7 @@ void KmerDHT<MAX_K>::flush_updates() {
 
 #ifdef ENABLE_KCOUNT_GPUS_HT
   barrier();
-  int num_purged = 0, num_entries = 0;
-  ht_gpu_driver->flush_inserts(num_purged, num_entries);
+  ht_gpu_driver->flush_inserts();
   // a bunch of stats about the hash table on the GPU
   auto insert_stats = ht_gpu_driver->get_stats(static_cast<kcount_gpu::PASS_TYPE>(pass_type));
   auto avg_num_gpu_calls = reduce_one(insert_stats.num_gpu_calls, op_fast_add, 0).wait() / rank_n();
@@ -419,7 +418,7 @@ void KmerDHT<MAX_K>::flush_updates() {
     SWARN("GPU ", (pass_type == READ_KMERS_PASS ? "read" : "ctg"), " hash table: failed to insert ",
           perc_str(num_dropped_elems, num_attempted_inserts), " elements; capacity ", all_capacity);
   int64_t key_empty_overlaps = reduce_one(insert_stats.key_empty_overlaps, op_fast_add, 0).wait();
-  if (key_empty_overlaps) 
+  if (key_empty_overlaps)
     SWARN("GPU ", (pass_type == READ_KMERS_PASS ? "read" : "ctg"), " hash table: dropped ",
           perc_str(key_empty_overlaps, num_attempted_inserts), " kmers with longs equal to KEY_EMPTY");
   double load = (double)(insert_stats.new_inserts) / capacity;
@@ -427,17 +426,8 @@ void KmerDHT<MAX_K>::flush_updates() {
   double max_load_factor = reduce_one(load, op_fast_max, 0).wait();
   SLOG(KLMAGENTA "GPU ", (pass_type == READ_KMERS_PASS ? "read" : "ctg"), " kmer hash table load factor ", fixed, setprecision(3),
        avg_load_factor, " avg, ", max_load_factor, " max" KNORM "\n");
-  if (pass_type == READ_KMERS_PASS) {
-    int64_t all_num_purged = reduce_one((int64_t)num_purged, op_fast_add, 0).wait();
-    int64_t all_num_entries = reduce_one((int64_t)num_entries, op_fast_add, 0).wait();
-    int64_t prepurge_num_entries = all_num_entries + all_num_purged;
-    SLOG(KLMAGENTA "GPU read kmers hash table: purged ", perc_str(all_num_purged, prepurge_num_entries), " singleton kmers out of ",
-         prepurge_num_entries, KNORM "\n");
-    SLOG(KLMAGENTA "GPU read kmers hash table final size per rank is ", num_entries, " entries and final load factor is ",
-         ((double)all_num_entries / all_capacity), KNORM "\n");
-  } else {
-    SLOG(KLMAGENTA "GPU ctg kmers hash table final size per rank is ", insert_stats.new_inserts, " entries" KNORM "\n");
-  }
+  SLOG(KLMAGENTA "GPU ", (pass_type == READ_KMERS_PASS ? "reads" : "ctgs"), " kmers hash table final size per rank is ",
+       insert_stats.new_inserts, " entries " KNORM "\n");
 #else
   if (pass_type == READ_KMERS_PASS) {
     barrier();
@@ -478,14 +468,22 @@ void KmerDHT<MAX_K>::purge_kmers(int threshold) {
 template <int MAX_K>
 void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
 #ifdef ENABLE_KCOUNT_GPUS_HT
+  barrier();
   Timer insert_timer("gpu insert to cpu timer");
   insert_timer.start();
-  int num_dropped, num_entries;
-  ht_gpu_driver->done_all_inserts(num_dropped, num_entries);
-  if (num_dropped) WARN("GPU dropped ", num_dropped, " entries when compacting to output hash table" KNORM "\n");
-  barrier();
+  int num_dropped = 0, num_entries = 0, num_purged = 0;
+  ht_gpu_driver->done_all_inserts(num_dropped, num_entries, num_purged);
+  if (num_dropped)
+    WARN("GPU dropped ", num_dropped, " entries out of ", num_entries, " when compacting to output hash table" KNORM "\n");
+  auto all_capacity = reduce_one(ht_gpu_driver->get_capacity(kcount_gpu::READ_KMERS_PASS), op_fast_add, 0).wait();
+  int64_t all_num_purged = reduce_one((int64_t)num_purged, op_fast_add, 0).wait();
   int64_t all_num_entries = reduce_one((int64_t)num_entries, op_fast_add, 0).wait();
-  SLOG(KLMAGENTA, "GPU hash table contains ", all_num_entries, " valid entries" KNORM "\n");
+  int64_t prepurge_num_entries = all_num_entries + all_num_purged;
+  SLOG(KLMAGENTA "GPU read kmers hash table: purged ", perc_str(all_num_purged, prepurge_num_entries), " singleton kmers out of ",
+       prepurge_num_entries, KNORM "\n");
+  SLOG(KLMAGENTA "GPU hash table final size is ", all_num_entries, " entries and final load factor is ",
+       ((double)all_num_entries / all_capacity), KNORM "\n");
+  barrier();
 
   // add some space for the ctg kmers
   kmers->reserve(num_entries * 1.5);
@@ -551,7 +549,6 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
   int64_t all_invalid = reduce_one(invalid, op_fast_add, 0).wait();
   if (!rank_me() && all_kmers_size != all_num_entries - all_invalid)
     SWARN("CPU kmer counts not equal to gpu kmer counts: ", all_kmers_size, " != ", (all_num_entries - all_invalid));
-
   double gpu_insert_time = 0, gpu_kernel_time = 0, gpu_memcpy_time = 0;
   ht_gpu_driver->get_elapsed_time(gpu_insert_time, gpu_kernel_time, gpu_memcpy_time);
   auto avg_gpu_insert_time = reduce_one(gpu_insert_time, op_fast_add, 0).wait() / rank_n();
@@ -565,6 +562,7 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
   SLOG(KLMAGENTA "  insert: ", fixed, setprecision(3), avg_gpu_insert_time, " avg, ", max_gpu_insert_time, " max" KNORM "\n");
   SLOG(KLMAGENTA "  kernel: ", fixed, setprecision(3), avg_gpu_kernel_time, " avg, ", max_gpu_kernel_time, " max" KNORM "\n");
   SLOG(KLMAGENTA "  to cpu: ", fixed, setprecision(3), avg_gpu_memcpy_time, " avg, ", max_gpu_memcpy_time, " max" KNORM "\n");
+  barrier();
 #endif
 }
 

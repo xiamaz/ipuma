@@ -56,8 +56,8 @@ enum PASS_TYPE { READ_KMERS_PASS, CTG_KMERS_PASS };
 
 using cu_uint64_t = unsigned long long int;
 static_assert(sizeof(cu_uint64_t) == 8);
-//#define KEY_EMPTY UINT64_C(-1)
-#define KEY_EMPTY UINT64_C(0xffffffffffffffff)
+#define KEY_EMPTY UINT64_C(-1)
+#define KEY_EMPTY_BYTE 0xFF
 using count_t = uint32_t;
 
 struct CountsArray {
@@ -145,6 +145,7 @@ class HashTableGPUDriver {
   PASS_TYPE pass_type;
 
   void insert_kmer_block(KmerCountsMap<MAX_K> &kmer_counts_map, InsertStats &stats, bool ctg_kmers);
+  void purge_invalid(int &num_purged, int &num_entries);
 
  public:
   HashTableGPUDriver();
@@ -158,9 +159,9 @@ class HashTableGPUDriver {
   void set_pass(PASS_TYPE p);
 
   void insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right);
-  void flush_inserts(int &num_purged, int &num_entries);
+  void flush_inserts();
   void done_ctg_kmer_inserts(int &attempted_inserts, int &dropped_inserts, int &new_inserts);
-  void done_all_inserts(int &num_dropped, int &num_unique);
+  void done_all_inserts(int &num_dropped, int &num_unique, int &num_purged);
 
   // FIXME: return a pair of kmerarr and a struct of int, char, char whiich is the count and left and right exts
   std::pair<KmerArray<MAX_K> *, CountExts *> get_next_entry();
