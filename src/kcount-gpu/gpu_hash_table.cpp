@@ -105,9 +105,10 @@ __device__ size_t kmer_hash(const KmerArray<MAX_K> &kmer) {
   return gpu_murmurhash3_64(reinterpret_cast<const void *>(kmer.longs), kmer.N_LONGS * sizeof(cu_uint64_t));
 }
 
-__device__ int8_t get_ext(count_t kmer_count, count_t *ext_counts, int8_t *ext_map) {
+__device__ int8_t get_ext(count_t *ext_counts, int pos, int8_t *ext_map) {
   count_t top_count = 0, runner_up_count = 0;
   int top_ext_pos = 0;
+  count_t kmer_count = ext_counts[0];
   for (int i = 0; i < 4; i++) {
     if (ext_counts[i] > top_count) {
       runner_up_count = top_count;
@@ -183,8 +184,8 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
             memcpy(read_kmers.vals[slot].data, ext_counts, sizeof(count_t) * 9);
           } else {
             // existing kmer from reads - only replace if the kmer is non-UU
-            int8_t left_ext = get_ext(kmer_count, read_kmers.vals[slot].data + 1, ext_map);
-            int8_t right_ext = get_ext(kmer_count, read_kmers.vals[slot].data + 5, ext_map);
+            int8_t left_ext = get_ext(read_kmers.vals[slot].data, 1, ext_map);
+            int8_t right_ext = get_ext(read_kmers.vals[slot].data, 5, ext_map);
             if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F')
               memcpy(read_kmers.vals[slot].data, ext_counts, sizeof(count_t) * 9);
           }
@@ -223,13 +224,13 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
     for (j = 0; j < MAX_PROBE; j++) {
       cu_uint64_t old_key = atomicCAS(&(compact_elems.keys[slot].longs[0]), KEY_EMPTY, kmer.longs[0]);
       if (old_key == KEY_EMPTY) {
-        // found empty slot
+        // found empty slot - there will be no duplicate keys since we're copying across from another hash table
         unique_inserts++;
         for (int k = 1; k < N_LONGS; k++) compact_elems.keys[slot].longs[k] = kmer.longs[k];
         count_t count = elems.vals[threadid].data[0];
         // compute exts
-        int8_t left_ext = get_ext(count, elems.vals[threadid].data + 1, ext_map);
-        int8_t right_ext = get_ext(count, elems.vals[threadid].data + 5, ext_map);
+        int8_t left_ext = get_ext(elems.vals[threadid].data, 1, ext_map);
+        int8_t right_ext = get_ext(elems.vals[threadid].data, 5, ext_map);
         compact_elems.vals[slot].count = count;
         compact_elems.vals[slot].left = left_ext;
         compact_elems.vals[slot].right = right_ext;
