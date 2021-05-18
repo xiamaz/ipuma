@@ -56,7 +56,8 @@ enum PASS_TYPE { READ_KMERS_PASS, CTG_KMERS_PASS };
 
 using cu_uint64_t = unsigned long long int;
 static_assert(sizeof(cu_uint64_t) == 8);
-#define KEY_EMPTY UINT64_C(-1)
+//#define KEY_EMPTY UINT64_C(-1)
+#define KEY_EMPTY UINT64_C(0xffffffffffffffff)
 using count_t = uint32_t;
 
 struct CountsArray {
@@ -110,6 +111,7 @@ struct InsertStats {
   int64_t dropped = 0;
   int64_t attempted = 0;
   int64_t new_inserts = 0;
+  int64_t key_empty_overlaps = 0;
   int num_gpu_calls = 0;
 };
 
@@ -142,7 +144,7 @@ class HashTableGPUDriver {
 
   PASS_TYPE pass_type;
 
-  void insert_kmer_block(KmerCountsMap<MAX_K> &kmer_counts_map, InsertStats &stats);
+  void insert_kmer_block(KmerCountsMap<MAX_K> &kmer_counts_map, InsertStats &stats, bool ctg_kmers);
 
  public:
   HashTableGPUDriver();

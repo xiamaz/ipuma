@@ -75,7 +75,6 @@ void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> 
                                   dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver) {
 #ifdef ENABLE_KCOUNT_GPUS_HT
   num_inserts++;
-  // FIXME: buffer hash table entries, and when full, copy across to
   ht_gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right);
 #else
   // find it - if it isn't found then insert it, otherwise increment the counts
@@ -418,7 +417,11 @@ void KmerDHT<MAX_K>::flush_updates() {
   int64_t all_capacity = reduce_one(capacity, op_fast_add, 0).wait();
   if (num_dropped_elems)
     SWARN("GPU ", (pass_type == READ_KMERS_PASS ? "read" : "ctg"), " hash table: failed to insert ",
-          perc_str(num_dropped_elems, num_attempted_inserts), " elements; capacity ", all_capacity, " \n");
+          perc_str(num_dropped_elems, num_attempted_inserts), " elements; capacity ", all_capacity);
+  int64_t key_empty_overlaps = reduce_one(insert_stats.key_empty_overlaps, op_fast_add, 0).wait();
+  if (key_empty_overlaps) 
+    SWARN("GPU ", (pass_type == READ_KMERS_PASS ? "read" : "ctg"), " hash table: dropped ",
+          perc_str(key_empty_overlaps, num_attempted_inserts), " kmers with longs equal to KEY_EMPTY");
   double load = (double)(insert_stats.new_inserts) / capacity;
   double avg_load_factor = reduce_one(load, op_fast_add, 0).wait() / rank_n();
   double max_load_factor = reduce_one(load, op_fast_max, 0).wait();

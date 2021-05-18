@@ -357,7 +357,6 @@ void analyze_kmers(unsigned kmer_len, unsigned prev_kmer_len, int qual_offset, v
                    int dmin_thres, Contigs &ctgs, dist_object<KmerDHT<MAX_K>> &kmer_dht, bool dump_kmers) {
   BarrierTimer timer(__FILEFUNC__);
   auto fut_has_contigs = upcxx::reduce_all(ctgs.size(), upcxx::op_fast_max).then([](size_t max_ctgs) { return max_ctgs > 0; });
-
   _dynamic_min_depth = DYN_MIN_DEPTH;
   _dmin_thres = dmin_thres;
 
