@@ -67,6 +67,7 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
                               int64_t &num_kmers, int64_t &num_gpu_waits) {
   bool from_ctgs = quals_block.empty();
   int qual_cutoff = KCOUNT_QUAL_CUTOFF;
+  SLOG_VERBOSE("process_gpu_block with sequence length ", seq_block.length(), "\n");
   if (!pnp_gpu_driver->process_seq_block(seq_block, num_Ns))
     DIE("seq length is too high, ", seq_block.length(), " >= ", KCOUNT_GPU_SEQ_BLOCK_SIZE);
   while (!pnp_gpu_driver->kernel_is_done()) {

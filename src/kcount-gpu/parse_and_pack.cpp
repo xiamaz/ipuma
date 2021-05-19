@@ -256,6 +256,7 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, in
   QuickTimer func_timer, cp_timer, kernel_timer;
 
   if (seqs.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) return false;
+  if (seqs.length() == 0) return false;
 
   func_timer.start();
   cudaErrchk(cudaEventCreateWithFlags(&dstate->event, cudaEventDisableTiming | cudaEventBlockingSync));
