@@ -24,7 +24,7 @@ wait
 
 wd=`pwd`
 test_dir=$wd/test-arctic-sample0
-if [ "$@" != "${@/--restart/}" ]
+if [[ "$*" != *"--restart"* ]]
 then
   rm -rf $test_dir
 else
