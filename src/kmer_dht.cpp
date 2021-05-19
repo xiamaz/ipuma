@@ -222,7 +222,7 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     // calculate total slots for hash table. Reserve space for parse and pack
     int bytes_for_pnp = KCOUNT_GPU_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
     int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
-    auto gpu_avail_mem = (gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp) * 0.6;
+    auto gpu_avail_mem = (gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp) * 0.95;
     auto gpu_tot_mem = gpu_utils::get_tot_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
     SLOG(KLMAGENTA, "Available GPU memory per rank for kmers hash table is ", get_size_str(gpu_avail_mem), " out of a max of ",
          get_size_str(gpu_tot_mem), KNORM, "\n");
@@ -275,7 +275,7 @@ pair<int64_t, int64_t> KmerDHT<MAX_K>::get_bytes_sent() {
 }
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::init_ctg_kmers(int max_elems) {
+void KmerDHT<MAX_K>::init_ctg_kmers(int64_t max_elems) {
 #ifdef ENABLE_KCOUNT_GPUS_HT
   using_ctg_kmers = true;
   int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();

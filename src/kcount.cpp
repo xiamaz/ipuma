@@ -290,8 +290,10 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   }
   // estimate number of kmers from ctgs
   int64_t max_kmers = 0;
-  for (auto &ctg : ctgs) max_kmers += ctg.seq.length() - kmer_len + 1;
-  auto all_max_kmers = reduce_all(max_kmers, op_fast_add).wait();
+  for (auto &ctg : ctgs) {
+    if (ctg.seq.length() > kmer_len) max_kmers += ctg.seq.length() - kmer_len + 1;
+  }
+  int64_t all_max_kmers = reduce_all(max_kmers, op_fast_add).wait();
   kmer_dht->init_ctg_kmers(all_max_kmers / rank_n());
 
 #else

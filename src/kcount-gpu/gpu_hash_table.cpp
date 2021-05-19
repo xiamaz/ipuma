@@ -456,7 +456,7 @@ void HashTableGPUDriver<MAX_K>::init_ctg_kmers(int max_elems, size_t gpu_avail_m
   size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * sizeof(KmerAndExts<MAX_K>);
   size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(CountsArray);
   size_t max_slots = 0.9 * (gpu_avail_mem - elem_buff_size) / elem_size;
-  prime.set(min(max_slots, (size_t)(max_elems * 5)), false);
+  prime.set(min(max_slots, (size_t)(max_elems * 3)), false);
   auto ht_capacity = prime.get();
   ctg_kmers_dev.init(ht_capacity);
 }

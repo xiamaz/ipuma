@@ -217,7 +217,7 @@ class KmerDHT {
 
   pair<int64_t, int64_t> get_bytes_sent();
 
-  void init_ctg_kmers(int max_elems);
+  void init_ctg_kmers(int64_t max_elems);
 
   void set_pass(PASS_TYPE pass_type);
 
