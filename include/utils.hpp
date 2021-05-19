@@ -42,6 +42,7 @@
  form.
 */
 
+#include <cassert>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -93,3 +94,19 @@ void pin_cpu();
 void pin_core();
 
 void pin_numa();
+
+template<typename STL>
+class safe_stl : public STL {
+    // implements assertion based bounds checks that, IMO should be enabled in all STLs
+    public:
+    using typename STL::value_type;
+    
+    value_type & operator[](int idx) {
+        assert(idx < this->size() && idx >= 0 && "operator[] bounds check failed");
+        return (*((STL*)this))[idx];
+    }
+    const value_type & operator[](int idx) const {
+        assert(idx < this->size() && idx >= 0 && "operator[] bounds check failed");
+        return (*((STL*)this))[idx];
+    }
+};

@@ -118,7 +118,14 @@ struct ReadRecord {
   ReadRecord(const string &id, const string &seq, const string &quals)
       : id(id)
       , seq(seq)
-      , quals(quals) {}
+      , quals(quals)
+      , aligned_ctgs_map{} {}
+  ~ReadRecord() {
+    id.clear();
+    seq.clear();
+    quals.clear();
+  }
+  bool is_valid() const { return !id.empty() && !seq.empty() && !quals.empty(); }
 };
 
 struct KmerToRead {
@@ -182,6 +189,7 @@ class KmerCtgDHT {
  public:
   size_t kmer_seed_lookups = 0;
   size_t unique_kmer_seed_lookups = 0;
+  bool using_kmer_cache() const { return use_kmer_cache; }
 
  private:
   bool use_kmer_cache;
@@ -706,6 +714,7 @@ class KmerCtgDHT {
                  kmer_ctg_locs.reserve(kmers.size());
                  for (auto &kmer : kmers) {
                    assert(kmer.is_least());
+                   assert(kmer.is_valid());
                    const auto it = kmer_map->find(kmer);
                    if (it == kmer_map->end()) continue;
                    // skip conflicts
@@ -849,6 +858,9 @@ class KmerCtgDHT {
           }
         }
         if (!found) {
+          if (ctg_seq.size() < cstart + overlap_len || ctg_seq.size() != ctg_loc.clen)
+            WARN("ctg_seq size mismatch size=", ctg_seq.size(), " cstart=", cstart, " overlap_len=", overlap_len,
+                 " ctg_loc=.cid=", ctg_loc.cid, " .clen=", ctg_loc.clen, " .pos=", ctg_loc.pos_in_ctg, "\n");
           assert(ctg_seq.size() >= cstart + overlap_len);
           assert(ctg_seq.size() == ctg_loc.clen);
           // also get extra bordering blank bases on either side of the contig for negligable extra overhead and likely fewer rgets
@@ -885,6 +897,9 @@ class KmerCtgDHT {
 
       assert(pos_in_read + Kmer<MAX_K>::get_k() <= rseq_ptr.size() && "kmer fits in read");
       assert(ctg_loc.pos_in_ctg + Kmer<MAX_K>::get_k() <= ctg_seq.size() && "kmer fits in ctg");
+      if (memcmp(rseq_ptr.data() + pos_in_read, ctg_seq.data() + ctg_loc.pos_in_ctg, Kmer<MAX_K>::get_k()) != 0)
+        WARN(string_view(rseq_ptr.data() + pos_in_read, Kmer<MAX_K>::get_k()), "' got '",
+             string_view(ctg_seq.data() + ctg_loc.pos_in_ctg, Kmer<MAX_K>::get_k()), " -- read=", rname, " rseq=", rseq_fw, "\n");
       assert(memcmp(rseq_ptr.data() + pos_in_read, ctg_seq.data() + ctg_loc.pos_in_ctg, Kmer<MAX_K>::get_k()) == 0 &&
              "kmer seed exact matches read and ctg");
       align_read(rname, ctg_loc.cid, read_subseq, ctg_subseq, rstart, rlen, cstart, ctg_loc.clen, orient, overlap_len,
@@ -894,10 +909,12 @@ class KmerCtgDHT {
       // depth
       if (use_kmer_cache && !found && ctg_loc.depth > 2) {
         vector<Kmer<MAX_K>> kmers;
-        Kmer<MAX_K>::get_kmers(kmer_len, ctg_subseq, kmers);
+        Kmer<MAX_K>::get_kmers(kmer_len, ctg_subseq, kmers, true);
         for (int i = 0; i < kmers.size(); i++) {
           const auto &kmer_fw = kmers[i];
+          assert(kmer_fw.is_valid());
           Kmer<MAX_K> kmer_rc = kmer_fw.revcomp();
+          assert(kmer_rc.is_valid());
           int pos_in_ctg = cstart + i;
           bool is_rc = false;
           const Kmer<MAX_K> *kmer_lc = &kmer_fw;
@@ -1005,10 +1022,11 @@ static void build_alignment_index(KmerCtgDHT<MAX_K> &kmer_ctg_dht, Contigs &ctgs
     if (ctg->seq.length() < min_ctg_len) continue;
     global_ptr<char> seq_gptr = kmer_ctg_dht.add_ctg_seq(ctg->seq);
     CtgLoc ctg_loc = {.cid = ctg->id, .seq_gptr = seq_gptr, .clen = (int)ctg->seq.length(), .depth = (float)ctg->depth};
-    Kmer<MAX_K>::get_kmers(kmer_ctg_dht.kmer_len, string_view(ctg->seq.data(), ctg->seq.size()), kmers);
+    Kmer<MAX_K>::get_kmers(kmer_ctg_dht.kmer_len, string_view(ctg->seq.data(), ctg->seq.size()), kmers, true);
     num_kmers += kmers.size();
     for (unsigned i = 0; i < kmers.size(); i++) {
       ctg_loc.pos_in_ctg = i;
+      assert(kmers[i].is_valid());
       kmer_ctg_dht.add_kmer(kmers[i], ctg_loc);
     }
     progress();
@@ -1035,6 +1053,8 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
                                  int64_t &kmer_bytes_received, const Kmer<MAX_K> &kmer, const CtgLoc &ctg_loc) {
     kmer_bytes_received += sizeof(ctg_loc) + sizeof(Kmer<MAX_K>);
     // get the reads that this kmer mapped to
+    assert(kmer.is_valid());
+    assert(kmer.is_least());
     auto kmer_read_map_it = kmer_read_map.find(kmer);
     if (kmer_read_map_it == kmer_read_map.end()) DIE("Could not find kmer ", kmer);
     // this is a list of the reads
@@ -1042,6 +1062,7 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
     // now add the ctg loc to all the reads
     for (auto &kmer_to_read : kmer_to_reads) {
       auto read_record = kmer_to_read.read_record;
+      assert(read_record->is_valid());
       int pos_in_read = kmer_to_read.pos_in_read;
       bool read_is_rc = kmer_to_read.is_rc;
       if (KLIGN_MAX_ALNS_PER_READ && read_record->aligned_ctgs_map.size() >= KLIGN_MAX_ALNS_PER_READ) {
@@ -1064,6 +1085,7 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
 #ifdef USE_KMER_CACHE
     auto *ctg_loc = kmer_ctg_dht.find_cached_kmer_lc(*kmer_lc);
     if (ctg_loc) {
+      assert(kmer_ctg_dht.using_kmer_cache());
       progress();
       process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, *kmer_lc, *ctg_loc);
       continue;
@@ -1083,7 +1105,8 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
     kmer_bytes_sent += kmer_lists[target_rank].size() * sizeof(Kmer<MAX_K>);
     auto fut_get_ctgs = kmer_ctg_dht.get_ctgs_with_kmers(target_rank, kmer_lists[target_rank]);
     kmer_lists[target_rank].clear();
-    auto fut_rpc_returned = fut_get_ctgs.then([&](const vector<KmerAndCtgLoc<MAX_K>> kmer_ctg_locs) {
+    auto fut_rpc_returned = fut_get_ctgs.then([target_rank, &process_kmer_ctg_loc, &kmer_read_map, &num_excess_alns_reads,
+                                               &kmer_bytes_received](const vector<KmerAndCtgLoc<MAX_K>> kmer_ctg_locs) {
       // iterate through the kmers, each one has an associated ctg location
       for (auto &kmer_ctg_loc : kmer_ctg_locs) {
         process_kmer_ctg_loc(kmer_read_map, num_excess_alns_reads, kmer_bytes_received, kmer_ctg_loc.kmer, kmer_ctg_loc.ctg_loc);
@@ -1108,18 +1131,24 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
   for (auto read_record : read_records) {
     if (!KLIGN_MAX_ALNS_PER_READ || read_record->aligned_ctgs_map.size() < KLIGN_MAX_ALNS_PER_READ)
       good_read_records.push_back(read_record);
-    else
+    else {
+      assert(read_record->is_valid());
       delete read_record;
+    }
   }
   // compute alignments for each read
   for (auto read_record : good_read_records) {
+    assert(read_record->is_valid());
     progress();
+    assert(read_record->is_valid());
     // compute alignments
     if (read_record->aligned_ctgs_map.size()) {
       num_reads_aligned++;
+      assert(read_record->is_valid());
       kmer_ctg_dht.compute_alns_for_read(&read_record->aligned_ctgs_map, read_record->id, read_record->seq, read_group_id,
                                          aln_kernel_timer);
     }
+    assert(read_record->is_valid());
     delete read_record;
   }
   read_records.clear();
@@ -1163,20 +1192,26 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
       progbar.update();
       // this happens when a placeholder read with just a single N character is added after merging reads
       if (kmer_ctg_dht.kmer_len > read_seq.length()) continue;
-      Kmer<MAX_K>::get_kmers(kmer_ctg_dht.kmer_len, string_view(read_seq.data(), read_seq.size()), kmers);
+      Kmer<MAX_K>::get_kmers(kmer_ctg_dht.kmer_len, string_view(read_seq.data(), read_seq.size()), kmers, true);
       tot_num_kmers += kmers.size();
       ReadRecord *read_record = new ReadRecord(read_id, read_seq, quals);
       read_records.push_back(read_record);
       bool filled = false;
       for (int i = 0; i < (int)kmers.size(); i += seed_space) {
         const Kmer<MAX_K> &kmer_fw = kmers[i];
+        if (!kmers[i].is_valid()) {
+          DBG_VERBOSE("Skipping invalid kmer at i=", i, " read_seq=", read_seq, "\n");
+          continue;
+        }
         const Kmer<MAX_K> kmer_rc = kmer_fw.revcomp();
         const Kmer<MAX_K> *kmer_lc = &kmer_fw;
+        assert(kmer_fw.is_valid() && kmer_rc.is_valid());
         bool is_rc = false;
         if (kmer_rc < kmer_fw) {
           kmer_lc = &kmer_rc;
           is_rc = true;
         }
+        assert(kmer_lc->is_least());
         auto it = kmer_read_map.find(*kmer_lc);
         if (it == kmer_read_map.end()) {
           auto pairit = kmer_read_map.insert({*kmer_lc, {}});
@@ -1192,6 +1227,8 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
         num_reads_aligned +=
             align_kmers(kmer_ctg_dht, kmer_read_map, read_records, compute_alns_timer, get_ctgs_timer, aln_kernel_timer,
                         num_excess_alns_reads, read_group_id, kmer_bytes_sent, kmer_bytes_received);
+        assert(read_records.empty());
+        assert(kmer_read_map.empty());
       }
       num_reads++;
     }
@@ -1200,6 +1237,7 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
           align_kmers(kmer_ctg_dht, kmer_read_map, read_records, compute_alns_timer, get_ctgs_timer, aln_kernel_timer,
                       num_excess_alns_reads, read_group_id, kmer_bytes_sent, kmer_bytes_received);
     }
+    assert(read_records.empty());
     assert(kmer_read_map.empty());
     kmer_ctg_dht.flush_remaining(aln_kernel_timer, read_group_id);
     read_group_id++;

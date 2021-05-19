@@ -116,10 +116,19 @@ void Kmer<MAX_K>::swap(Kmer<MAX_K> &other) {
 }
 
 template <int MAX_K>
-Kmer<MAX_K> Kmer<MAX_K>::get_invalid() {
-  Kmer invalid;
-  invalid.longs.fill(0xFFFFFFFFFFFFFFFF);  // all bits set (i.e. poly T with no zero masking)
+const Kmer<MAX_K> &Kmer<MAX_K>::get_invalid() {
+  static bool _ = false;
+  static Kmer invalid;
+  if (!_) {
+    invalid.longs.fill(0xFFFFFFFFFFFFFFFF);  // all bits set (i.e. poly T with no zero masking)
+    _ = true;
+  }
   return invalid;
+}
+
+template <int MAX_K>
+bool Kmer<MAX_K>::is_valid() const {
+  return *this != get_invalid();
 }
 
 template <int MAX_K>
@@ -143,15 +152,15 @@ unsigned int Kmer<MAX_K>::get_MAX_K() {
 }
 
 template <int MAX_K>
-void Kmer<MAX_K>::get_kmers(unsigned kmer_len, string seq, vector<Kmer> &kmers) {
+void Kmer<MAX_K>::get_kmers(unsigned kmer_len, string seq, vector<Kmer> &kmers, bool check_n) {
   // converts lowercases to upper case
   if (seq.size() < Kmer::k) return;
   for (auto &c : seq) c = toupper(c);  // this might be slow
-  get_kmers(kmer_len, std::string_view(seq.data(), seq.size()), kmers);
+  get_kmers(kmer_len, std::string_view(seq.data(), seq.size()), kmers, check_n);
 }
 
 template <int MAX_K>
-void Kmer<MAX_K>::get_kmers(unsigned kmer_len, const std::string_view &seq, std::vector<Kmer> &kmers) {
+void Kmer<MAX_K>::get_kmers(unsigned kmer_len, const std::string_view &seq, std::vector<Kmer> &kmers, bool check_n) {
   // only need rank 0 to check
   assert(Kmer::k > 0);
   assert(kmer_len == Kmer::k);
@@ -165,6 +174,7 @@ void Kmer<MAX_K>::get_kmers(unsigned kmer_len, const std::string_view &seq, std:
   uint8_t *bufPtr = (uint8_t *)buf;
   memset(buf, 0, bufsize * 8);
   const char *s = seq.data();
+  int N_counter = 0;
   // calculate binary along entire sequence
   for (unsigned i = 0; i < seq.size(); ++i) {
     int j = i % 32;
@@ -172,6 +182,29 @@ void Kmer<MAX_K>::get_kmers(unsigned kmer_len, const std::string_view &seq, std:
     assert(*s != '\0');
     longs_t x = ((*s) & 4) >> 1;
     buf[l] |= ((x + ((x ^ (*s & 2)) >> 1)) << (2 * (31 - j)));
+    if (check_n) {
+      if (*s == 'N') {
+        if (i < Kmer::k) {
+          // invalid kmers at the beginning
+          // flag those k-mers before
+          for(int ii = 0; ii < i && ii < kmers.size(); ii++) {
+            kmers.at(ii) = Kmer::get_invalid();
+          }
+          N_counter = 1; // next valid starts at +1
+        } else {
+          // The next k k-mers will be invalid
+          N_counter = Kmer::k + 1; // next valid starts at +k +1
+        }
+      }
+      if (N_counter) {
+        if (i <= Kmer::k && i < kmers.size()) {
+          kmers.at(i) = Kmer::get_invalid();
+        } else if (i > Kmer::k && i - Kmer::k < kmers.size()) {
+          kmers.at(i-Kmer::k) = Kmer::get_invalid();
+        }
+        N_counter--;
+      }
+    }
     s++;
   }
   // fix to big endian
@@ -179,7 +212,7 @@ void Kmer<MAX_K>::get_kmers(unsigned kmer_len, const std::string_view &seq, std:
   const longs_t mask = ((int64_t)0x3);
   longs_t endmask = 0;
   if (Kmer::k % 32) {
-    endmask = (((longs_t)2) << (2 * (31 - (k % 32)) + 1)) - 1;
+    endmask = (((longs_t)2) << (2 * (31 - (Kmer::k % 32)) + 1)) - 1;
     // k == 0 :                0x0000000000000000
     // k == 1 : 2 << 61  - 1 : 0x3FFFFFFFFFFFFFFF
     // k == 31: 2 << 1   - 1 : 0x0000000000000003
@@ -198,6 +231,7 @@ void Kmer<MAX_K>::get_kmers(unsigned kmer_len, const std::string_view &seq, std:
     for (unsigned i = shift; i < kmers.size(); i += 4) {
       int byteOffset = i / 4;
       assert(byteOffset + N_LONGS * 8 <= bufsize * 8);
+      if (kmers[i] == Kmer::get_invalid()) continue;
       for (int l = 0; l < N_LONGS; l++) {
         kmers[i].longs[l] = BE2H(*((longs_t *)(bufPtr + byteOffset + l * 8)));
       }
@@ -263,34 +297,6 @@ void Kmer<MAX_K>::set_kmer(const char *s) {
 #endif
     s++;
   }
-}
-
-template <int MAX_K>
-string Kmer<MAX_K>::mer_to_string(longs_t mmer, int m) {
-  char buf[33] = "";
-  char *s = buf;
-  for (int j = 0; j < m; j++) {
-    switch ((mmer >> (2 * (31 - j))) & 0x03) {
-      case 0x00:
-        *s = 'A';
-        ++s;
-        break;
-      case 0x01:
-        *s = 'C';
-        ++s;
-        break;
-      case 0x02:
-        *s = 'G';
-        ++s;
-        break;
-      case 0x03:
-        *s = 'T';
-        ++s;
-        break;
-    }
-  }
-  *s = '\0';
-  return string(buf);
 }
 
 template <int MAX_K>
@@ -544,38 +550,46 @@ char Kmer<MAX_K>::back() {
 }
 
 template <int MAX_K>
-void Kmer<MAX_K>::to_string(char *s) const {
-  size_t i, j, l;
-  for (i = 0; i < Kmer::k; i++) {
-    j = i % 32;
-    l = i / 32;
-    switch (((longs[l]) >> (2 * (31 - j))) & 0x03) {
-      case 0x00:
-        *s = 'A';
-        ++s;
-        break;
-      case 0x01:
-        *s = 'C';
-        ++s;
-        break;
-      case 0x02:
-        *s = 'G';
-        ++s;
-        break;
-      case 0x03:
-        *s = 'T';
-        ++s;
-        break;
-    }
+void Kmer<MAX_K>::to_string(char *s, bool add_null) const {
+  size_t i, j, l = 0;
+  for (i = 0; i < Kmer::k; i += 32) {
+    assert(l < longs.size());
+    const longs_t &mer = longs[l++];
+    j = (i + 32 <= Kmer::k) ? 32 : Kmer::k % 32;
+    mer_to_string(s, mer, j, false);
+    s += j;
   }
-  *s = '\0';
+  if (add_null) *s = '\0';
 }
 
 template <int MAX_K>
 string Kmer<MAX_K>::to_string() const {
-  char buf[Kmer::k + 1];
-  to_string(buf);
-  return string(buf);
+  string buf(Kmer::k, 'N');
+  to_string(buf.data());
+  return buf;
+}
+
+template <int MAX_K>
+void Kmer<MAX_K>::mer_to_string(char *s, const longs_t mmer, const int m, bool add_null) {
+  assert(m <= 32);
+  for (int j = 0; j < m; j++) {
+    switch ((mmer >> (2 * (31 - j))) & 0x03) {
+      case 0x00: *s = 'A'; break;
+      case 0x01: *s = 'C'; break;
+      case 0x02: *s = 'G'; break;
+      case 0x03: *s = 'T'; break;
+    }
+    ++s;
+  }
+  if (add_null) *s = '\0';
+}
+
+template <int MAX_K>
+string Kmer<MAX_K>::mer_to_string(longs_t mmer, int m) {
+  assert(m <= 32);
+  string buf(m, 'N');
+  mer_to_string(buf.data(), mmer, m, false);
+  return buf;
 }
 
 template <int MAX_K>
