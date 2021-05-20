@@ -127,10 +127,13 @@ if(ENABLE_CUDA)
     add_subdirectory(adept-sw)
     include_directories("kcount-gpu")
     add_subdirectory(kcount-gpu)
+    include_directories("gpu-loc-assem")
+    add_subdirectory(gpu-loc-assem)
     set_property(TARGET mhm2 PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF) # just to be sure. It should be off in parent dir
     set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} GPU_UTILS_LIBRARY_static)
     set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} ADEPT_SW_LIBRARY_static)
     set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} KCOUNT_GPU_LIBRARY_static)
+    set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} LOC_ASSEM_GPU_LIBRARY_static)
     target_link_libraries(mhm2
         ${MHM2_LINK_LIBRARIES}
         ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
