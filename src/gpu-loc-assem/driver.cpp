@@ -51,6 +51,8 @@
 #include "gpu_utils.hpp"
 #include "gpu_common.hpp"
 
+using namespace std;
+
 size_t locassm_driver::get_device_mem(int ranks_per_gpu, int gpu_id) {
   size_t free_mem, total_mem;
   cudaSetDevice(gpu_id);
@@ -65,7 +67,7 @@ int locassm_driver::get_gpu_per_node() {
   return deviceCount;
 }
 
-void locassm_driver::local_assem_driver(std::vector<CtgWithReads> &data_in, uint32_t max_ctg_size, uint32_t max_read_size,
+void locassm_driver::local_assem_driver(vector<CtgWithReads> &data_in, uint32_t max_ctg_size, uint32_t max_read_size,
                                         uint32_t max_r_count, uint32_t max_l_count, int mer_len, int max_kmer_len,
                                         accum_data &sizes_vecs, int walk_len_limit, int qual_offset, int ranks, int my_rank,
                                         int g_rank_me) {
@@ -77,10 +79,10 @@ void locassm_driver::local_assem_driver(std::vector<CtgWithReads> &data_in, uint
   unsigned tot_extensions = data_in.size();
   uint32_t max_read_count = max_r_count > max_l_count ? max_r_count : max_l_count;
   int max_walk_len = walk_len_limit;
-  uint64_t ht_tot_size = std::accumulate(sizes_vecs.ht_sizes.begin(), sizes_vecs.ht_sizes.end(), 0);
-  uint64_t total_r_reads = std::accumulate(sizes_vecs.r_reads_count.begin(), sizes_vecs.r_reads_count.end(), 0);
-  uint64_t total_l_reads = std::accumulate(sizes_vecs.l_reads_count.begin(), sizes_vecs.l_reads_count.end(), 0);
-  uint64_t total_ctg_len = std::accumulate(sizes_vecs.ctg_sizes.begin(), sizes_vecs.ctg_sizes.end(), 0);
+  uint64_t ht_tot_size = accumulate(sizes_vecs.ht_sizes.begin(), sizes_vecs.ht_sizes.end(), 0);
+  uint64_t total_r_reads = accumulate(sizes_vecs.r_reads_count.begin(), sizes_vecs.r_reads_count.end(), 0);
+  uint64_t total_l_reads = accumulate(sizes_vecs.l_reads_count.begin(), sizes_vecs.l_reads_count.end(), 0);
+  uint64_t total_ctg_len = accumulate(sizes_vecs.ctg_sizes.begin(), sizes_vecs.ctg_sizes.end(), 0);
 
   size_t gpu_mem_req = sizeof(int32_t) * tot_extensions * 6 + sizeof(int32_t) * total_l_reads + sizeof(int32_t) * total_r_reads +
                        sizeof(char) * total_ctg_len + sizeof(char) * total_l_reads * max_read_size * 2 +
@@ -105,29 +107,28 @@ void locassm_driver::local_assem_driver(std::vector<CtgWithReads> &data_in, uint
   unsigned slice_size = tot_extensions / iterations;
   assert(slice_size > 0);
   unsigned remaining = tot_extensions % iterations;
-  std::vector<uint32_t> max_ht_sizes;
+  vector<uint32_t> max_ht_sizes;
   // to get the largest ht size for any iteration and allocate GPU memory for that (once)
   uint64_t max_ht = 0, max_r_rds_its = 0, max_l_rds_its = 0, max_ctg_len_it = 0, test_sum = 0;
   for (unsigned i = 0; i < iterations; i++) {
     uint64_t temp_max_ht = 0, temp_max_r_rds = 0, temp_max_l_rds = 0, temp_max_ctg_len = 0;
     if (i < iterations - 1) {
-      temp_max_ht =
-          std::accumulate(sizes_vecs.ht_sizes.begin() + i * slice_size, sizes_vecs.ht_sizes.begin() + (i + 1) * slice_size, 0);
-      temp_max_r_rds = std::accumulate(sizes_vecs.r_reads_count.begin() + i * slice_size,
-                                       sizes_vecs.r_reads_count.begin() + (i + 1) * slice_size, 0);
-      temp_max_l_rds = std::accumulate(sizes_vecs.l_reads_count.begin() + i * slice_size,
-                                       sizes_vecs.l_reads_count.begin() + (i + 1) * slice_size, 0);
+      temp_max_ht = accumulate(sizes_vecs.ht_sizes.begin() + i * slice_size, sizes_vecs.ht_sizes.begin() + (i + 1) * slice_size, 0);
+      temp_max_r_rds =
+          accumulate(sizes_vecs.r_reads_count.begin() + i * slice_size, sizes_vecs.r_reads_count.begin() + (i + 1) * slice_size, 0);
+      temp_max_l_rds =
+          accumulate(sizes_vecs.l_reads_count.begin() + i * slice_size, sizes_vecs.l_reads_count.begin() + (i + 1) * slice_size, 0);
       temp_max_ctg_len =
-          std::accumulate(sizes_vecs.ctg_sizes.begin() + i * slice_size, sizes_vecs.ctg_sizes.begin() + (i + 1) * slice_size, 0);
+          accumulate(sizes_vecs.ctg_sizes.begin() + i * slice_size, sizes_vecs.ctg_sizes.begin() + (i + 1) * slice_size, 0);
     } else {
-      temp_max_ht = std::accumulate(sizes_vecs.ht_sizes.begin() + i * slice_size,
-                                    sizes_vecs.ht_sizes.begin() + ((i + 1) * slice_size) + remaining, 0);
-      temp_max_r_rds = std::accumulate(sizes_vecs.r_reads_count.begin() + i * slice_size,
-                                       sizes_vecs.r_reads_count.begin() + ((i + 1) * slice_size) + remaining, 0);
-      temp_max_l_rds = std::accumulate(sizes_vecs.l_reads_count.begin() + i * slice_size,
-                                       sizes_vecs.l_reads_count.begin() + ((i + 1) * slice_size) + remaining, 0);
-      temp_max_ctg_len = std::accumulate(sizes_vecs.ctg_sizes.begin() + i * slice_size,
-                                         sizes_vecs.ctg_sizes.begin() + ((i + 1) * slice_size) + remaining, 0);
+      temp_max_ht = accumulate(sizes_vecs.ht_sizes.begin() + i * slice_size,
+                               sizes_vecs.ht_sizes.begin() + ((i + 1) * slice_size) + remaining, 0);
+      temp_max_r_rds = accumulate(sizes_vecs.r_reads_count.begin() + i * slice_size,
+                                  sizes_vecs.r_reads_count.begin() + ((i + 1) * slice_size) + remaining, 0);
+      temp_max_l_rds = accumulate(sizes_vecs.l_reads_count.begin() + i * slice_size,
+                                  sizes_vecs.l_reads_count.begin() + ((i + 1) * slice_size) + remaining, 0);
+      temp_max_ctg_len = accumulate(sizes_vecs.ctg_sizes.begin() + i * slice_size,
+                                    sizes_vecs.ctg_sizes.begin() + ((i + 1) * slice_size) + remaining, 0);
     }
     if (temp_max_ht > max_ht) max_ht = temp_max_ht;
     if (temp_max_r_rds > max_r_rds_its) max_r_rds_its = temp_max_r_rds;
@@ -138,29 +139,29 @@ void locassm_driver::local_assem_driver(std::vector<CtgWithReads> &data_in, uint
   slice_size = slice_size + remaining;  // this is the largest slice size, mostly the last iteration handles the leftovers
   // allocating maximum possible memory for a single iteration
 
-  std::unique_ptr<char[]> ctg_seqs_h{new char[max_ctg_size * slice_size]};
-  std::unique_ptr<uint64_t[]> cid_h{new uint64_t[slice_size]};
-  std::unique_ptr<char[]> ctgs_seqs_rc_h{
+  unique_ptr<char[]> ctg_seqs_h{new char[max_ctg_size * slice_size]};
+  unique_ptr<uint64_t[]> cid_h{new uint64_t[slice_size]};
+  unique_ptr<char[]> ctgs_seqs_rc_h{
       new char[max_ctg_size * slice_size]};  // revcomps not requried on GPU, ctg space will be re-used on GPU, but if we want to do
                                              // right left extensions in parallel, then we need separate space on GPU
-  std::unique_ptr<uint32_t[]> ctg_seq_offsets_h{new uint32_t[slice_size]};
-  std::unique_ptr<double[]> depth_h{new double[slice_size]};
-  std::unique_ptr<char[]> reads_left_h{new char[max_l_count * max_read_size * slice_size]};
-  std::unique_ptr<char[]> reads_right_h{new char[max_r_count * max_read_size * slice_size]};
-  std::unique_ptr<char[]> quals_right_h{new char[max_r_count * max_read_size * slice_size]};
-  std::unique_ptr<char[]> quals_left_h{new char[max_l_count * max_read_size * slice_size]};
-  std::unique_ptr<uint32_t[]> reads_l_offset_h{new uint32_t[max_l_count * slice_size]};
-  std::unique_ptr<uint32_t[]> reads_r_offset_h{new uint32_t[max_r_count * slice_size]};
-  std::unique_ptr<uint32_t[]> rds_l_cnt_offset_h{new uint32_t[slice_size]};
-  std::unique_ptr<uint32_t[]> rds_r_cnt_offset_h{new uint32_t[slice_size]};
-  std::unique_ptr<uint32_t[]> term_counts_h{new uint32_t[3]};
-  std::unique_ptr<char[]> longest_walks_r_h{new char[slice_size * max_walk_len * iterations]};  // reserve memory for all the walks
-  std::unique_ptr<char[]> longest_walks_l_h{
+  unique_ptr<uint32_t[]> ctg_seq_offsets_h{new uint32_t[slice_size]};
+  unique_ptr<double[]> depth_h{new double[slice_size]};
+  unique_ptr<char[]> reads_left_h{new char[max_l_count * max_read_size * slice_size]};
+  unique_ptr<char[]> reads_right_h{new char[max_r_count * max_read_size * slice_size]};
+  unique_ptr<char[]> quals_right_h{new char[max_r_count * max_read_size * slice_size]};
+  unique_ptr<char[]> quals_left_h{new char[max_l_count * max_read_size * slice_size]};
+  unique_ptr<uint32_t[]> reads_l_offset_h{new uint32_t[max_l_count * slice_size]};
+  unique_ptr<uint32_t[]> reads_r_offset_h{new uint32_t[max_r_count * slice_size]};
+  unique_ptr<uint32_t[]> rds_l_cnt_offset_h{new uint32_t[slice_size]};
+  unique_ptr<uint32_t[]> rds_r_cnt_offset_h{new uint32_t[slice_size]};
+  unique_ptr<uint32_t[]> term_counts_h{new uint32_t[3]};
+  unique_ptr<char[]> longest_walks_r_h{new char[slice_size * max_walk_len * iterations]};  // reserve memory for all the walks
+  unique_ptr<char[]> longest_walks_l_h{
       new char[slice_size * max_walk_len * iterations]};  // not needed on device, will re-use right walk memory
-  std::unique_ptr<uint32_t[]> final_walk_lens_r_h{new uint32_t[slice_size * iterations]};  // reserve memory for all the walks.
-  std::unique_ptr<uint32_t[]> final_walk_lens_l_h{
+  unique_ptr<uint32_t[]> final_walk_lens_r_h{new uint32_t[slice_size * iterations]};  // reserve memory for all the walks.
+  unique_ptr<uint32_t[]> final_walk_lens_l_h{
       new uint32_t[slice_size * iterations]};  // not needed on device, will re use right walk memory
-  std::unique_ptr<uint32_t[]> prefix_ht_size_h{new uint32_t[slice_size]};
+  unique_ptr<uint32_t[]> prefix_ht_size_h{new uint32_t[slice_size]};
 
   gpu_mem_req = sizeof(int32_t) * slice_size * 6 + sizeof(int32_t) * 3 + sizeof(int32_t) * max_l_rds_its +
                 sizeof(int32_t) * max_r_rds_its + sizeof(char) * max_ctg_len_it + sizeof(char) * max_l_rds_its * max_read_size * 2 +
@@ -212,7 +213,7 @@ void locassm_driver::local_assem_driver(std::vector<CtgWithReads> &data_in, uint
     assert(left_over >= 0);
     assert(slice >= 0);
 
-    std::vector<CtgWithReads>::const_iterator slice_iter = data_in.begin() + slice * slice_size;
+    vector<CtgWithReads>::const_iterator slice_iter = data_in.begin() + slice * slice_size;
     auto this_slice_size = slice_size + left_over;
     uint32_t vec_size = this_slice_size;  // slice_data.size();
     uint32_t ctgs_offset_sum = 0;
@@ -334,14 +335,14 @@ void locassm_driver::local_assem_driver(std::vector<CtgWithReads> &data_in, uint
 
     for (int i = 0; i < loc_size; i++) {
       if (final_walk_lens_l_h[j * slice_size + i] > 0) {
-        std::string left(longest_walks_l_h.get() + j * slice_size * max_walk_len + max_walk_len * i,
-                         final_walk_lens_l_h[j * slice_size + i]);
-        std::string left_rc = locassm_driver::revcomp(left);
+        string left(longest_walks_l_h.get() + j * slice_size * max_walk_len + max_walk_len * i,
+                    final_walk_lens_l_h[j * slice_size + i]);
+        string left_rc = locassm_driver::revcomp(left);
         data_in[j * slice_size + i].seq.insert(0, left_rc);
       }
       if (final_walk_lens_r_h[j * slice_size + i] > 0) {
-        std::string right(longest_walks_r_h.get() + j * slice_size * max_walk_len + max_walk_len * i,
-                          final_walk_lens_r_h[j * slice_size + i]);
+        string right(longest_walks_r_h.get() + j * slice_size * max_walk_len + max_walk_len * i,
+                     final_walk_lens_r_h[j * slice_size + i]);
         data_in[j * slice_size + i].seq += right;
       }
     }
