@@ -190,24 +190,24 @@ void Kmer<MAX_K>::get_kmers(unsigned kmer_len, const std::string_view &seq, std:
         if (i < Kmer::k) {
           // invalid kmers at the beginning
           // flag those k-mers before
-          for(int ii = 0; ii < i && ii < kmers.size(); ii++) {
-            //DBG("Invalid ii=", ii, "of", kmers.size(), " in ", seq, "\n");
+          for (int ii = 0; ii < i && ii < kmers.size(); ii++) {
+            // DBG("Invalid ii=", ii, "of", kmers.size(), " in ", seq, "\n");
             kmers.at(ii) = Kmer::get_invalid();
           }
-          N_counter = 1; // next valid starts at +1
+          N_counter = 1;  // next valid starts at +1
         } else {
           // The next k k-mers will be invalid
-          N_counter = Kmer::k; // next valid starts at +k +1
+          N_counter = Kmer::k;  // next valid starts at +k +1
         }
-        //DBG("Next ", N_counter, " are invalid i=", i, "\n");
+        // DBG("Next ", N_counter, " are invalid i=", i, "\n");
       }
       if (N_counter) {
         if (i < Kmer::k && i < kmers.size()) {
-          //DBG("Invalid i=", i, "of", kmers.size(), " at start in ", seq, "\n");
+          // DBG("Invalid i=", i, "of", kmers.size(), " at start in ", seq, "\n");
           kmers.at(i) = Kmer::get_invalid();
         } else if (i >= Kmer::k && i - Kmer::k + 1 < kmers.size()) {
-          //DBG("Invalid i=", i-Kmer::k+1, "of", kmers.size(), " in ", seq, "\n");
-          kmers.at(i-Kmer::k+1) = Kmer::get_invalid();
+          // DBG("Invalid i=", i-Kmer::k+1, "of", kmers.size(), " in ", seq, "\n");
+          kmers.at(i - Kmer::k + 1) = Kmer::get_invalid();
         }
         N_counter--;
       }

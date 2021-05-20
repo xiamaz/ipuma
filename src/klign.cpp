@@ -898,8 +898,10 @@ class KmerCtgDHT {
       assert(pos_in_read + Kmer<MAX_K>::get_k() <= rseq_ptr.size() && "kmer fits in read");
       assert(ctg_loc.pos_in_ctg + Kmer<MAX_K>::get_k() <= ctg_seq.size() && "kmer fits in ctg");
       if (memcmp(rseq_ptr.data() + pos_in_read, ctg_seq.data() + ctg_loc.pos_in_ctg, Kmer<MAX_K>::get_k()) != 0)
-        WARN("pos_in_read=", pos_in_read, " pos_in_ctg=", ctg_loc.pos_in_ctg, " ctg_rc=", ctg_loc.is_rc, " read_rc=", read_kmer_is_rc, " expected: '", string_view(rseq_ptr.data() + pos_in_read, Kmer<MAX_K>::get_k()), "' got '",
-            string_view(ctg_seq.data() + ctg_loc.pos_in_ctg, Kmer<MAX_K>::get_k()), "' -- read=", rname, " rseq=", rseq_fw, "\n");
+        WARN("pos_in_read=", pos_in_read, " pos_in_ctg=", ctg_loc.pos_in_ctg, " ctg_rc=", ctg_loc.is_rc,
+             " read_rc=", read_kmer_is_rc, " expected: '", string_view(rseq_ptr.data() + pos_in_read, Kmer<MAX_K>::get_k()),
+             "' got '", string_view(ctg_seq.data() + ctg_loc.pos_in_ctg, Kmer<MAX_K>::get_k()), "' -- read=", rname,
+             " rseq=", rseq_fw, "\n");
       assert(memcmp(rseq_ptr.data() + pos_in_read, ctg_seq.data() + ctg_loc.pos_in_ctg, Kmer<MAX_K>::get_k()) == 0 &&
              "kmer seed exact matches read and ctg");
       align_read(rname, ctg_loc.cid, read_subseq, ctg_subseq, rstart, rlen, cstart, ctg_loc.clen, orient, overlap_len,
@@ -1140,15 +1142,12 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
   for (auto read_record : good_read_records) {
     assert(read_record->is_valid());
     progress();
-    assert(read_record->is_valid());
     // compute alignments
     if (read_record->aligned_ctgs_map.size()) {
       num_reads_aligned++;
-      assert(read_record->is_valid());
       kmer_ctg_dht.compute_alns_for_read(&read_record->aligned_ctgs_map, read_record->id, read_record->seq, read_group_id,
                                          aln_kernel_timer);
     }
-    assert(read_record->is_valid());
     delete read_record;
   }
   read_records.clear();
@@ -1200,7 +1199,7 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
       for (int i = 0; i < (int)kmers.size(); i += seed_space) {
         const Kmer<MAX_K> &kmer_fw = kmers[i];
         if (!kmers[i].is_valid()) {
-          //DBG("Skipping invalid kmer at i=", i, "of", kmers.size(), " read=", read_id, " read_seq=", read_seq, "\n");
+          // DBG("Skipping invalid kmer at i=", i, "of", kmers.size(), " read=", read_id, " read_seq=", read_seq, "\n");
           continue;
         }
         const Kmer<MAX_K> kmer_rc = kmer_fw.revcomp();
@@ -1221,7 +1220,8 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
         }
         kmer_ctg_dht.kmer_seed_lookups++;
         it->second.push_back({read_record, i, is_rc});
-        //DBG("Pushed read=", read_id, ", i=", i, " is_rc=", is_rc, " for kmer=", kmer_lc->to_string(), " read_kmer=", string_view(read_seq.data()+i, Kmer<MAX_K>::get_k()), "\n");
+        // DBG("Pushed read=", read_id, ", i=", i, " is_rc=", is_rc, " for kmer=", kmer_lc->to_string(), " read_kmer=",
+        // string_view(read_seq.data()+i, Kmer<MAX_K>::get_k()), "\n");
       }
       if (kmer_read_map.size() + kmers.size() * 2 >= KLIGN_CTG_FETCH_BUF_SIZE) filled = true;
       if (filled) {
