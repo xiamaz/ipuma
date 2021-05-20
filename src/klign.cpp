@@ -1028,7 +1028,7 @@ static void build_alignment_index(KmerCtgDHT<MAX_K> &kmer_ctg_dht, Contigs &ctgs
     num_kmers += kmers.size();
     for (unsigned i = 0; i < kmers.size(); i++) {
       ctg_loc.pos_in_ctg = i;
-      assert(kmers[i].is_valid());
+      if (!kmers[i].is_valid()) continue;
       kmer_ctg_dht.add_kmer(kmers[i], ctg_loc);
     }
     progress();
