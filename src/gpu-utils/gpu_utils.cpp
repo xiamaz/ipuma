@@ -51,6 +51,8 @@
 #include "upcxx_utils/colors.h"
 #include "gpu_common.hpp"
 
+using namespace std;
+
 size_t gpu_utils::get_avail_gpu_mem_per_rank(int totRanks, int num_devices) {
   if (num_devices == 0) num_devices = get_num_node_gpus();
   if (!num_devices) return 0;
@@ -58,7 +60,7 @@ size_t gpu_utils::get_avail_gpu_mem_per_rank(int totRanks, int num_devices) {
   return (get_tot_gpu_mem() * 0.8) / ranksPerDevice;
 }
 
-std::string gpu_utils::get_gpu_device_name() {
+string gpu_utils::get_gpu_device_name() {
   cudaDeviceProp prop;
   cudaErrchk(cudaGetDeviceProperties(&prop, 0));
   return prop.name;
@@ -84,11 +86,11 @@ int gpu_utils::get_num_node_gpus() {
 }
 
 bool gpu_utils::initialize_gpu(double& time_to_initialize, int& device_count, size_t& total_mem) {
-  using timepoint_t = std::chrono::time_point<std::chrono::high_resolution_clock>;
+  using timepoint_t = chrono::time_point<chrono::high_resolution_clock>;
   double* first_touch;
 
-  timepoint_t t = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> elapsed;
+  timepoint_t t = chrono::high_resolution_clock::now();
+  chrono::duration<double> elapsed;
 
   device_count = get_num_node_gpus();
   if (device_count > 0) {
@@ -96,7 +98,7 @@ bool gpu_utils::initialize_gpu(double& time_to_initialize, int& device_count, si
     cudaErrchk(cudaMallocHost((void**)&first_touch, sizeof(double)));
     cudaErrchk(cudaFreeHost(first_touch));
   }
-  elapsed = std::chrono::high_resolution_clock::now() - t;
+  elapsed = chrono::high_resolution_clock::now() - t;
   time_to_initialize = elapsed.count();
   return device_count > 0;
 }
@@ -108,10 +110,10 @@ bool gpu_utils::initialize_gpu() {
   return initialize_gpu(t, c, m);
 }
 
-std::string gpu_utils::get_gpu_device_description() {
+string gpu_utils::get_gpu_device_description() {
   cudaDeviceProp prop;
   int num_devs = get_num_node_gpus();
-  std::ostringstream os;
+  ostringstream os;
   for (int i = 0; i < num_devs; ++i) {
     cudaErrchk(cudaGetDeviceProperties(&prop, i));
 
