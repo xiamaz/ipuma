@@ -121,6 +121,7 @@ const Kmer<MAX_K> &Kmer<MAX_K>::get_invalid() {
   static Kmer invalid;
   if (!_) {
     invalid.longs.fill(0xFFFFFFFFFFFFFFFF);  // all bits set (i.e. poly T with no zero masking)
+    assert(invalid.longs[0] == H2BE(invalid.longs[0]));
     _ = true;
   }
   return invalid;
@@ -159,6 +160,7 @@ void Kmer<MAX_K>::get_kmers(unsigned kmer_len, string seq, vector<Kmer> &kmers, 
   get_kmers(kmer_len, std::string_view(seq.data(), seq.size()), kmers, check_n);
 }
 
+//#include "upcxx_utils/log.hpp"
 template <int MAX_K>
 void Kmer<MAX_K>::get_kmers(unsigned kmer_len, const std::string_view &seq, std::vector<Kmer> &kmers, bool check_n) {
   // only need rank 0 to check
@@ -169,7 +171,8 @@ void Kmer<MAX_K>::get_kmers(unsigned kmer_len, const std::string_view &seq, std:
   int bufsize = max((int)N_LONGS, (int)(seq.size() + 31) / 32) + N_LONGS;
   int lastLong = N_LONGS - 1;
   assert(lastLong >= 0 && lastLong < N_LONGS);
-  kmers.resize(seq.size() - Kmer::k + 1);
+  kmers.resize(seq.size() - Kmer::k + 1, {});
+  assert(kmers[0] != Kmer::get_invalid());
   longs_t buf[bufsize];
   uint8_t *bufPtr = (uint8_t *)buf;
   memset(buf, 0, bufsize * 8);
@@ -188,24 +191,32 @@ void Kmer<MAX_K>::get_kmers(unsigned kmer_len, const std::string_view &seq, std:
           // invalid kmers at the beginning
           // flag those k-mers before
           for(int ii = 0; ii < i && ii < kmers.size(); ii++) {
+            //DBG("Invalid ii=", ii, "of", kmers.size(), " in ", seq, "\n");
             kmers.at(ii) = Kmer::get_invalid();
           }
           N_counter = 1; // next valid starts at +1
         } else {
           // The next k k-mers will be invalid
-          N_counter = Kmer::k + 1; // next valid starts at +k +1
+          N_counter = Kmer::k; // next valid starts at +k +1
         }
+        //DBG("Next ", N_counter, " are invalid i=", i, "\n");
       }
       if (N_counter) {
-        if (i <= Kmer::k && i < kmers.size()) {
+        if (i < Kmer::k && i < kmers.size()) {
+          //DBG("Invalid i=", i, "of", kmers.size(), " at start in ", seq, "\n");
           kmers.at(i) = Kmer::get_invalid();
-        } else if (i > Kmer::k && i - Kmer::k < kmers.size()) {
-          kmers.at(i-Kmer::k) = Kmer::get_invalid();
+        } else if (i >= Kmer::k && i - Kmer::k + 1 < kmers.size()) {
+          //DBG("Invalid i=", i-Kmer::k+1, "of", kmers.size(), " in ", seq, "\n");
+          kmers.at(i-Kmer::k+1) = Kmer::get_invalid();
         }
         N_counter--;
       }
     }
     s++;
+  }
+  if (check_n && N_counter) {
+    // The last kmer is also invalid
+    assert(kmers.back() == Kmer::get_invalid());
   }
   // fix to big endian
   for (int l = 0; l < bufsize; l++) buf[l] = H2BE(buf[l]);
