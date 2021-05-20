@@ -53,26 +53,13 @@
 
 using namespace std;
 
-size_t locassm_driver::get_device_mem(int ranks_per_gpu, int gpu_id) {
-  size_t free_mem, total_mem;
-  cudaSetDevice(gpu_id);
-  cudaMemGetInfo(&free_mem, &total_mem);
-  return free_mem / ranks_per_gpu;
-}
-
-int locassm_driver::get_gpu_per_node() {
-  int deviceCount = 0;
-  auto res = cudaGetDeviceCount(&deviceCount);
-  if (res != cudaSuccess) return 0;
-  return deviceCount;
-}
-
 void locassm_driver::local_assem_driver(vector<CtgWithReads> &data_in, uint32_t max_ctg_size, uint32_t max_read_size,
                                         uint32_t max_r_count, uint32_t max_l_count, int mer_len, int max_kmer_len,
                                         accum_data &sizes_vecs, int walk_len_limit, int qual_offset, int ranks, int my_rank,
                                         int g_rank_me) {
-  int total_gpus_avail = get_gpu_per_node();
-  int my_gpu_id = my_rank % total_gpus_avail;
+  int device_count = 0;
+  cudaErrchk(cudaGetDeviceCount(&device_count));
+  int my_gpu_id = my_rank % device_count;
   cudaErrchk(cudaSetDevice(my_gpu_id));
   int max_mer_len = max_kmer_len;  // mer_len;// max_mer_len needs to come from macro (121) and mer_len is the mer_len for current
                                    // go
@@ -94,9 +81,7 @@ void locassm_driver::local_assem_driver(vector<CtgWithReads> &data_in, uint32_t 
                        (max_mer_len + max_walk_len) * sizeof(char) * tot_extensions +
                        sizeof(loc_ht_bool) * tot_extensions * max_walk_len;
 
-  // size_t gpu_mem_avail = get_device_mem(
-  //    (ranks / GPUS_PER_NODE), my_gpu_id);  // FIXME: need to find a way to detect gpus per node on summit (fixing it to 6 here)
-  size_t gpu_mem_avail = gpu_utils::get_avail_gpu_mem_per_rank(ranks, total_gpus_avail);
+  size_t gpu_mem_avail = gpu_utils::get_avail_gpu_mem_per_rank(ranks, device_count);
 
   float factor = 0.80;
   assert(gpu_mem_avail > 0);
