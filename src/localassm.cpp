@@ -52,6 +52,10 @@
 #include "packed_reads.hpp"
 #include "upcxx_utils.hpp"
 #include "utils.hpp"
+#include "gpu-loc-assem/locassem_struct.hpp"
+#ifdef ENABLE_GPUS
+#include "gpu-loc-assem/driver.hpp"
+#endif
 
 using namespace std;
 using namespace upcxx;
@@ -63,8 +67,16 @@ struct CtgInfo {
   int64_t cid;
   char orient;
   char side;
+  CtgInfo()
+      : cid{}
+      , orient{}
+      , side{} {}
+  CtgInfo(int64_t _cid, char _orient, char _side)
+      : cid(_cid)
+      , orient(_orient)
+      , side(_side) {}
 #if UPCXX_VERSION < 20210300L
-  char pad[6];  // FIXME necessary in upcxx <= 2020.10 see upcxx Issue #427
+  char pad[6];  // necessary in upcxx < 2021.03 see upcxx Issue #427
   UPCXX_SERIALIZED_FIELDS(cid, orient, side, pad);
 #else
   UPCXX_SERIALIZED_FIELDS(cid, orient, side);
@@ -162,21 +174,6 @@ class ReadsToCtgsDHT {
   }
 };
 
-struct ReadSeq {
-  string read_id;
-  string seq;
-  string quals;
-  UPCXX_SERIALIZED_FIELDS(read_id, seq, quals);
-};
-
-struct CtgWithReads {
-  int64_t cid;
-  string seq;
-  double depth;
-  vector<ReadSeq> reads_left;
-  vector<ReadSeq> reads_right;
-};
-
 struct CtgData {
   int64_t cid;
   string seq;
@@ -185,14 +182,24 @@ struct CtgData {
 };
 
 struct CtgReadData {
+  CtgReadData()
+      : cid{}
+      , side{}
+      , read_seq{} {}
+  CtgReadData(int64_t _cid, char _side, const ReadSeq _read_seq)
+      : cid(_cid)
+      , side(_side)
+      , read_seq(_read_seq) {}
   int64_t cid;
   char side;
 #if UPCXX_VERSION < 20210300L
-  char pad[7];  // FIXME necessary in upcxx <= 2020.10 see upcxx Issue #427
+  char pad[7];  // necessary in upcxx <= 2021.03 see upcxx Issue #427
   ReadSeq read_seq;
+
   UPCXX_SERIALIZED_FIELDS(cid, side, pad, read_seq);
 #else
   ReadSeq read_seq;
+
   UPCXX_SERIALIZED_FIELDS(cid, side, read_seq);
 #endif
 };
@@ -219,10 +226,13 @@ class CtgsWithReadsDHT {
     ctg_store.set_update_func([&ctgs_map = this->ctgs_map](CtgData &&ctg_data) {
       auto it = ctgs_map->find(ctg_data.cid);
       if (it != ctgs_map->end()) DIE("Found duplicate ctg ", ctg_data.cid);
-      ctgs_map_t::value_type record = {
-          .first = ctg_data.cid,
-          .second = {
-              .cid = ctg_data.cid, .seq = std::move(ctg_data.seq), .depth = ctg_data.depth, .reads_left = {}, .reads_right = {}}};
+      ctgs_map_t::value_type record = {.first = ctg_data.cid,
+                                       .second = {.cid = ctg_data.cid,
+                                                  .seq = std::move(ctg_data.seq),
+                                                  .depth = ctg_data.depth,
+                                                  .max_reads = 0,
+                                                  .reads_left = {},
+                                                  .reads_right = {}}};
       it = ctgs_map->insert(it, std::move(record));
       DBG_VERBOSE("Added contig cid=", it->first, ": ", it->second.seq, " depth=", it->second.depth, "\n");
     });
@@ -252,11 +262,7 @@ class CtgsWithReadsDHT {
   }
 
   void add_read(int64_t cid, char side, const ReadSeq read_seq) {
-#if UPCXX_VERSION < 20210300L
-    CtgReadData ctg_read_data = {.cid = cid, .side = side, .pad = {}, .read_seq = read_seq};
-#else
-    CtgReadData ctg_read_data = {.cid = cid, .side = side, .read_seq = read_seq};
-#endif
+    CtgReadData ctg_read_data(cid, side, read_seq);
     add_read(ctg_read_data);
   }
   void add_read(const CtgReadData &ctg_read_data) { ctg_read_store.update(get_target_rank(ctg_read_data.cid), ctg_read_data); }
@@ -304,6 +310,71 @@ class CtgsWithReadsDHT {
     return ctg;
   }
 };
+
+#ifdef ENABLE_GPUS
+vector<ReadSeq> reads_to_reads(vector<ReadSeq> read_in) {
+  vector<ReadSeq> reads_out;
+  for (int i = 0; i < min((int)read_in.size(), (int)LASSM_MAX_COUNT_MERS_READS); i++) {
+    ReadSeq temp_seq_in = read_in[i];
+    ReadSeq temp_seq_out;
+
+    temp_seq_out.read_id = temp_seq_in.read_id;
+    temp_seq_out.seq = temp_seq_in.seq;
+    temp_seq_out.quals = temp_seq_in.quals;
+    reads_out.push_back(temp_seq_out);
+  }
+  return reads_out;
+}
+
+CtgWithReads ctgs_to_ctgs(CtgWithReads ctg_in) {
+  CtgWithReads ctg_out;
+  ctg_out.cid = ctg_in.cid;
+  ctg_out.seq = ctg_in.seq;
+  ctg_out.depth = ctg_in.depth;
+  ctg_out.max_reads = ctg_in.max_reads;
+  vector<ReadSeq> temp_reads = reads_to_reads(ctg_in.reads_left);
+  ctg_out.reads_left = temp_reads;
+  temp_reads = reads_to_reads(ctg_in.reads_right);
+  ctg_out.reads_right = temp_reads;
+  return ctg_out;
+}
+
+void bucket_ctgs(locassm_driver::ctg_bucket &zero_slice, locassm_driver::ctg_bucket &mid_slice,
+                 locassm_driver::ctg_bucket &outlier_slice, CtgsWithReadsDHT &ctgs_dht, IntermittentTimer &ctg_buckets_timer) {
+  ctg_buckets_timer.start();
+  unsigned max_read_size = 300;
+  for (auto ctg = ctgs_dht.get_first_local_ctg(); ctg != nullptr; ctg = ctgs_dht.get_next_local_ctg()) {
+    CtgWithReads temp_in = ctgs_to_ctgs(*ctg);
+    temp_in.max_reads =
+        temp_in.reads_left.size() > temp_in.reads_right.size() ? temp_in.reads_left.size() : temp_in.reads_right.size();
+    if (temp_in.max_reads == 0) {
+      zero_slice.ctg_vec.push_back(temp_in);
+    } else if (temp_in.max_reads > 0 && temp_in.max_reads < 10) {
+      mid_slice.ctg_vec.push_back(temp_in);
+      uint32_t temp_ht_size = temp_in.max_reads * max_read_size;
+      mid_slice.sizes_vec.ht_sizes.push_back(temp_ht_size);
+      mid_slice.sizes_vec.ctg_sizes.push_back(temp_in.seq.size());
+      mid_slice.sizes_vec.l_reads_count.push_back(temp_in.reads_left.size());
+      mid_slice.sizes_vec.r_reads_count.push_back(temp_in.reads_right.size());
+      if (mid_slice.l_max < temp_in.reads_left.size()) mid_slice.l_max = temp_in.reads_left.size();
+      if (mid_slice.r_max < temp_in.reads_right.size()) mid_slice.r_max = temp_in.reads_right.size();
+      if (mid_slice.max_contig_sz < temp_in.seq.size()) mid_slice.max_contig_sz = temp_in.seq.size();
+    } else {
+      outlier_slice.ctg_vec.push_back(temp_in);
+      uint32_t temp_ht_size = temp_in.max_reads * max_read_size;
+      outlier_slice.sizes_vec.ht_sizes.push_back(temp_ht_size);
+      outlier_slice.sizes_vec.ctg_sizes.push_back(temp_in.seq.size());
+      outlier_slice.sizes_vec.l_reads_count.push_back(temp_in.reads_left.size());
+      outlier_slice.sizes_vec.r_reads_count.push_back(temp_in.reads_right.size());
+      if (outlier_slice.l_max < temp_in.reads_left.size()) outlier_slice.l_max = temp_in.reads_left.size();
+      if (outlier_slice.r_max < temp_in.reads_right.size()) outlier_slice.r_max = temp_in.reads_right.size();
+      if (outlier_slice.max_contig_sz < temp_in.seq.size()) outlier_slice.max_contig_sz = temp_in.seq.size();
+    }
+  }
+
+  ctg_buckets_timer.stop();
+}
+#endif
 
 struct MerFreqs {
   // how many times this kmer has occurred: don't need to count beyond 65536
@@ -453,17 +524,9 @@ static void process_reads(unsigned kmer_len, vector<PackedReads *> &packed_reads
                   reverse(quals_rc.begin(), quals_rc.end());
                   was_revcomp = true;
                 }
-#if UPCXX_VERSION < 20210300L
-                ctgs_to_add.push_back({ctg.cid, ctg.side, {}, {id, seq_rc, quals_rc}});
-#else
-                ctgs_to_add.push_back({ctg.cid, ctg.side, {id, seq_rc, quals_rc}});
-#endif
+                ctgs_to_add.push_back(CtgReadData(ctg.cid, ctg.side, {id, seq_rc, quals_rc}));
               } else {
-#if UPCXX_VERSION < 20210300L
-                ctgs_to_add.push_back({ctg.cid, ctg.side, {}, {id, seq, quals}});
-#else
-                ctgs_to_add.push_back({ctg.cid, ctg.side, {id, seq, quals}});
-#endif
+                ctgs_to_add.push_back(CtgReadData(ctg.cid, ctg.side, {id, seq, quals}));
               }
             }
           }
@@ -794,8 +857,68 @@ static void extend_ctgs(CtgsWithReadsDHT &ctgs_dht, Contigs &ctgs, int insert_av
   WalkMetrics wm;
 
   IntermittentTimer count_mers_timer(__FILENAME__ + string(":") + "count_mers"),
-      walk_mers_timer(__FILENAME__ + string(":") + "walk_mers");
+      walk_mers_timer(__FILENAME__ + string(":") + "walk_mers"), ctg_buckets_timer(__FILENAME__ + string(":") + "bucket_ctgs"),
+      loc_assem_kernel_timer(__FILENAME__ + string(":") + "GPU_locassem");
+
   ProgressBar progbar(ctgs_dht.get_local_num_ctgs(), "Extending contigs");
+
+#ifdef ENABLE_GPUS
+  locassm_driver::ctg_bucket zero_slice, mid_slice, outlier_slice;
+  bucket_ctgs(zero_slice, mid_slice, outlier_slice, ctgs_dht, ctg_buckets_timer);
+  ctg_buckets_timer.done_all();
+
+  loc_assem_kernel_timer.start();
+  unsigned max_read_size = 300;
+
+  future<> fut_outlier =
+      upcxx_utils::execute_in_thread_pool([&outlier_slice, max_read_size, walk_len_limit, qual_offset, max_kmer_len, kmer_len]() {
+        if (outlier_slice.ctg_vec.size() > 0)
+          local_assem_driver(outlier_slice.ctg_vec, outlier_slice.max_contig_sz, max_read_size, outlier_slice.r_max,
+                             outlier_slice.l_max, kmer_len, max_kmer_len, outlier_slice.sizes_vec, walk_len_limit, qual_offset,
+                             local_team().rank_n(), local_team().rank_me(), rank_me());
+      });
+  auto tot_mids{mid_slice.ctg_vec.size()};
+  while ((!fut_outlier.ready() && mid_slice.ctg_vec.size() > 0) ||
+         (mid_slice.ctg_vec.size() <= 100 && mid_slice.ctg_vec.size() > 0)) {
+    auto ctg = &mid_slice.ctg_vec.back();
+    extend_ctg(ctg, wm, insert_avg, insert_stddev, max_kmer_len, kmer_len, qual_offset, walk_len_limit, count_mers_timer,
+               walk_mers_timer);
+    ctgs.add_contig({.id = ctg->cid, .seq = ctg->seq, .depth = ctg->depth});
+    mid_slice.ctg_vec.pop_back();
+    upcxx::progress();
+  }
+  auto cpu_exts{tot_mids - mid_slice.ctg_vec.size()};
+  LOG("Number of Local Contig Extensions processed on CPU:", cpu_exts, "\n");
+
+  if (mid_slice.ctg_vec.size() > 0) {
+    local_assem_driver(mid_slice.ctg_vec, mid_slice.max_contig_sz, max_read_size, mid_slice.r_max, mid_slice.l_max, kmer_len,
+                       max_kmer_len, mid_slice.sizes_vec, walk_len_limit, qual_offset, local_team().rank_n(),
+                       local_team().rank_me(), rank_me());
+  }
+
+  loc_assem_kernel_timer.stop();
+  for (int j = 0; j < zero_slice.ctg_vec.size(); j++) {
+    CtgWithReads temp_ctg = zero_slice.ctg_vec[j];
+    ctgs.add_contig({.id = temp_ctg.cid, .seq = temp_ctg.seq, .depth = temp_ctg.depth});
+  }
+  for (int j = 0; j < mid_slice.ctg_vec.size(); j++) {
+    CtgWithReads temp_ctg = mid_slice.ctg_vec[j];
+    ctgs.add_contig({.id = temp_ctg.cid, .seq = temp_ctg.seq, .depth = temp_ctg.depth});
+  }
+
+  fut_outlier.wait();
+  for (int j = 0; j < outlier_slice.ctg_vec.size(); j++) {
+    CtgWithReads temp_ctg = outlier_slice.ctg_vec[j];
+    ctgs.add_contig({.id = temp_ctg.cid, .seq = temp_ctg.seq, .depth = temp_ctg.depth});
+  }
+
+  count_mers_timer.done_all();
+  walk_mers_timer.done_all();
+  loc_assem_kernel_timer.done_all();
+  barrier();
+#endif
+
+#ifndef ENABLE_GPUS
   for (auto ctg = ctgs_dht.get_first_local_ctg(); ctg != nullptr; ctg = ctgs_dht.get_next_local_ctg()) {
     progbar.update();
     Contig ext_contig;
@@ -827,6 +950,8 @@ static void extend_ctgs(CtgsWithReadsDHT &ctgs_dht, Contigs &ctgs, int insert_av
                  (double)(tot_sum_ext + tot_sum_clen) / tot_sum_clen, "\n");
   if (tot_num_walks)
     SLOG_VERBOSE("Average walk length ", tot_sum_ext / tot_num_walks, ", max walk length ", tot_max_walk_len, "\n");
+
+#endif
 }
 
 void localassm(int max_kmer_len, int kmer_len, vector<PackedReads *> &packed_reads_list, int insert_avg, int insert_stddev,
