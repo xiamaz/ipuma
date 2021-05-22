@@ -59,7 +59,7 @@
 #include "upcxx_utils/flat_aggr_store.hpp"
 #include "upcxx_utils/three_tier_aggr_store.hpp"
 
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) & defined(KCOUNT_ENABLE_GPUS)
 #include "gpu-utils/gpu_utils.hpp"
 #include "kcount-gpu/gpu_hash_table.hpp"
 #endif
@@ -167,11 +167,11 @@ class KmerDHT {
   // the second bloom filer stores only kmers that are above the repeat depth, and is used for correctly sizing the kmer hash table
   upcxx::dist_object<BloomFilter> bloom_filter2;
 #ifndef FLAT_AGGR_STORE
-  upcxx_utils::ThreeTierAggrStore<Kmer<MAX_K>, dist_object<BloomFilter> &, dist_object<BloomFilter> &> kmer_store_bloom;
-  upcxx_utils::ThreeTierAggrStore<KmerAndExt, dist_object<KmerMap> &, dist_object<BloomFilter> &> kmer_store;
+  upcxx_utils::ThreeTierAggrStore<Kmer<MAX_K>> kmer_store_bloom;
+  upcxx_utils::ThreeTierAggrStore<KmerAndExt> kmer_store;
 #else
-  upcxx_utils::FlatAggrStore<Kmer<MAX_K>, dist_object<BloomFilter> &, dist_object<BloomFilter> &> kmer_store_bloom;
-  upcxx_utils::FlatAggrStore<KmerAndExt, dist_object<KmerMap> &, dist_object<BloomFilter> &> kmer_store;
+  FlatAggrStore<Kmer<MAX_K>> kmer_store_bloom;
+  FlatAggrStore<KmerAndExt> kmer_store;
 #endif
   int64_t max_kmer_store_bytes;
   int64_t initial_kmer_dht_reservation;
@@ -184,24 +184,23 @@ class KmerDHT {
   bool use_bloom;
   int64_t bytes_sent = 0;
   int minimizer_len = 15;
-#ifdef ENABLE_GPUS
+#if defined(ENABLE_GPUS) & defined(KCOUNT_ENABLE_GPUS)
   kcount_gpu::HashTableGPUDriver *gpu_driver;
 #endif
 
-  static void update_bloom_set(Kmer<MAX_K> kmer, upcxx::dist_object<BloomFilter> &bloom_filter1,
-                               upcxx::dist_object<BloomFilter> &bloom_filter2);
+  auto update_bloom_set_func();
 
-  static void update_ctg_bloom_set(Kmer<MAX_K> kmer, upcxx::dist_object<BloomFilter> &bloom_filter1,
-                                   upcxx::dist_object<BloomFilter> &bloom_filter2);
+  auto update_ctg_bloom_set_func();
 
-  static void update_bloom_count(KmerAndExt kmer_and_ext, upcxx::dist_object<KmerMap> &kmers,
-                                 upcxx::dist_object<BloomFilter> &bloom_filter);
+  auto update_bloom_count_func();
 
-  static void update_count(KmerAndExt kmer_and_ext, upcxx::dist_object<KmerMap> &kmers,
-                           upcxx::dist_object<BloomFilter> &bloom_filter);
+  auto update_count_func();
 
-  static void update_ctg_kmers_count(KmerAndExt kmer_and_ext, upcxx::dist_object<KmerMap> &kmers,
-                                     upcxx::dist_object<BloomFilter> &bloom_filter);
+  static void update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers);
+
+  static void update_ctg_kmers_count(KmerAndExt kmer_and_ext, upcxx::dist_object<KmerMap> &kmers);
+
+  auto update_ctg_kmers_count_func();
 
  public:
   KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool force_bloom, bool useHHSS);

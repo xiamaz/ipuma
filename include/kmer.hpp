@@ -78,6 +78,8 @@ class Kmer {
 
   void swap(Kmer &other);
 
+  static Kmer get_invalid();
+
   static void set_k(unsigned int k);
 
   static unsigned int get_k();
@@ -88,9 +90,13 @@ class Kmer {
 
   static void get_kmers(unsigned kmer_len, std::string seq, std::vector<Kmer> &kmers);
 
+  static void get_kmers(unsigned kmer_len, const std::string_view &seq, std::vector<Kmer> &kmers);
+
   Kmer &operator=(const Kmer &o);
 
   bool operator<(const Kmer &o) const;
+
+  bool operator<=(const Kmer &o) const;
 
   bool operator==(const Kmer &o) const;
 
@@ -125,6 +131,8 @@ class Kmer {
   void set_zeros();
 
   Kmer revcomp() const;
+
+  bool is_least() const;
 
   Kmer forward_base(const char b) const;
 

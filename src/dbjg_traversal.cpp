@@ -69,6 +69,7 @@ enum class Dirn { LEFT, RIGHT, NONE };
 
 enum class WalkStatus { RUNNING = '-', DEADEND = 'X', FORK = 'F', CONFLICT = 'O', REPEAT = 'R', VISITED = 'V' };
 
+struct FragElem;
 struct FragElem {
   global_ptr<FragElem> left_gptr, right_gptr;
   bool left_is_rc, right_is_rc;

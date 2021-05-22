@@ -116,6 +116,13 @@ void Kmer<MAX_K>::swap(Kmer<MAX_K> &other) {
 }
 
 template <int MAX_K>
+Kmer<MAX_K> Kmer<MAX_K>::get_invalid() {
+  Kmer invalid;
+  invalid.longs.fill(0xFFFFFFFFFFFFFFFF);  // all bits set (i.e. poly T with no zero masking)
+  return invalid;
+}
+
+template <int MAX_K>
 void Kmer<MAX_K>::set_k(unsigned int k) {
   Kmer::k = k;
 }
@@ -137,12 +144,19 @@ unsigned int Kmer<MAX_K>::get_MAX_K() {
 
 template <int MAX_K>
 void Kmer<MAX_K>::get_kmers(unsigned kmer_len, string seq, vector<Kmer> &kmers) {
+  // converts lowercases to upper case
+  if (seq.size() < Kmer::k) return;
+  for (auto &c : seq) c = toupper(c);  // this might be slow
+  get_kmers(kmer_len, std::string_view(seq.data(), seq.size()), kmers);
+}
+
+template <int MAX_K>
+void Kmer<MAX_K>::get_kmers(unsigned kmer_len, const std::string_view &seq, std::vector<Kmer> &kmers) {
   // only need rank 0 to check
   assert(Kmer::k > 0);
   assert(kmer_len == Kmer::k);
   kmers.clear();
   if (seq.size() < Kmer::k) return;
-  for (auto &c : seq) c = toupper(c);
   int bufsize = max((int)N_LONGS, (int)(seq.size() + 31) / 32) + N_LONGS;
   int lastLong = N_LONGS - 1;
   assert(lastLong >= 0 && lastLong < N_LONGS);
@@ -150,7 +164,7 @@ void Kmer<MAX_K>::get_kmers(unsigned kmer_len, string seq, vector<Kmer> &kmers) 
   longs_t buf[bufsize];
   uint8_t *bufPtr = (uint8_t *)buf;
   memset(buf, 0, bufsize * 8);
-  const char *s = seq.c_str();
+  const char *s = seq.data();
   // calculate binary along entire sequence
   for (unsigned i = 0; i < seq.size(); ++i) {
     int j = i % 32;
@@ -209,6 +223,11 @@ bool Kmer<MAX_K>::operator<(const Kmer<MAX_K> &o) const {
     if (longs[i] > o.longs[i]) return false;
   }
   return false;
+}
+
+template <int MAX_K>
+bool Kmer<MAX_K>::operator<=(const Kmer<MAX_K> &o) const {
+  return *this == o || *this < o;
 }
 
 template <int MAX_K>
@@ -465,6 +484,11 @@ Kmer<MAX_K> Kmer<MAX_K>::revcomp() const {
     km.longs[i] = km.longs[i] << shift;
   }
   return km;
+}
+
+template <int MAX_K>
+bool Kmer<MAX_K>::is_least() const {
+  return *this <= revcomp();
 }
 
 template <int MAX_K>
