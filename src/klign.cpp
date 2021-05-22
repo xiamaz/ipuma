@@ -283,9 +283,6 @@ class KmerCtgDHT {
 
   // encapsulate the data for a kernel to run a block independently
   struct AlignBlockData {
-#ifdef ENABLE_GPUS
-    adept_sw::GPUDriver &gpu_driver;
-#endif
     vector<Aln> kernel_alns;
     vector<string> ctg_seqs;
     vector<string> read_seqs;
@@ -296,6 +293,9 @@ class KmerCtgDHT {
     int64_t max_clen;
     int64_t max_rlen;
     int read_group_id;
+#ifdef ENABLE_GPUS
+    adept_sw::GPUDriver &gpu_driver;
+#endif
 
     AlignBlockData(KmerCtgDHT &kmer_ctg_dht, int read_group_id)
         : aln_scoring(kmer_ctg_dht.aln_scoring)
@@ -434,8 +434,8 @@ class KmerCtgDHT {
       , active_kernel_fut(make_future())
       , aln_cpu_bypass_timer("klign.cpp:CPU_BSW-bypass")
       , alns(&alns)
-      , kmer_len(kmer_len)
-      , first_ctg_round(first_ctg_round) {
+      , first_ctg_round(first_ctg_round) 
+      , kmer_len(kmer_len) {
     this->aln_scoring = aln_scoring;
     ssw_filter.report_cigar = compute_cigar;
     kmer_store.set_size("insert ctg seeds", max_store_size, max_rpcs_in_flight);
