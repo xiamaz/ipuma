@@ -42,8 +42,6 @@ else
         rm -rf *
         rm -rf $INSTALL_PATH/cmake
         cmake $rootdir -DCMAKE_BUILD_TYPE=$1 -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH $MHM2_CMAKE_EXTRAS
-        #-DCMAKE_CXX_CPPCHECK=/usr/bin/cppcheck
-        #-DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy
         #-DENABLE_CUDA=0
     fi
     make -j ${MHM2_BUILD_THREADS} all install
