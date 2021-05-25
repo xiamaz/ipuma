@@ -897,11 +897,6 @@ class KmerCtgDHT {
 
       assert(pos_in_read + Kmer<MAX_K>::get_k() <= rseq_ptr.size() && "kmer fits in read");
       assert(ctg_loc.pos_in_ctg + Kmer<MAX_K>::get_k() <= ctg_seq.size() && "kmer fits in ctg");
-      if (memcmp(rseq_ptr.data() + pos_in_read, ctg_seq.data() + ctg_loc.pos_in_ctg, Kmer<MAX_K>::get_k()) != 0)
-        WARN("pos_in_read=", pos_in_read, " pos_in_ctg=", ctg_loc.pos_in_ctg, " ctg_rc=", ctg_loc.is_rc,
-             " read_rc=", read_kmer_is_rc, " expected: '", string_view(rseq_ptr.data() + pos_in_read, Kmer<MAX_K>::get_k()),
-             "' got '", string_view(ctg_seq.data() + ctg_loc.pos_in_ctg, Kmer<MAX_K>::get_k()), "' -- read=", rname,
-             " rseq=", rseq_fw, "\n");
       assert(memcmp(rseq_ptr.data() + pos_in_read, ctg_seq.data() + ctg_loc.pos_in_ctg, Kmer<MAX_K>::get_k()) == 0 &&
              "kmer seed exact matches read and ctg");
       align_read(rname, ctg_loc.cid, read_subseq, ctg_subseq, rstart, rlen, cstart, ctg_loc.clen, orient, overlap_len,
