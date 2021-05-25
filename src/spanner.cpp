@@ -155,8 +155,6 @@ double estimate_gap_size(double meanAnchor, double k, double l, double c1, doubl
   // Negative gap size padding disabled for metagenomes
   // if (gMid < gMin) gMid = gMin + 1;
   if (gMid > gMax) gMid = gMax - 1;
-  //double aMax = mean_spanning_clone(gMax, k, l, c1, c2, mu, sigma) - gMax;
-  //double aMin = mean_spanning_clone(gMin, k, l, c1, c2, mu, sigma) - gMin;
   double aMid = mean_spanning_clone(gMid, k, l, c1, c2, mu, sigma) - gMid;
   double deltaG = gMax - gMin;
   double iterations = 0;
@@ -164,14 +162,12 @@ double estimate_gap_size(double meanAnchor, double k, double l, double c1, doubl
     iterations++;
     if (meanAnchor > aMid) {
       gMax = gMid;
-      //aMax = aMid;
       gMid = (gMid + gMin) / 2;
-      //aMid = mean_spanning_clone(gMid, k, l, c1, c2, mu, sigma) - gMid;
+      aMid = mean_spanning_clone(gMid, k, l, c1, c2, mu, sigma) - gMid;
     } else if (meanAnchor < aMid) {
       gMin = gMid;
-      //aMin = aMid;
       gMid = (gMid + gMax) / 2;
-      //aMid = mean_spanning_clone(gMid, k, l, c1, c2, mu, sigma) - gMid;
+      aMid = mean_spanning_clone(gMid, k, l, c1, c2, mu, sigma) - gMid;
     } else {
       break;
     }
