@@ -53,7 +53,7 @@
 #include "upcxx_utils.hpp"
 #include "utils.hpp"
 #include "gpu-loc-assem/locassem_struct.hpp"
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_LASSM_GPUS
 #include "gpu-loc-assem/driver.hpp"
 #endif
 
@@ -311,7 +311,7 @@ class CtgsWithReadsDHT {
   }
 };
 
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_LASSM_GPUS
 vector<ReadSeq> reads_to_reads(vector<ReadSeq> read_in) {
   vector<ReadSeq> reads_out;
   for (int i = 0; i < min((int)read_in.size(), (int)LASSM_MAX_COUNT_MERS_READS); i++) {
@@ -862,7 +862,7 @@ static void extend_ctgs(CtgsWithReadsDHT &ctgs_dht, Contigs &ctgs, int insert_av
 
   ProgressBar progbar(ctgs_dht.get_local_num_ctgs(), "Extending contigs");
 
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_LASSM_GPUS
   locassm_driver::ctg_bucket zero_slice, mid_slice, outlier_slice;
   bucket_ctgs(zero_slice, mid_slice, outlier_slice, ctgs_dht, ctg_buckets_timer);
   ctg_buckets_timer.done_all();
@@ -918,7 +918,7 @@ static void extend_ctgs(CtgsWithReadsDHT &ctgs_dht, Contigs &ctgs, int insert_av
   barrier();
 #endif
 
-#ifndef ENABLE_GPUS
+#ifndef ENABLE_LASSM_GPUS
   for (auto ctg = ctgs_dht.get_first_local_ctg(); ctg != nullptr; ctg = ctgs_dht.get_next_local_ctg()) {
     progbar.update();
     Contig ext_contig;
