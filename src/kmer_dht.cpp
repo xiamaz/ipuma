@@ -255,6 +255,12 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
   else
     kmer_store.set_size("kmers", max_kmer_store_bytes, max_rpcs_in_flight, useHHSS);
 
+  upcxx::barrier(upcxx::local_team());
+  auto new_mem = get_free_mem();
+  SLOG_VERBOSE("Kmer stores used ", get_size_str(init_mem_free - new_mem), " memory on node 0\n");
+  init_mem_free = new_mem;
+  upcxx::barrier(upcxx::local_team());
+
   if (use_bloom) {
 #if defined(ENABLE_GPUS) & defined(KCOUNT_ENABLE_GPUS)
     SDIE("Cannot use bloom with GPU kmer counting");
@@ -280,7 +286,7 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     SLOG_VERBOSE("Reserving at least ", get_size_str(node0_cores * kmers_space_reserved), " for kmer hash tables with ",
                  node0_cores * my_adjusted_num_kmers, " entries on node 0\n");
     if (my_adjusted_num_kmers <= 0) DIE("no kmers to reserve space for");
-    
+
     kmers->reserve(my_adjusted_num_kmers);
     upcxx::barrier(upcxx::local_team());
     SLOG_VERBOSE("Kmer hashtables used ", get_size_str(init_mem_free - get_free_mem()), " memory on node 0\n");
