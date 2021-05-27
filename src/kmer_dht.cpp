@@ -71,101 +71,142 @@ static int64_t _num_kmers_counted = 0;
 static int num_inserts = 0;
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
+void KmerDHT<MAX_K>::get_kmers_and_exts(const Supermer &supermer, vector<KmerAndExt> &kmers_and_exts) {
+  auto kmer_len = Kmer<MAX_K>::get_k();
+  vector<Kmer<MAX_K>> kmers;
+  Kmer<MAX_K>::get_kmers(kmer_len, supermer.seq, kmers);
+  kmers_and_exts.clear();
+  for (int i = 1; i < (int)(supermer.seq.length() - kmer_len); i++) {
+    Kmer<MAX_K> kmer = kmers[i];
+    char left_ext = supermer.seq[i - 1];
+    if (!supermer.quals[i - 1]) left_ext = '0';
+    char right_ext = supermer.seq[i + kmer_len];
+    if (!supermer.quals[i + kmer_len]) right_ext = '0';
+    // get the lexicographically smallest
+    Kmer<MAX_K> kmer_rc = kmer.revcomp();
+    if (kmer_rc < kmer) {
+      kmer = kmer_rc;
+      swap(left_ext, right_ext);
+      left_ext = comp_nucleotide(left_ext);
+      right_ext = comp_nucleotide(right_ext);
+    };
+    kmers_and_exts.push_back({.kmer = kmer, .count = supermer.count, .left = left_ext, .right = right_ext});
+  }
+}
+
+template <int MAX_K>
+void KmerDHT<MAX_K>::update_count(Supermer supermer, dist_object<KmerMap> &kmers,
                                   dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver) {
 #ifdef ENABLE_KCOUNT_GPUS_HT
   num_inserts++;
   ht_gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right);
 #else
-  // find it - if it isn't found then insert it, otherwise increment the counts
-  const auto it = kmers->find(kmer_and_ext.kmer);
-  if (it == kmers->end()) {
-    KmerCounts kmer_counts = {.left_exts = {0},
-                              .right_exts = {0},
-                              .uutig_frag = nullptr,
-                              .count = kmer_and_ext.count,
-                              .left = 'X',
-                              .right = 'X',
-                              .from_ctg = false};
-    kmer_counts.left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
-    kmer_counts.right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
-    auto prev_bucket_count = kmers->bucket_count();
-    kmers->insert({kmer_and_ext.kmer, kmer_counts});
-    // since sizes are an estimate this could happen, but it will impact performance
-    if (prev_bucket_count < kmers->bucket_count())
-      SWARN("Hash table on rank 0 was resized from ", prev_bucket_count, " to ", kmers->bucket_count());
-    DBG_INSERT_KMER("inserted kmer ", kmer_and_ext.kmer.to_string(), " with count ", kmer_counts.count, "\n");
-  } else {
-    auto kmer_count = &it->second;
-    int count = kmer_count->count + kmer_and_ext.count;
-    if (count > numeric_limits<kmer_count_t>::max()) count = numeric_limits<kmer_count_t>::max();
-    kmer_count->count = count;
-    kmer_count->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
-    kmer_count->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
+  for (int i = 0; i < supermer.seq.length(); i++) {
+    if (supermer.seq[i] != 'A' && supermer.seq[i] != 'C' && supermer.seq[i] != 'G' && supermer.seq[i] != 'T')
+      DIE("bad char '", supermer.seq[i], "' in supermer seq int val ", (int)supermer.seq[i], " length ", supermer.seq.length(),
+          " supermer ", supermer.seq);
+  }
+  auto kmer_len = Kmer<MAX_K>::get_k();
+  vector<KmerAndExt> kmers_and_exts;
+  kmers_and_exts.reserve(supermer.seq.length() - kmer_len);
+  KmerDHT<MAX_K>::get_kmers_and_exts(supermer, kmers_and_exts);
+  for (auto &kmer_and_ext : kmers_and_exts) {
+    // find it - if it isn't found then insert it, otherwise increment the counts
+    const auto it = kmers->find(kmer_and_ext.kmer);
+    if (it == kmers->end()) {
+      KmerCounts kmer_counts = {.left_exts = {0},
+                                .right_exts = {0},
+                                .uutig_frag = nullptr,
+                                .count = kmer_and_ext.count,
+                                .left = 'X',
+                                .right = 'X',
+                                .from_ctg = false};
+      kmer_counts.left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
+      kmer_counts.right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
+      auto prev_bucket_count = kmers->bucket_count();
+      kmers->insert({kmer_and_ext.kmer, kmer_counts});
+      // since sizes are an estimate this could happen, but it will impact performance
+      if (prev_bucket_count < kmers->bucket_count())
+        SWARN("Hash table on rank 0 was resized from ", prev_bucket_count, " to ", kmers->bucket_count());
+      DBG_INSERT_KMER("inserted kmer ", kmer_and_ext.kmer.to_string(), " with count ", kmer_counts.count, "\n");
+    } else {
+      auto kmer_count = &it->second;
+      int count = kmer_count->count + kmer_and_ext.count;
+      if (count > numeric_limits<kmer_count_t>::max()) count = numeric_limits<kmer_count_t>::max();
+      kmer_count->count = count;
+      kmer_count->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
+      kmer_count->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
+    }
   }
 #endif
 }
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
+void KmerDHT<MAX_K>::update_ctg_kmers_count(Supermer supermer, dist_object<KmerMap> &kmers,
                                             dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver) {
 #ifdef ENABLE_KCOUNT_GPUS_HT
   num_inserts++;
   // FIXME: buffer hash table entries, and when full, copy across to
   ht_gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right);
 #else
-  // insert a new kmer derived from the previous round's contigs
-  const auto it = kmers->find(kmer_and_ext.kmer);
-  bool insert = false;
-  if (it == kmers->end()) {
-    // if it isn't found then insert it
-    insert = true;
-  } else {
-    auto kmer_counts = &it->second;
-    if (!kmer_counts->from_ctg) {
-      // existing kmer is from a read, only replace with new contig kmer if the existing kmer is not UU
-      char left_ext = kmer_counts->get_left_ext();
-      char right_ext = kmer_counts->get_right_ext();
-      if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F') {
-        // non-UU, replace
-        insert = true;
-        DBG_INS_CTG_KMER("replace non-UU read kmer\n");
-      }
+  auto kmer_len = Kmer<MAX_K>::get_k();
+  vector<KmerAndExt> kmers_and_exts;
+  kmers_and_exts.reserve(supermer.seq.length() - kmer_len);
+  get_kmers_and_exts(supermer, kmers_and_exts);
+  for (auto &kmer_and_ext : kmers_and_exts) {
+    // insert a new kmer derived from the previous round's contigs
+    const auto it = kmers->find(kmer_and_ext.kmer);
+    bool insert = false;
+    if (it == kmers->end()) {
+      // if it isn't found then insert it
+      insert = true;
     } else {
-      // existing kmer from previous round's contigs
-      // update kmer counts
-      if (!kmer_counts->count) {
-        // previously must have been a conflict and set to zero, so don't do anything
-        DBG_INS_CTG_KMER("skip conflicted kmer, depth 0\n");
-      } else {
-        // will always insert, although it may get purged later for a conflict
-        insert = true;
+      auto kmer_counts = &it->second;
+      if (!kmer_counts->from_ctg) {
+        // existing kmer is from a read, only replace with new contig kmer if the existing kmer is not UU
         char left_ext = kmer_counts->get_left_ext();
         char right_ext = kmer_counts->get_right_ext();
-        if (left_ext != kmer_and_ext.left || right_ext != kmer_and_ext.right) {
-          // if the two contig kmers disagree on extensions, set up to purge by setting the count to 0
-          kmer_and_ext.count = 0;
-          DBG_INS_CTG_KMER("set to purge conflict: prev ", left_ext, ", ", right_ext, " new ", kmer_and_ext.left, ", ",
-                           kmer_and_ext.right, "\n");
+        if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F') {
+          // non-UU, replace
+          insert = true;
+          DBG_INS_CTG_KMER("replace non-UU read kmer\n");
+        }
+      } else {
+        // existing kmer from previous round's contigs
+        // update kmer counts
+        if (!kmer_counts->count) {
+          // previously must have been a conflict and set to zero, so don't do anything
+          DBG_INS_CTG_KMER("skip conflicted kmer, depth 0\n");
         } else {
-          // multiple occurrences of the same kmer derived from different contigs or parts of contigs
-          // The only way this kmer could have been already found in the contigs only is if it came from a localassm
-          // extension. In which case, all such kmers should not be counted again for each contig, because each
-          // contig can use the same reads independently, and the depth will be oversampled.
-          kmer_and_ext.count = min(kmer_and_ext.count, kmer_counts->count);
-          // kmer_and_ext.count += kmer_counts->count;
-          DBG_INS_CTG_KMER("increase count of existing ctg kmer from ", kmer_counts->count, " to ", kmer_and_ext.count, "\n");
+          // will always insert, although it may get purged later for a conflict
+          insert = true;
+          char left_ext = kmer_counts->get_left_ext();
+          char right_ext = kmer_counts->get_right_ext();
+          if (left_ext != kmer_and_ext.left || right_ext != kmer_and_ext.right) {
+            // if the two contig kmers disagree on extensions, set up to purge by setting the count to 0
+            kmer_and_ext.count = 0;
+            DBG_INS_CTG_KMER("set to purge conflict: prev ", left_ext, ", ", right_ext, " new ", kmer_and_ext.left, ", ",
+                             kmer_and_ext.right, "\n");
+          } else {
+            // multiple occurrences of the same kmer derived from different contigs or parts of contigs
+            // The only way this kmer could have been already found in the contigs only is if it came from a localassm
+            // extension. In which case, all such kmers should not be counted again for each contig, because each
+            // contig can use the same reads independently, and the depth will be oversampled.
+            kmer_and_ext.count = min(kmer_and_ext.count, kmer_counts->count);
+            // kmer_and_ext.count += kmer_counts->count;
+            DBG_INS_CTG_KMER("increase count of existing ctg kmer from ", kmer_counts->count, " to ", kmer_and_ext.count, "\n");
+          }
         }
       }
     }
-  }
-  if (insert) {
-    kmer_count_t count = kmer_and_ext.count;
-    KmerCounts kmer_counts = {
-        .left_exts = {0}, .right_exts = {0}, .uutig_frag = nullptr, .count = count, .left = 'X', .right = 'X', .from_ctg = true};
-    kmer_counts.left_exts.inc(kmer_and_ext.left, count);
-    kmer_counts.right_exts.inc(kmer_and_ext.right, count);
-    (*kmers)[kmer_and_ext.kmer] = kmer_counts;
+    if (insert) {
+      kmer_count_t count = kmer_and_ext.count;
+      KmerCounts kmer_counts = {
+          .left_exts = {0}, .right_exts = {0}, .uutig_frag = nullptr, .count = count, .left = 'X', .right = 'X', .from_ctg = true};
+      kmer_counts.left_exts.inc(kmer_and_ext.left, count);
+      kmer_counts.right_exts.inc(kmer_and_ext.right, count);
+      (*kmers)[kmer_and_ext.kmer] = kmer_counts;
+    }
   }
 #endif
 }
@@ -377,23 +418,36 @@ bool KmerDHT<MAX_K>::kmer_exists(Kmer<MAX_K> kmer) {
 #endif
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::add_kmer(Kmer<MAX_K> kmer, char left_ext, char right_ext, kmer_count_t count, int target_rank) {
+void KmerDHT<MAX_K>::add_kmers(const string &seq, const string &quals, kmer_count_t count) {
   _num_kmers_counted++;
   if (!count) count = 1;
-  if (target_rank == -1) {
-    // get the lexicographically smallest
-    Kmer<MAX_K> kmer_rc = kmer.revcomp();
-    if (kmer_rc < kmer) {
-      kmer.swap(kmer_rc);
-      swap(left_ext, right_ext);
-      left_ext = comp_nucleotide(left_ext);
-      right_ext = comp_nucleotide(right_ext);
-    }
-    target_rank = get_kmer_target_rank(kmer, &kmer_rc);
+  auto kmer_len = Kmer<MAX_K>::get_k();
+  vector<Kmer<MAX_K>> kmers;
+  Kmer<MAX_K>::get_kmers(kmer_len, seq, kmers);
+  for (int i = 0; i < kmers.size(); i++) {
+    bytes_kmers_sent += sizeof(KmerAndExt);
+    Kmer<MAX_K> kmer_rc = kmers[i].revcomp();
+    if (kmer_rc < kmers[i]) kmers[i] = kmer_rc;
   }
-  KmerAndExt kmer_and_ext = {.kmer = kmer, .count = count, .left = left_ext, .right = right_ext};
-  kmer_store.update(target_rank, kmer_and_ext);
-  bytes_sent += sizeof(kmer_and_ext);
+  Supermer supermer{.seq = seq.substr(0, kmer_len + 1), .quals = quals.substr(0, kmer_len + 1), .count = count};
+  auto prev_target_rank = get_kmer_target_rank(kmers[1]);
+  for (int i = 1; i < (int)(seq.length() - kmer_len); i++) {
+    auto target_rank = get_kmer_target_rank(kmers[i]);
+    if (target_rank == prev_target_rank) {
+      supermer.seq += seq[i + kmer_len];
+      supermer.quals += quals[i + kmer_len];
+    } else {
+      bytes_supermers_sent += supermer.get_bytes_compressed();
+      kmer_store.update(prev_target_rank, supermer);
+      supermer.seq = seq.substr(i - 1, kmer_len + 2);
+      supermer.quals = quals.substr(i - 1, kmer_len + 2);
+      prev_target_rank = target_rank;
+    }
+  }
+  if (supermer.seq.length() >= kmer_len + 2) {
+    bytes_supermers_sent += supermer.get_bytes_compressed();
+    kmer_store.update(prev_target_rank, supermer);
+  }
 }
 
 template <int MAX_K>
@@ -445,6 +499,11 @@ void KmerDHT<MAX_K>::flush_updates() {
   auto max_kmers_processed = reduce_one(_num_kmers_counted, op_fast_max, 0).wait();
   SLOG_VERBOSE("Avg kmers processed per rank ", avg_kmers_processed, " (balance ",
                (double)avg_kmers_processed / max_kmers_processed, ")\n");
+  auto tot_supermers_bytes_sent = reduce_one(bytes_supermers_sent, op_fast_add, 0).wait();
+  auto tot_kmers_bytes_sent = reduce_one(bytes_kmers_sent, op_fast_add, 0).wait();
+  SLOG(KLGREEN "Total bytes sent in compressed supermers ", get_size_str(tot_supermers_bytes_sent),
+       " and what would have been sent in kmers ", get_size_str(tot_kmers_bytes_sent),
+       " compression is ", fixed, setprecision(3), (double)tot_kmers_bytes_sent / tot_supermers_bytes_sent, KNORM "\n");
 }
 
 template <int MAX_K>

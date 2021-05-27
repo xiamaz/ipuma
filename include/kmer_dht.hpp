@@ -178,13 +178,151 @@ class KmerDHT {
     UPCXX_SERIALIZED_FIELDS(kmer, count, left, right);
   };
 
+  struct Supermer {
+    string seq;
+    string quals;
+    kmer_count_t count;
+
+    UPCXX_SERIALIZED_FIELDS(seq, quals, count);
+
+    int get_bytes_compressed() { return ceil((double)seq.length() * 0.375) + sizeof(int) + sizeof(kmer_count_t); }
+
+    /*
+    static pair<uint8_t *, size_t> pack_dna_seq(const string &seq) {
+      size_t bits = 4;
+      size_t packed_len = (seq.length() + bits - 1) / bits;
+      uint8_t *packed_seq = new uint8_t[packed_len];
+      memset(packed_seq, 0, packed_len);
+      for (int i = 0; i < seq.length(); ++i) {
+        int j = i % bits;
+        int l = i / bits;
+        assert(seq[i] != '\0');
+        uint8_t x;
+        x = ((seq[i]) & 4) >> 1;
+        packed_seq[l] |= ((x + ((x ^ (seq[i] & 2)) >> 1)) << (2 * (bits - 1 - j)));
+      }
+      return {packed_seq, packed_len};
+    }
+
+    static string unpack_dna_seq(uint8_t *packed_seq, size_t seq_len) {
+      size_t bits = 4;
+      string seq;
+      seq.resize(seq_len);
+      for (int i = 0; i < seq_len; i++) {
+        int j = i % bits;
+        int l = i / bits;
+        switch (((packed_seq[l]) >> (2 * (bits - 1 - j))) & 0x03) {
+          case 0x00: seq[i] = 'A'; break;
+          case 0x01: seq[i] = 'C'; break;
+          case 0x02: seq[i] = 'G'; break;
+          case 0x03: seq[i] = 'T'; break;
+        }
+      }
+      return seq;
+    }
+
+    static size_t get_packed_dna_seq_size(size_t len) { return (len + 3) / 4; }
+
+    static pair<uint8_t *, size_t> pack_bool_seq(const string &seq) {
+      uint8_t bits[8] = {0};
+      int n_whole = (seq.length() / 8) * 8;
+      size_t packed_len = (seq.length() + 7) / 8;
+      uint8_t *packed_seq = new uint8_t[packed_len];
+      for (int i = 0; i < n_whole; i += 8) {
+        bits[0] = seq[i + 7];
+        bits[1] = seq[i + 6] << 1;
+        bits[2] = seq[i + 5] << 2;
+        bits[3] = seq[i + 4] << 3;
+        bits[4] = seq[i + 3] << 4;
+        bits[5] = seq[i + 2] << 5;
+        bits[6] = seq[i + 1] << 6;
+        bits[7] = seq[i + 0] << 7;
+        packed_seq[i / 8] = bits[0] | bits[1] | bits[2] | bits[3] | bits[4] | bits[5] | bits[6] | bits[7];
+      }
+      if (seq.length() > n_whole) {
+        int last_byte = n_whole / 8;
+        memset(packed_seq + last_byte, 0, 8);
+        for (int i = n_whole; i < seq.length(); ++i) {
+          packed_seq[last_byte] |= (seq[i] ? 1 << (7 - (i - n_whole)) : 0);
+        }
+      }
+      return {packed_seq, packed_len};
+    }
+
+    static string unpack_bool_seq(uint8_t *packed_seq, size_t seq_len) {
+      string seq;
+      seq.resize(seq_len);
+      int n_whole = (seq.length() / 8) * 8;
+      size_t packed_len = (seq.length() + 7) / 8;
+      for (int i = 0; i < n_whole; i += 8) {
+        uint8_t bits = packed_seq[i / 8];
+        seq[i + 7] = (bits)&0x01;
+        seq[i + 6] = (bits >> 1) & 0x01;
+        seq[i + 5] = (bits >> 2) & 0x01;
+        seq[i + 4] = (bits >> 3) & 0x01;
+        seq[i + 3] = (bits >> 4) & 0x01;
+        seq[i + 2] = (bits >> 5) & 0x01;
+        seq[i + 1] = (bits >> 6) & 0x01;
+        seq[i + 0] = (bits >> 7) & 0x01;
+      }
+      if (seq.length() > n_whole) {
+        int last_byte = n_whole / 8;
+        uint8_t bits = packed_seq[last_byte];
+        for (int i = n_whole; i < seq.length(); ++i) {
+          seq[i] = (bits >> (7 - (i - n_whole))) & 0x01;
+        }
+      }
+      return seq;
+    }
+
+    static size_t get_packed_bool_seq_size(size_t len) { return (len + 7) / 8; }
+
+    struct upcxx_serialization {
+      template <typename Writer>
+      static void serialize(Writer &writer, Supermer const &supermer) {
+        uint16_t seq_len = supermer.seq.length();
+        writer.write(seq_len);
+        auto [packed_seq, packed_len] = pack_dna_seq(supermer.seq);
+        for (int i = 0; i < packed_len; i++) writer.write(packed_seq[i]);
+        delete[] packed_seq;
+        auto [packed_quals, packed_quals_len] = pack_bool_seq(supermer.quals);
+        for (int i = 0; i < packed_quals_len; i++) writer.write(packed_quals[i]);
+        delete[] packed_quals;
+        writer.write(supermer.count);
+      }
+
+      template <typename Reader>
+      static Supermer *deserialize(Reader &reader, void *storage) {
+        Supermer *supermer = new (storage) Supermer();
+        uint16_t seq_len = reader.template read<uint16_t>();
+        size_t packed_len = get_packed_dna_seq_size(seq_len);
+        uint8_t *packed_seq = new uint8_t[packed_len];
+        for (int i = 0; i < packed_len; i++) packed_seq[i] = reader.template read<uint8_t>();
+        supermer->seq = unpack_dna_seq(packed_seq, seq_len);
+        delete[] packed_seq;
+        size_t packed_quals_len = get_packed_bool_seq_size(seq_len);
+        uint8_t *packed_quals = new uint8_t[packed_quals_len];
+        for (int i = 0; i < packed_quals_len; i++) packed_quals[i] = reader.template read<uint8_t>();
+        supermer->quals = unpack_bool_seq(packed_quals, seq_len);
+        delete[] packed_quals;
+        supermer->count = reader.template read<uint16_t>();
+        return supermer;
+      }
+    };
+
+    size_t get_packed_size() const {
+      return 2 + get_packed_dna_seq_size(seq.length()) + get_packed_bool_seq_size(seq.length()) + 2;
+    }
+    */
+  };
+
   using KmerMap = HASH_TABLE<Kmer<MAX_K>, KmerCounts>;
 
  private:
   upcxx::dist_object<KmerMap> kmers;
   dist_object<HashTableGPUDriver<MAX_K>> ht_gpu_driver;
 
-  upcxx_utils::ThreeTierAggrStore<KmerAndExt, dist_object<KmerMap> &, dist_object<HashTableGPUDriver<MAX_K>> &> kmer_store;
+  upcxx_utils::ThreeTierAggrStore<Supermer, dist_object<KmerMap> &, dist_object<HashTableGPUDriver<MAX_K>> &> kmer_store;
   int64_t max_kmer_store_bytes;
   int64_t initial_kmer_dht_reservation;
   int64_t my_num_kmers;
@@ -193,18 +331,22 @@ class KmerDHT {
   std::chrono::time_point<std::chrono::high_resolution_clock> start_t;
   PASS_TYPE pass_type;
   int64_t bytes_sent = 0;
+  int64_t bytes_supermers_sent = 0;
+  int64_t bytes_kmers_sent = 0;
+
   int minimizer_len = 15;
   bool using_ctg_kmers = false;
 
-  static void update_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
-                           dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver);
+  static void update_count(Supermer supermer, dist_object<KmerMap> &kmers, dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver);
 
-  static void update_ctg_kmers_count(KmerAndExt kmer_and_ext, dist_object<KmerMap> &kmers,
+  static void update_ctg_kmers_count(Supermer supermer, dist_object<KmerMap> &kmers,
                                      dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver);
 
   void purge_kmers(int threshold);
 
   void insert_from_gpu_hashtable();
+
+  static void get_kmers_and_exts(const Supermer &supermer, vector<KmerAndExt> &kmers_and_exts);
 
  public:
   KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS);
@@ -241,7 +383,7 @@ class KmerDHT {
   bool kmer_exists(Kmer<MAX_K> kmer);
 #endif
 
-  void add_kmer(Kmer<MAX_K> kmer, char left_ext, char right_ext, kmer_count_t count, int target_rank = -1);
+  void add_kmers(const string &seq, const string &quals, kmer_count_t count);
 
   void flush_updates();
 

@@ -102,9 +102,11 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
     if (cpu_target != pnp_gpu_driver->host_kmer_targets[i])
       DIE("cpu target is ", cpu_target, " but gpu target is ", pnp_gpu_driver->host_kmer_targets[i]);
 #endif
-    kmer_dht->add_kmer(kmer, left_base, right_base, depth, pnp_gpu_driver->host_kmer_targets[i]);
-    DBG_ADD_KMER("kcount add_kmer ", kmer.to_string(), " count ", 1, "\n");
-    num_kmers++;
+    if (left_base != '0' && right_base != '0') {
+      kmer_dht->add_kmer(kmer, left_base, right_base, depth, pnp_gpu_driver->host_kmer_targets[i]);
+      DBG_ADD_KMER("kcount add_kmer ", kmer.to_string(), " count ", 1, "\n");
+      num_kmers++;
+    }
   }
 }
 
@@ -113,45 +115,14 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
 template <int MAX_K>
 static void process_seq(unsigned kmer_len, int qual_offset, const string &seq, const string &quals, int depth,
                         dist_object<KmerDHT<MAX_K>> &kmer_dht, int64_t &num_Ns, int64_t &num_kmers, vector<Kmer<MAX_K>> &kmers) {
-  int qual_cutoff = KCOUNT_QUAL_CUTOFF;
-  bool from_ctgs = quals.empty();
-  // split into kmers
-  Kmer<MAX_K>::get_kmers(kmer_len, seq, kmers);
-  // skip kmers that contain an N
-  size_t found_N_pos = seq.length();
-  if (!from_ctgs) {
-    found_N_pos = seq.find_first_of('N');
-    if (found_N_pos == string::npos)
-      found_N_pos = seq.length();
-    else
-      num_Ns++;
-  }
-  for (int i = 0; i < (int)kmers.size(); i++) {
-    // skip kmers that contain an N
-    if (i + kmer_len > found_N_pos) {
-      i = found_N_pos;  // skip
-      // find the next N
-      found_N_pos = seq.find_first_of('N', found_N_pos + 1);
-      if (found_N_pos == string::npos)
-        found_N_pos = seq.length();
-      else
-        num_Ns++;
-      continue;
+  string quals_flag(seq.length(), 1);
+  if (!quals.empty()) {
+    for (int i = 0; i < seq.length(); i++) {
+      if (quals[i] < qual_offset + KCOUNT_QUAL_CUTOFF) quals_flag[i] = 0;
     }
-    char left_base = '0', right_base = '0';
-    if (from_ctgs) {
-      if (i > 0) left_base = seq[i - 1];
-      if (i + kmer_len < seq.length()) right_base = seq[i + kmer_len];
-      if (left_base == '0' || right_base == '0') continue;
-    } else {
-      int qthres = qual_offset + qual_cutoff;
-      if (i > 0 && quals[i - 1] >= qthres) left_base = seq[i - 1];
-      if (i + kmer_len < quals.length() && quals[i + kmer_len] >= qthres) right_base = seq[i + kmer_len];
-    }
-    kmer_dht->add_kmer(kmers[i], left_base, right_base, depth);
-    DBG_ADD_KMER("kcount add_kmer ", kmers[i].to_string(), " count ", depth, "\n");
-    num_kmers++;
   }
+  kmer_dht->add_kmers(seq, quals_flag, depth);
+  num_kmers += seq.length() - 2 - kmer_len;
 }
 
 #endif
