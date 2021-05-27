@@ -71,7 +71,7 @@ static int64_t _num_kmers_counted = 0;
 static int num_inserts = 0;
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::get_kmers_and_exts(const Supermer &supermer, vector<KmerAndExt> &kmers_and_exts) {
+void KmerDHT<MAX_K>::get_kmers_and_exts(const Supermer &supermer, vector<KmerAndExt<MAX_K>> &kmers_and_exts) {
   auto kmer_len = Kmer<MAX_K>::get_k();
   vector<Kmer<MAX_K>> kmers;
   Kmer<MAX_K>::get_kmers(kmer_len, supermer.seq, kmers);
@@ -107,7 +107,7 @@ void KmerDHT<MAX_K>::update_count(Supermer supermer, dist_object<KmerMap> &kmers
           " supermer ", supermer.seq);
   }
   auto kmer_len = Kmer<MAX_K>::get_k();
-  vector<KmerAndExt> kmers_and_exts;
+  vector<KmerAndExt<MAX_K>> kmers_and_exts;
   kmers_and_exts.reserve(supermer.seq.length() - kmer_len);
   KmerDHT<MAX_K>::get_kmers_and_exts(supermer, kmers_and_exts);
   for (auto &kmer_and_ext : kmers_and_exts) {
@@ -150,7 +150,7 @@ void KmerDHT<MAX_K>::update_ctg_kmers_count(Supermer supermer, dist_object<KmerM
   ht_gpu_driver->insert_kmer(kmer_and_ext.kmer.get_longs(), kmer_and_ext.count, kmer_and_ext.left, kmer_and_ext.right);
 #else
   auto kmer_len = Kmer<MAX_K>::get_k();
-  vector<KmerAndExt> kmers_and_exts;
+  vector<KmerAndExt<MAX_K>> kmers_and_exts;
   kmers_and_exts.reserve(supermer.seq.length() - kmer_len);
   get_kmers_and_exts(supermer, kmers_and_exts);
   for (auto &kmer_and_ext : kmers_and_exts) {
@@ -418,36 +418,8 @@ bool KmerDHT<MAX_K>::kmer_exists(Kmer<MAX_K> kmer) {
 #endif
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::add_kmers(const string &seq, const string &quals, kmer_count_t count) {
-  _num_kmers_counted++;
-  if (!count) count = 1;
-  auto kmer_len = Kmer<MAX_K>::get_k();
-  vector<Kmer<MAX_K>> kmers;
-  Kmer<MAX_K>::get_kmers(kmer_len, seq, kmers);
-  for (int i = 0; i < kmers.size(); i++) {
-    bytes_kmers_sent += sizeof(KmerAndExt);
-    Kmer<MAX_K> kmer_rc = kmers[i].revcomp();
-    if (kmer_rc < kmers[i]) kmers[i] = kmer_rc;
-  }
-  Supermer supermer{.seq = seq.substr(0, kmer_len + 1), .quals = quals.substr(0, kmer_len + 1), .count = count};
-  auto prev_target_rank = get_kmer_target_rank(kmers[1]);
-  for (int i = 1; i < (int)(seq.length() - kmer_len); i++) {
-    auto target_rank = get_kmer_target_rank(kmers[i]);
-    if (target_rank == prev_target_rank) {
-      supermer.seq += seq[i + kmer_len];
-      supermer.quals += quals[i + kmer_len];
-    } else {
-      bytes_supermers_sent += supermer.get_bytes_compressed();
-      kmer_store.update(prev_target_rank, supermer);
-      supermer.seq = seq.substr(i - 1, kmer_len + 2);
-      supermer.quals = quals.substr(i - 1, kmer_len + 2);
-      prev_target_rank = target_rank;
-    }
-  }
-  if (supermer.seq.length() >= kmer_len + 2) {
-    bytes_supermers_sent += supermer.get_bytes_compressed();
-    kmer_store.update(prev_target_rank, supermer);
-  }
+void KmerDHT<MAX_K>::add_supermer(Supermer &supermer, int target_rank) {
+  kmer_store.update(target_rank, supermer);
 }
 
 template <int MAX_K>
@@ -499,11 +471,6 @@ void KmerDHT<MAX_K>::flush_updates() {
   auto max_kmers_processed = reduce_one(_num_kmers_counted, op_fast_max, 0).wait();
   SLOG_VERBOSE("Avg kmers processed per rank ", avg_kmers_processed, " (balance ",
                (double)avg_kmers_processed / max_kmers_processed, ")\n");
-  auto tot_supermers_bytes_sent = reduce_one(bytes_supermers_sent, op_fast_add, 0).wait();
-  auto tot_kmers_bytes_sent = reduce_one(bytes_kmers_sent, op_fast_add, 0).wait();
-  SLOG(KLGREEN "Total bytes sent in compressed supermers ", get_size_str(tot_supermers_bytes_sent),
-       " and what would have been sent in kmers ", get_size_str(tot_kmers_bytes_sent),
-       " compression is ", fixed, setprecision(3), (double)tot_kmers_bytes_sent / tot_supermers_bytes_sent, KNORM "\n");
 }
 
 template <int MAX_K>

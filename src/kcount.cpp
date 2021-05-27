@@ -74,6 +74,8 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
     num_gpu_waits++;
     progress();
   }
+  // FIXME: for the first pass, just get the kmers from the GPU as above, and then below process those kmers into supermers
+  // and call ->add_supermer()
   int num_kmer_longs = Kmer<MAX_K>::get_N_LONGS();
   for (int i = 0; i < (int)pnp_gpu_driver->host_kmer_targets.size(); i++) {
     // invalid kmer
@@ -114,14 +116,40 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
 
 template <int MAX_K>
 static void process_seq(unsigned kmer_len, int qual_offset, const string &seq, const string &quals, int depth,
-                        dist_object<KmerDHT<MAX_K>> &kmer_dht, int64_t &num_Ns, int64_t &num_kmers, vector<Kmer<MAX_K>> &kmers) {
+                        dist_object<KmerDHT<MAX_K>> &kmer_dht, int64_t &num_Ns, int64_t &num_kmers, vector<Kmer<MAX_K>> &kmers,
+                        int64_t &bytes_kmers_sent, int64_t &bytes_supermers_sent) {
   string quals_flag(seq.length(), 1);
   if (!quals.empty()) {
     for (int i = 0; i < seq.length(); i++) {
       if (quals[i] < qual_offset + KCOUNT_QUAL_CUTOFF) quals_flag[i] = 0;
     }
   }
-  kmer_dht->add_kmers(seq, quals_flag, depth);
+  if (!depth) depth = 1;
+  Kmer<MAX_K>::get_kmers(kmer_len, seq, kmers);
+  for (int i = 0; i < kmers.size(); i++) {
+    bytes_kmers_sent += sizeof(KmerAndExt<MAX_K>);
+    Kmer<MAX_K> kmer_rc = kmers[i].revcomp();
+    if (kmer_rc < kmers[i]) kmers[i] = kmer_rc;
+  }
+  Supermer supermer{.seq = seq.substr(0, kmer_len + 1), .quals = quals_flag.substr(0, kmer_len + 1), .count = (kmer_count_t)depth};
+  auto prev_target_rank = kmer_dht->get_kmer_target_rank(kmers[1]);
+  for (int i = 1; i < (int)(seq.length() - kmer_len); i++) {
+    auto target_rank = kmer_dht->get_kmer_target_rank(kmers[i]);
+    if (target_rank == prev_target_rank) {
+      supermer.seq += seq[i + kmer_len];
+      supermer.quals += quals_flag[i + kmer_len];
+    } else {
+      bytes_supermers_sent += supermer.get_bytes_compressed();
+      kmer_dht->add_supermer(supermer, prev_target_rank);
+      supermer.seq = seq.substr(i - 1, kmer_len + 2);
+      supermer.quals = quals_flag.substr(i - 1, kmer_len + 2);
+      prev_target_rank = target_rank;
+    }
+  }
+  if (supermer.seq.length() >= kmer_len + 2) {
+    bytes_supermers_sent += supermer.get_bytes_compressed();
+    kmer_dht->add_supermer(supermer, prev_target_rank);
+  }
   num_kmers += seq.length() - 2 - kmer_len;
 }
 
@@ -143,6 +171,9 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   int64_t num_kmers = 0;
   int64_t num_bad_quals = 0;
   int64_t num_Ns = 0;
+  int64_t bytes_supermers_sent = 0;
+  int64_t bytes_kmers_sent = 0;
+
   string progbar_prefix = "";
   IntermittentTimer t_pp(__FILENAME__ + string(":kmer parse and pack"));
   kmer_dht->set_pass(READ_KMERS_PASS);
@@ -191,7 +222,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       quals_block += quals;
       quals_block += '\0';
 #else
-      process_seq(kmer_len, qual_offset, seq, quals, 1, kmer_dht, num_Ns, num_kmers, kmers);
+      process_seq(kmer_len, qual_offset, seq, quals, 1, kmer_dht, num_Ns, num_kmers, kmers, bytes_kmers_sent, bytes_supermers_sent);
 #endif
       progress();
     }
@@ -221,6 +252,11 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   auto all_num_Ns = reduce_one(num_Ns, op_fast_add, 0).wait();
   if (all_num_bad_quals) SLOG_VERBOSE("Found ", perc_str(all_num_bad_quals, all_num_kmers), " bad quality positions\n");
   if (all_num_Ns) SLOG_VERBOSE("Found ", perc_str(all_num_Ns, all_num_kmers), " kmers with Ns\n");
+  auto tot_supermers_bytes_sent = reduce_one(bytes_supermers_sent, op_fast_add, 0).wait();
+  auto tot_kmers_bytes_sent = reduce_one(bytes_kmers_sent, op_fast_add, 0).wait();
+  SLOG(KLGREEN "Total bytes sent in compressed supermers ", get_size_str(tot_supermers_bytes_sent),
+       " and what would have been sent in kmers ", get_size_str(tot_kmers_bytes_sent), " compression is ", fixed, setprecision(3),
+       (double)tot_kmers_bytes_sent / tot_supermers_bytes_sent, KNORM "\n");
 #if !defined(ENABLE_KCOUNT_GPUS)
   auto all_distinct_kmers = kmer_dht->get_num_kmers();
   SLOG_VERBOSE("Processed a total of ", all_num_reads, " reads\n");
@@ -241,6 +277,9 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   int64_t num_kmers = 0;
   int64_t num_prev_kmers = kmer_dht->get_num_kmers();
   int64_t num_Ns = 0;
+  int64_t bytes_supermers_sent = 0;
+  int64_t bytes_kmers_sent = 0;
+
   ProgressBar progbar(ctgs.size(), "Adding extra contig kmers from kmer length " + to_string(prev_kmer_len));
   kmer_dht->set_pass(CTG_KMERS_PASS);
   auto start_local_num_kmers = kmer_dht->get_local_num_kmers();
@@ -290,7 +329,8 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     seq_block += "_";
     depth_block.insert(depth_block.end(), ctg->seq.length() + 1, ctg->get_uint16_t_depth());
 #else
-    process_seq(kmer_len, 0, ctg->seq, {}, ctg->get_uint16_t_depth(), kmer_dht, num_Ns, num_kmers, kmers);
+    process_seq(kmer_len, 0, ctg->seq, {}, ctg->get_uint16_t_depth(), kmer_dht, num_Ns, num_kmers, kmers, bytes_kmers_sent,
+                bytes_supermers_sent);
     progress();
 #endif
   }
@@ -313,6 +353,11 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   auto all_num_ctgs = reduce_one(ctgs.size(), op_fast_add, 0).wait();
   auto all_num_kmers = reduce_one(num_kmers, op_fast_add, 0).wait();
   SLOG_VERBOSE("Processed a total of ", all_num_ctgs, " contigs and ", all_num_kmers, " kmers\n");
+  auto tot_supermers_bytes_sent = reduce_one(bytes_supermers_sent, op_fast_add, 0).wait();
+  auto tot_kmers_bytes_sent = reduce_one(bytes_kmers_sent, op_fast_add, 0).wait();
+  SLOG(KLGREEN "Total bytes sent in compressed supermers ", get_size_str(tot_supermers_bytes_sent),
+       " and what would have been sent in kmers ", get_size_str(tot_kmers_bytes_sent), " compression is ", fixed, setprecision(3),
+       (double)tot_kmers_bytes_sent / tot_supermers_bytes_sent, KNORM "\n");
 #if !defined(ENABLE_KCOUNT_GPUS)
   SLOG_VERBOSE("Found ", perc_str(kmer_dht->get_num_kmers() - num_prev_kmers, all_num_kmers), " additional unique kmers\n");
   auto local_kmers = kmer_dht->get_local_num_kmers() - start_local_num_kmers;
