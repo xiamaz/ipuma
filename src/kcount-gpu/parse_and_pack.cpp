@@ -156,22 +156,19 @@ __device__ uint64_t gpu_minimizer_hash_fast(int m, int kmer_len, int num_longs, 
 
 __global__ void parse_and_pack(char *seqs, int minimizer_len, int kmer_len, int num_longs, int seqs_len, int *kmer_targets,
                                int num_ranks) {
-  unsigned int tid = threadIdx.x;
-  unsigned int lane_id = tid & (blockDim.x - 1);
-  int per_block_seq_len = blockDim.x;
-  int st_char_block = blockIdx.x * per_block_seq_len;
   int num_kmers = seqs_len - kmer_len + 1;
   const int MAX_LONGS = (MAX_BUILD_KMER + 31) / 32;
   uint64_t rc_longs[MAX_LONGS];
   uint64_t kmer[MAX_LONGS];
-  for (int i = st_char_block + lane_id; i < (st_char_block + per_block_seq_len) && i < num_kmers; i += blockDim.x) {
+  unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (threadid < num_kmers) {
     int l = 0, prev_l = 0;
     bool valid_kmer = true;
     uint64_t longs = 0;
     memset(kmer, 0, sizeof(uint64_t) * MAX_LONGS);
     // each thread extracts one kmer
     for (int k = 0; k < kmer_len; k++) {
-      char s = seqs[i + k];
+      char s = seqs[threadid + k];
       if (s == '_' || s == 'N') {
         valid_kmer = false;
         break;
@@ -191,10 +188,10 @@ __global__ void parse_and_pack(char *seqs, int minimizer_len, int kmer_len, int 
     kmer[l] = longs;
     if (valid_kmer) {
       revcomp(kmer, rc_longs, kmer_len, num_longs);
-      kmer_targets[i] = gpu_minimizer_hash_fast(minimizer_len, kmer_len, num_longs, kmer, rc_longs) % num_ranks;
+      kmer_targets[threadid] = gpu_minimizer_hash_fast(minimizer_len, kmer_len, num_longs, kmer, rc_longs) % num_ranks;
     } else {
       // indicate invalid with -1
-      kmer_targets[i] = -1;
+      kmer_targets[threadid] = -1;
     }
   }
 }
@@ -267,11 +264,12 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, in
   cudaErrchk(cudaMemcpy(dev_seqs, &seqs[0], seqs.length(), cudaMemcpyHostToDevice));
   cp_timer.stop();
 
-  int block_size = 128;
-  int num_blocks = (seqs.length() + (block_size - 1)) / block_size;
-
-  parse_and_pack<<<num_blocks, block_size>>>(dev_seqs, minimizer_len, kmer_len, num_kmer_longs, seqs.length(), dev_kmer_targets,
-                                             upcxx_rank_n);
+  int mingridsize = 0;
+  int threadblocksize = 0;
+  cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, parse_and_pack, 0, 0));
+  int gridsize = ((uint32_t)seqs.length() + threadblocksize - 1) / threadblocksize;
+  parse_and_pack<<<gridsize, threadblocksize>>>(dev_seqs, minimizer_len, kmer_len, num_kmer_longs, seqs.length(), dev_kmer_targets,
+                                                upcxx_rank_n);
   host_kmer_targets.resize(num_kmers);
   /*
   host_supermer_targets.resize(num_supermers);
