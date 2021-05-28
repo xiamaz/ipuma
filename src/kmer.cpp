@@ -140,6 +140,7 @@ void Kmer<MAX_K>::get_kmers(unsigned kmer_len, string seq, vector<Kmer> &kmers) 
   // only need rank 0 to check
   assert(Kmer::k > 0);
   assert(kmer_len == Kmer::k);
+  // Note this converts Ns to Gs
   kmers.clear();
   if (seq.size() < Kmer::k) return;
   for (auto &c : seq) c = toupper(c);

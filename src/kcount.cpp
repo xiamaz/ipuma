@@ -44,7 +44,7 @@
 #include "utils.hpp"
 #include "kcount.hpp"
 
-#ifdef ENABLE_KCOUNT_GPUS
+#ifdef ENABLE_KCOUNT_GPUS_PNP
 #include "gpu-utils/gpu_utils.hpp"
 #include "kcount-gpu/parse_and_pack.hpp"
 
@@ -59,12 +59,15 @@ using namespace std;
 using namespace upcxx_utils;
 using namespace upcxx;
 
-#ifdef ENABLE_KCOUNT_GPUS
+#ifdef ENABLE_KCOUNT_GPUS_PNP
+
+static bool is_valid_base(char base) { return (base != '_' && base != 'N'); }
 
 template <int MAX_K>
 static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &seq_block, const string &quals_block,
                               const vector<kmer_count_t> &depth_block, dist_object<KmerDHT<MAX_K>> &kmer_dht, int64_t &num_Ns,
-                              int64_t &num_kmers, int64_t &num_gpu_waits) {
+                              int64_t &num_kmers, int64_t &num_gpu_waits, int64_t &bytes_kmers_sent,
+                              int64_t &bytes_supermers_sent) {
   bool from_ctgs = quals_block.empty();
   int qual_cutoff = KCOUNT_QUAL_CUTOFF;
   SLOG_VERBOSE("process_gpu_block with sequence length ", seq_block.length(), "\n");
@@ -74,41 +77,51 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
     num_gpu_waits++;
     progress();
   }
-  // FIXME: for the first pass, just get the kmers from the GPU as above, and then below process those kmers into supermers
-  // and call ->add_supermer()
-  int num_kmer_longs = Kmer<MAX_K>::get_N_LONGS();
-  for (int i = 0; i < (int)pnp_gpu_driver->host_kmer_targets.size(); i++) {
-    // invalid kmer
-    if (pnp_gpu_driver->host_kmer_targets[i] == -1) continue;
-    char left_base = '0', right_base = '0';
-    kmer_count_t depth = 1;
-    if (from_ctgs) {
-      if (i > 0 && seq_block[i - 1] != '_') left_base = seq_block[i - 1];
-      if (i + kmer_len < seq_block.size() && seq_block[i + kmer_len] != '_') right_base = seq_block[i + kmer_len];
-      if (right_base == '0' || left_base == '0') continue;
-      depth = depth_block[i];
-    } else {
-      int qthres = qual_offset + qual_cutoff;
-      if (i > 0 && quals_block[i - 1] >= qthres && seq_block[i - 1] != '_') left_base = seq_block[i - 1];
-      if (i + kmer_len < quals_block.size() && quals_block[i + kmer_len] >= qthres && seq_block[i + kmer_len] != '_')
-        right_base = seq_block[i + kmer_len];
+  string quals_flag(seq_block.length(), 1);
+  if (!from_ctgs) {
+    for (int i = 0; i < seq_block.length(); i++) {
+      if (quals_block[i] < qual_offset + KCOUNT_QUAL_CUTOFF) quals_flag[i] = 0;
     }
-    if (pnp_gpu_driver->host_is_rcs[i]) {
-      swap(left_base, right_base);
-      left_base = comp_nucleotide(left_base);
-      right_base = comp_nucleotide(right_base);
+  }
+  int num_targets = (int)pnp_gpu_driver->host_kmer_targets.size();
+  for (int i = 0; i < num_targets; i++) {
+    if (pnp_gpu_driver->host_kmer_targets[i] != -1) bytes_kmers_sent += sizeof(KmerAndExt<MAX_K>);
+  }
+
+  Supermer supermer{.seq = "", .quals = "", .count = 0};
+  int start_i = 1;
+  while (true) {
+    int target = -1;
+    // find the starting valid kmer with valid extensions to left and right
+    for (int i = start_i; i < num_targets; i++) {
+      target = pnp_gpu_driver->host_kmer_targets[i];
+      if (target != -1 && is_valid_base(seq_block[i - 1]) && is_valid_base(seq_block[i + kmer_len])) {
+        supermer.seq = seq_block.substr(i - 1, kmer_len + 2);
+        supermer.quals = quals_flag.substr(i - 1, kmer_len + 2);
+        supermer.count = (depth_block.empty() ? 1 : depth_block[i]);
+        start_i = i + 1;
+        break;
+      } else {
+        target = -1;
+      }
     }
-    Kmer<MAX_K> kmer(&(pnp_gpu_driver->host_kmers[i * num_kmer_longs]));
-#ifdef DEBUG
-    auto cpu_target = kmer_dht->get_kmer_target_rank(kmer);
-    if (cpu_target != pnp_gpu_driver->host_kmer_targets[i])
-      DIE("cpu target is ", cpu_target, " but gpu target is ", pnp_gpu_driver->host_kmer_targets[i]);
-#endif
-    if (left_base != '0' && right_base != '0') {
-      kmer_dht->add_kmer(kmer, left_base, right_base, depth, pnp_gpu_driver->host_kmer_targets[i]);
-      DBG_ADD_KMER("kcount add_kmer ", kmer.to_string(), " count ", 1, "\n");
-      num_kmers++;
+    // no more valid kmers with exts to start
+    if (target == -1) break;
+    // build the supermer
+    for (int i = start_i; i < num_targets - 1; i++) {
+      auto next_target = pnp_gpu_driver->host_kmer_targets[i];
+      int end_pos = i + kmer_len;
+      if (next_target == target && end_pos < seq_block.length() && is_valid_base(seq_block[end_pos])) {
+        supermer.seq += seq_block[end_pos];
+        supermer.quals += quals_flag[end_pos];
+      } else {
+        bytes_supermers_sent += supermer.get_bytes_compressed();
+        kmer_dht->add_supermer(supermer, target);
+        start_i = i;
+        break;
+      }
     }
+    if (start_i + kmer_len + 1 >= seq_block.length()) break;
   }
 }
 
@@ -131,6 +144,9 @@ static void process_seq(unsigned kmer_len, int qual_offset, const string &seq, c
     Kmer<MAX_K> kmer_rc = kmers[i].revcomp();
     if (kmer_rc < kmers[i]) kmers[i] = kmer_rc;
   }
+
+  // FIXME: change this to be a loop through the kmers, just like we do for GPUS - then I can check the logic before enabling GPUs
+
   Supermer supermer{.seq = seq.substr(0, kmer_len + 1), .quals = quals_flag.substr(0, kmer_len + 1), .count = (kmer_count_t)depth};
   auto prev_target_rank = kmer_dht->get_kmer_target_rank(kmers[1]);
   for (int i = 1; i < (int)(seq.length() - kmer_len); i++) {
@@ -178,7 +194,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   IntermittentTimer t_pp(__FILENAME__ + string(":kmer parse and pack"));
   kmer_dht->set_pass(READ_KMERS_PASS);
   barrier();
-#ifdef ENABLE_KCOUNT_GPUS
+#ifdef ENABLE_KCOUNT_GPUS_PNP
   int64_t num_gpu_waits = 0;
   int num_read_blocks = 0;
   string seq_block, quals_block;
@@ -210,9 +226,10 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       num_reads++;
       progbar.update();
       if (seq.length() < kmer_len) continue;
-#ifdef ENABLE_KCOUNT_GPUS
+#ifdef ENABLE_KCOUNT_GPUS_PNP
       if (seq_block.length() + 1 + seq.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) {
-        process_block_gpu(kmer_len, qual_offset, seq_block, quals_block, {}, kmer_dht, num_Ns, num_kmers, num_gpu_waits);
+        process_block_gpu(kmer_len, qual_offset, seq_block, quals_block, {}, kmer_dht, num_Ns, num_kmers, num_gpu_waits,
+                          bytes_kmers_sent, bytes_supermers_sent);
         seq_block.clear();
         quals_block.clear();
         num_read_blocks++;
@@ -227,9 +244,10 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       progress();
     }
   }
-#ifdef ENABLE_KCOUNT_GPUS
+#ifdef ENABLE_KCOUNT_GPUS_PNP
   if (!seq_block.empty()) {
-    process_block_gpu(kmer_len, qual_offset, seq_block, quals_block, {}, kmer_dht, num_Ns, num_kmers, num_gpu_waits);
+    process_block_gpu(kmer_len, qual_offset, seq_block, quals_block, {}, kmer_dht, num_Ns, num_kmers, num_gpu_waits,
+                      bytes_kmers_sent, bytes_supermers_sent);
     num_read_blocks++;
   }
   progbar.done();
@@ -257,7 +275,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   SLOG(KLGREEN "Total bytes sent in compressed supermers ", get_size_str(tot_supermers_bytes_sent),
        " and what would have been sent in kmers ", get_size_str(tot_kmers_bytes_sent), " compression is ", fixed, setprecision(3),
        (double)tot_kmers_bytes_sent / tot_supermers_bytes_sent, KNORM "\n");
-#if !defined(ENABLE_KCOUNT_GPUS)
+#if !defined(ENABLE_KCOUNT_GPUS_PNP)
   auto all_distinct_kmers = kmer_dht->get_num_kmers();
   SLOG_VERBOSE("Processed a total of ", all_num_reads, " reads\n");
   SLOG_VERBOSE("Found ", perc_str(all_distinct_kmers, all_num_kmers), " unique kmers\n");
@@ -284,7 +302,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   kmer_dht->set_pass(CTG_KMERS_PASS);
   auto start_local_num_kmers = kmer_dht->get_local_num_kmers();
 
-#ifdef ENABLE_KCOUNT_GPUS
+#ifdef ENABLE_KCOUNT_GPUS_PNP
   int64_t num_gpu_waits = 0;
   int num_ctg_blocks = 0;
   string seq_block = "";
@@ -315,9 +333,10 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     auto ctg = it;
     progbar.update();
     if (ctg->seq.length() < kmer_len + 2) continue;
-#ifdef ENABLE_KCOUNT_GPUS
+#ifdef ENABLE_KCOUNT_GPUS_PNP
     if (seq_block.length() + 1 + ctg->seq.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) {
-      process_block_gpu(kmer_len, 0, seq_block, {}, depth_block, kmer_dht, num_Ns, num_kmers, num_gpu_waits);
+      process_block_gpu(kmer_len, 0, seq_block, {}, depth_block, kmer_dht, num_Ns, num_kmers, num_gpu_waits, bytes_kmers_sent,
+                        bytes_supermers_sent);
       seq_block.clear();
       depth_block.clear();
       num_ctg_blocks++;
@@ -335,9 +354,10 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
 #endif
   }
   progbar.done();
-#ifdef ENABLE_KCOUNT_GPUS
+#ifdef ENABLE_KCOUNT_GPUS_PNP
   if (!seq_block.empty()) {
-    process_block_gpu(kmer_len, 0, seq_block, {}, depth_block, kmer_dht, num_Ns, num_kmers, num_gpu_waits);
+    process_block_gpu(kmer_len, 0, seq_block, {}, depth_block, kmer_dht, num_Ns, num_kmers, num_gpu_waits, bytes_kmers_sent,
+                      bytes_supermers_sent);
     num_ctg_blocks++;
   }
   SLOG(KLMAGENTA, "Number of calls to progress while GPU PnP driver was running: ", num_gpu_waits, KNORM, "\n");
@@ -358,7 +378,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   SLOG(KLGREEN "Total bytes sent in compressed supermers ", get_size_str(tot_supermers_bytes_sent),
        " and what would have been sent in kmers ", get_size_str(tot_kmers_bytes_sent), " compression is ", fixed, setprecision(3),
        (double)tot_kmers_bytes_sent / tot_supermers_bytes_sent, KNORM "\n");
-#if !defined(ENABLE_KCOUNT_GPUS)
+#if !defined(ENABLE_KCOUNT_GPUS_PNP)
   SLOG_VERBOSE("Found ", perc_str(kmer_dht->get_num_kmers() - num_prev_kmers, all_num_kmers), " additional unique kmers\n");
   auto local_kmers = kmer_dht->get_local_num_kmers() - start_local_num_kmers;
   auto tot_kmers_stored = reduce_one(local_kmers, op_fast_add, 0).wait();
@@ -376,7 +396,6 @@ void analyze_kmers(unsigned kmer_len, unsigned prev_kmer_len, int qual_offset, v
                    int dmin_thres, Contigs &ctgs, dist_object<KmerDHT<MAX_K>> &kmer_dht, bool dump_kmers) {
   BarrierTimer timer(__FILEFUNC__);
   auto fut_has_contigs = upcxx::reduce_all(ctgs.size(), upcxx::op_fast_max).then([](size_t max_ctgs) { return max_ctgs > 0; });
-  _dynamic_min_depth = DYN_MIN_DEPTH;
   _dmin_thres = dmin_thres;
 
   count_kmers(kmer_len, qual_offset, packed_reads_list, kmer_dht);

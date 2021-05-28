@@ -60,21 +60,17 @@ class ParseAndPackGPUDriver {
   int minimizer_len;
   double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
   char *dev_seqs;
-  uint64_t *dev_kmers;
   int *dev_kmer_targets;
-  char *dev_is_rcs;
 
  public:
-  std::vector<uint64_t> host_kmers;
   std::vector<int> host_kmer_targets;
-  std::vector<char> host_is_rcs;
 
   ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int minimizer_len,
                         double &init_time);
   ~ParseAndPackGPUDriver();
   bool process_seq_block(const std::string &seqs, int64_t &num_Ns);
-  std::tuple<double, double, double, double> get_elapsed_times();
   bool kernel_is_done();
+  std::tuple<double, double, double, double> get_elapsed_times();
 };
 
 }  // namespace kcount_gpu

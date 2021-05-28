@@ -80,48 +80,6 @@ struct kcount_gpu::ParseAndPackDriverState {
   cudaEvent_t event;
 };
 
-kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs,
-                                                         int minimizer_len, double &init_time)
-    : upcxx_rank_me(upcxx_rank_me)
-    , upcxx_rank_n(upcxx_rank_n)
-    , kmer_len(kmer_len)
-    , num_kmer_longs(num_kmer_longs)
-    , minimizer_len(minimizer_len)
-    , t_func(0)
-    , t_malloc(0)
-    , t_cp(0)
-    , t_kernel(0) {
-  QuickTimer init_timer, malloc_timer;
-  init_timer.start();
-  int device_count = 0;
-  cudaErrchk(cudaGetDeviceCount(&device_count));
-  int my_gpu_id = upcxx_rank_me % device_count;
-  cudaErrchk(cudaSetDevice(my_gpu_id));
-  max_kmers = KCOUNT_GPU_SEQ_BLOCK_SIZE - kmer_len + 1;
-
-  malloc_timer.start();
-  cudaErrchk(cudaMalloc((void **)&dev_seqs, KCOUNT_GPU_SEQ_BLOCK_SIZE));
-  cudaErrchk(cudaMalloc((void **)&dev_kmers, max_kmers * num_kmer_longs * sizeof(uint64_t)));
-  cudaErrchk(cudaMalloc((void **)&dev_kmer_targets, max_kmers * sizeof(int)));
-  cudaErrchk(cudaMalloc((void **)&dev_is_rcs, max_kmers));
-  // total storage required is approx KCOUNT_GPU_SEQ_BLOCK_SIZE * (1 + num_kmers_longs * sizeof(uint64_t) + sizeof(int) + 1)
-  malloc_timer.stop();
-  t_malloc += malloc_timer.get_elapsed();
-
-  dstate = new ParseAndPackDriverState();
-  init_timer.stop();
-  init_time = init_timer.get_elapsed();
-}
-
-kcount_gpu::ParseAndPackGPUDriver::~ParseAndPackGPUDriver() {
-  cudaFree(dev_seqs);
-  cudaFree(dev_kmers);
-  cudaFree(dev_kmer_targets);
-  cudaFree(dev_is_rcs);
-  cudaDeviceSynchronize();
-  delete dstate;
-}
-
 __device__ void revcomp(uint64_t *longs, uint64_t *rc_longs, int kmer_len, int num_longs) {
   int last_long = (kmer_len + 31) / 32;
   for (size_t i = 0; i < last_long; i++) {
@@ -196,8 +154,8 @@ __device__ uint64_t gpu_minimizer_hash_fast(int m, int kmer_len, int num_longs, 
   return quick_hash(minimizer);
 }
 
-__global__ void parse_and_pack(char *seqs, int minimizer_len, int kmer_len, int num_longs, int seqs_len, uint64_t *kmers,
-                               int *kmer_targets, char *is_rcs, int num_ranks) {
+__global__ void parse_and_pack(char *seqs, int minimizer_len, int kmer_len, int num_longs, int seqs_len, int *kmer_targets,
+                               int num_ranks) {
   unsigned int tid = threadIdx.x;
   unsigned int lane_id = tid & (blockDim.x - 1);
   int per_block_seq_len = blockDim.x;
@@ -205,11 +163,12 @@ __global__ void parse_and_pack(char *seqs, int minimizer_len, int kmer_len, int 
   int num_kmers = seqs_len - kmer_len + 1;
   const int MAX_LONGS = (MAX_BUILD_KMER + 31) / 32;
   uint64_t rc_longs[MAX_LONGS];
+  uint64_t kmer[MAX_LONGS];
   for (int i = st_char_block + lane_id; i < (st_char_block + per_block_seq_len) && i < num_kmers; i += blockDim.x) {
     int l = 0, prev_l = 0;
     bool valid_kmer = true;
     uint64_t longs = 0;
-    uint64_t *kmer = &(kmers[i * num_longs]);
+    memset(kmer, 0, sizeof(uint64_t) * MAX_LONGS);
     // each thread extracts one kmer
     for (int k = 0; k < kmer_len; k++) {
       char s = seqs[i + k];
@@ -232,24 +191,50 @@ __global__ void parse_and_pack(char *seqs, int minimizer_len, int kmer_len, int 
     kmer[l] = longs;
     if (valid_kmer) {
       revcomp(kmer, rc_longs, kmer_len, num_longs);
-      bool must_rc = false;
-      for (l = 0; l < num_longs; l++) {
-        if (rc_longs[l] == kmer[l]) continue;
-        if (rc_longs[l] < kmer[l]) must_rc = true;
-        break;
-      }
       kmer_targets[i] = gpu_minimizer_hash_fast(minimizer_len, kmer_len, num_longs, kmer, rc_longs) % num_ranks;
-      if (must_rc) {
-        memcpy(kmer, rc_longs, num_longs * sizeof(uint64_t));
-        is_rcs[i] = 1;
-      } else {
-        is_rcs[i] = 0;
-      }
     } else {
       // indicate invalid with -1
       kmer_targets[i] = -1;
     }
   }
+}
+
+kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs,
+                                                         int minimizer_len, double &init_time)
+    : upcxx_rank_me(upcxx_rank_me)
+    , upcxx_rank_n(upcxx_rank_n)
+    , kmer_len(kmer_len)
+    , num_kmer_longs(num_kmer_longs)
+    , minimizer_len(minimizer_len)
+    , t_func(0)
+    , t_malloc(0)
+    , t_cp(0)
+    , t_kernel(0) {
+  QuickTimer init_timer, malloc_timer;
+  init_timer.start();
+  int device_count = 0;
+  cudaErrchk(cudaGetDeviceCount(&device_count));
+  int my_gpu_id = upcxx_rank_me % device_count;
+  cudaErrchk(cudaSetDevice(my_gpu_id));
+  max_kmers = KCOUNT_GPU_SEQ_BLOCK_SIZE - kmer_len + 1;
+
+  malloc_timer.start();
+  cudaErrchk(cudaMalloc((void **)&dev_seqs, KCOUNT_GPU_SEQ_BLOCK_SIZE));
+  cudaErrchk(cudaMalloc((void **)&dev_kmer_targets, max_kmers * sizeof(int)));
+  // total storage required is approx KCOUNT_GPU_SEQ_BLOCK_SIZE * (1 + num_kmers_longs * sizeof(uint64_t) + sizeof(int) + 1)
+  malloc_timer.stop();
+  t_malloc += malloc_timer.get_elapsed();
+
+  dstate = new ParseAndPackDriverState();
+  init_timer.stop();
+  init_time = init_timer.get_elapsed();
+}
+
+kcount_gpu::ParseAndPackGPUDriver::~ParseAndPackGPUDriver() {
+  cudaFree(dev_seqs);
+  cudaFree(dev_kmer_targets);
+  cudaDeviceSynchronize();
+  delete dstate;
 }
 
 bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, int64_t &num_Ns) {
@@ -264,24 +249,17 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, in
   int num_kmers = seqs.length() - kmer_len + 1;
   kernel_timer.start();
   cp_timer.start();
-  size_t kmer_bytes = num_kmers * num_kmer_longs * sizeof(uint64_t);
   cudaErrchk(cudaMemcpy(dev_seqs, &seqs[0], seqs.length(), cudaMemcpyHostToDevice));
-  cudaErrchk(cudaMemset(dev_kmers, 0, kmer_bytes));
-  cudaErrchk(cudaMemset(dev_is_rcs, 0, num_kmers));
   cp_timer.stop();
 
   int block_size = 128;
   int num_blocks = (seqs.length() + (block_size - 1)) / block_size;
 
-  parse_and_pack<<<num_blocks, block_size>>>(dev_seqs, minimizer_len, kmer_len, num_kmer_longs, seqs.length(), dev_kmers,
-                                             dev_kmer_targets, dev_is_rcs, upcxx_rank_n);
-  host_kmers.resize(num_kmers * num_kmer_longs);
+  parse_and_pack<<<num_blocks, block_size>>>(dev_seqs, minimizer_len, kmer_len, num_kmer_longs, seqs.length(), dev_kmer_targets,
+                                             upcxx_rank_n);
   host_kmer_targets.resize(num_kmers);
-  host_is_rcs.resize(num_kmers);
   cp_timer.start();
-  cudaErrchk(cudaMemcpy(&(host_kmers[0]), dev_kmers, num_kmers * num_kmer_longs * sizeof(uint64_t), cudaMemcpyDeviceToHost));
   cudaErrchk(cudaMemcpy(&(host_kmer_targets[0]), dev_kmer_targets, num_kmers * sizeof(int), cudaMemcpyDeviceToHost));
-  cudaErrchk(cudaMemcpy(&(host_is_rcs[0]), dev_is_rcs, num_kmers, cudaMemcpyDeviceToHost));
   cp_timer.stop();
   t_cp += cp_timer.get_elapsed();
   kernel_timer.stop();

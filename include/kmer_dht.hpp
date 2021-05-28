@@ -70,7 +70,6 @@ using kmer_count_t = uint16_t;
 using kcount_gpu::HashTableGPUDriver;
 
 // global variables to avoid passing dist objs to rpcs
-inline double _dynamic_min_depth = 0;
 inline int _dmin_thres = 2.0;
 
 struct ExtCounts {
@@ -136,7 +135,7 @@ struct ExtCounts {
     int top_count = sorted_counts[0].second;
     int runner_up_count = sorted_counts[1].second;
     // set dynamic_min_depth to 1.0 for single depth data (non-metagenomes)
-    int dmin_dyn = std::max((int)((1.0 - _dynamic_min_depth) * count), _dmin_thres);
+    int dmin_dyn = std::max((int)((1.0 - DYN_MIN_DEPTH) * count), _dmin_thres);
     if (top_count < dmin_dyn) return 'X';
     if (runner_up_count >= dmin_dyn) return 'F';
     return sorted_counts[0].first;
@@ -183,7 +182,8 @@ struct Supermer {
 
   UPCXX_SERIALIZED_FIELDS(seq, quals, count);
 
-  int get_bytes_compressed() { return ceil((double)seq.length() * 0.375) + sizeof(int) + sizeof(kmer_count_t); }
+  // int get_bytes_compressed() { return ceil((double)seq.length() * 0.375) + sizeof(int) + sizeof(kmer_count_t); }
+  int get_bytes_compressed() { return ceil((double)seq.length() * 2.0) + sizeof(int) + sizeof(kmer_count_t); }
 
   /*
   static pair<uint8_t *, size_t> pack_dna_seq(const string &seq) {
