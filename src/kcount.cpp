@@ -61,18 +61,17 @@ using namespace upcxx;
 
 #ifdef ENABLE_KCOUNT_GPUS_PNP
 
-static bool is_valid_base(char base) { return (base != '_' && base != 'N'); }
-
 template <int MAX_K>
 static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &seq_block, const string &quals_block,
                               const vector<kmer_count_t> &depth_block, dist_object<KmerDHT<MAX_K>> &kmer_dht, int64_t &num_Ns,
                               int64_t &num_kmers, int64_t &num_gpu_waits, int64_t &bytes_kmers_sent,
                               int64_t &bytes_supermers_sent) {
   bool from_ctgs = quals_block.empty();
-  int qual_cutoff = KCOUNT_QUAL_CUTOFF;
   SLOG_VERBOSE("process_gpu_block with sequence length ", seq_block.length(), "\n");
-  if (!pnp_gpu_driver->process_seq_block(seq_block, num_Ns))
+  int num_valid_kmers = 0;
+  if (!pnp_gpu_driver->process_seq_block(seq_block, num_valid_kmers))
     DIE("seq length is too high, ", seq_block.length(), " >= ", KCOUNT_GPU_SEQ_BLOCK_SIZE);
+  bytes_kmers_sent += sizeof(KmerAndExt<MAX_K>) * num_valid_kmers;
   while (!pnp_gpu_driver->kernel_is_done()) {
     num_gpu_waits++;
     progress();
@@ -83,45 +82,16 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
       if (quals_block[i] < qual_offset + KCOUNT_QUAL_CUTOFF) quals_flag[i] = 0;
     }
   }
-  int num_targets = (int)pnp_gpu_driver->host_kmer_targets.size();
+  int num_targets = (int)pnp_gpu_driver->host_supermer_targets.size();
   for (int i = 0; i < num_targets; i++) {
-    if (pnp_gpu_driver->host_kmer_targets[i] != -1) bytes_kmers_sent += sizeof(KmerAndExt<MAX_K>);
-  }
-
-  Supermer supermer{.seq = "", .quals = "", .count = 0};
-  int start_i = 1;
-  while (true) {
-    int target = -1;
-    // find the starting valid kmer with valid extensions to left and right
-    for (int i = start_i; i < num_targets; i++) {
-      target = pnp_gpu_driver->host_kmer_targets[i];
-      if (target != -1 && is_valid_base(seq_block[i - 1]) && is_valid_base(seq_block[i + kmer_len])) {
-        supermer.seq = seq_block.substr(i - 1, kmer_len + 2);
-        supermer.quals = quals_flag.substr(i - 1, kmer_len + 2);
-        supermer.count = (depth_block.empty() ? 1 : depth_block[i]);
-        start_i = i + 1;
-        break;
-      } else {
-        target = -1;
-      }
-    }
-    // no more valid kmers with exts to start
-    if (target == -1) break;
-    // build the supermer
-    for (int i = start_i; i < num_targets - 1; i++) {
-      auto next_target = pnp_gpu_driver->host_kmer_targets[i];
-      int end_pos = i + kmer_len;
-      if (next_target == target && end_pos < seq_block.length() && is_valid_base(seq_block[end_pos])) {
-        supermer.seq += seq_block[end_pos];
-        supermer.quals += quals_flag[end_pos];
-      } else {
-        bytes_supermers_sent += supermer.get_bytes_compressed();
-        kmer_dht->add_supermer(supermer, target);
-        start_i = i;
-        break;
-      }
-    }
-    if (start_i + kmer_len + 1 >= seq_block.length()) break;
+    auto target = pnp_gpu_driver->host_supermer_targets[i];
+    auto offset = pnp_gpu_driver->host_supermer_offsets[i];
+    auto len = pnp_gpu_driver->host_supermer_lens[i];
+    Supermer supermer{.seq = seq_block.substr(offset, len),
+                      .quals = quals_flag.substr(offset, len),
+                      .count = (from_ctgs ? depth_block[offset + 1] : (kmer_count_t)1)};
+    bytes_supermers_sent += supermer.get_bytes_compressed();
+    kmer_dht->add_supermer(supermer, target);
   }
 }
 
@@ -175,13 +145,6 @@ template <int MAX_K>
 static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *> &packed_reads_list,
                         dist_object<KmerDHT<MAX_K>> &kmer_dht) {
   BarrierTimer timer(__FILEFUNC__);
-  // probability of an error is P = 10^(-Q/10) where Q is the quality cutoff
-  // so we want P = 0.5*1/k (i.e. 50% chance of 1 error)
-  // and Q = -10 log10(P)
-  // eg qual_cutoff for k=21 is 16, for k=99 is 22.
-  // int qual_cutoff = -10 * log10(0.5 / kmer_len);
-  // SLOG_VERBOSE("Using quality cutoff ", qual_cutoff, "\n");
-  int qual_cutoff = KCOUNT_QUAL_CUTOFF;
   int64_t num_reads = 0;
   int64_t num_lines = 0;
   int64_t num_kmers = 0;
@@ -204,7 +167,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
     DIE("GPUs are enabled but no GPU could be configured for kmer counting");
   } else {
     double init_time;
-    pnp_gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
+    pnp_gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), qual_offset, kmer_len, Kmer<MAX_K>::get_N_LONGS(),
                                                            kmer_dht->get_minimizer_len(), init_time);
     SLOG(KLMAGENTA, "Initialized PnP GPU driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
   }
@@ -313,7 +276,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     DIE("GPUs are enabled but no GPU could be configured for kmer counting");
   } else {
     double init_time;
-    pnp_gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), kmer_len, Kmer<MAX_K>::get_N_LONGS(),
+    pnp_gpu_driver = new kcount_gpu::ParseAndPackGPUDriver(rank_me(), rank_n(), 0, kmer_len, Kmer<MAX_K>::get_N_LONGS(),
                                                            kmer_dht->get_minimizer_len(), init_time);
     SLOG(KLMAGENTA, "Initialized parse and pack GPU driver in ", fixed, setprecision(3), init_time, " s", KNORM, "\n");
   }

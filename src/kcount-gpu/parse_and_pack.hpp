@@ -56,19 +56,29 @@ class ParseAndPackGPUDriver {
   int upcxx_rank_n;
   int max_kmers;
   int kmer_len;
+  int qual_offset;
   int num_kmer_longs;
   int minimizer_len;
   double t_func = 0, t_malloc = 0, t_cp = 0, t_kernel = 0;
   char *dev_seqs;
   int *dev_kmer_targets;
-
- public:
+  /*
+  int *dev_supermer_targets;
+  int *dev_supermer_offsets;
+  int *dev_supermer_lens;
+  int *dev_num_supermers;
+  */
   std::vector<int> host_kmer_targets;
 
-  ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs, int minimizer_len,
+ public:
+  std::vector<int> host_supermer_targets;
+  std::vector<int> host_supermer_offsets;
+  std::vector<int> host_supermer_lens;
+
+  ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int qual_offset, int kmer_len, int num_kmer_longs, int minimizer_len,
                         double &init_time);
   ~ParseAndPackGPUDriver();
-  bool process_seq_block(const std::string &seqs, int64_t &num_Ns);
+  bool process_seq_block(const std::string &seqs, int &num_valid_kmers);
   bool kernel_is_done();
   std::tuple<double, double, double, double> get_elapsed_times();
 };

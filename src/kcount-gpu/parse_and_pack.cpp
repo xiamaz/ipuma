@@ -199,11 +199,12 @@ __global__ void parse_and_pack(char *seqs, int minimizer_len, int kmer_len, int 
   }
 }
 
-kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int num_kmer_longs,
-                                                         int minimizer_len, double &init_time)
+kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int qual_offset, int kmer_len,
+                                                         int num_kmer_longs, int minimizer_len, double &init_time)
     : upcxx_rank_me(upcxx_rank_me)
     , upcxx_rank_n(upcxx_rank_n)
     , kmer_len(kmer_len)
+    , qual_offset(qual_offset)
     , num_kmer_longs(num_kmer_longs)
     , minimizer_len(minimizer_len)
     , t_func(0)
@@ -221,6 +222,12 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
   malloc_timer.start();
   cudaErrchk(cudaMalloc((void **)&dev_seqs, KCOUNT_GPU_SEQ_BLOCK_SIZE));
   cudaErrchk(cudaMalloc((void **)&dev_kmer_targets, max_kmers * sizeof(int)));
+  /*
+  cudaErrchk(cudaMalloc((void **)&dev_supermer_targets, max_kmers * sizeof(int)));
+  cudaErrchk(cudaMalloc((void **)&dev_supermer_offsets, max_kmers * sizeof(int)));
+  cudaErrchk(cudaMalloc((void **)&dev_supermer_lens, max_kmers * sizeof(int)));
+  cudaErrchk(cudaMalloc((void **)&dev_num_supermers, sizeof(int)));
+  */
   // total storage required is approx KCOUNT_GPU_SEQ_BLOCK_SIZE * (1 + num_kmers_longs * sizeof(uint64_t) + sizeof(int) + 1)
   malloc_timer.stop();
   t_malloc += malloc_timer.get_elapsed();
@@ -233,11 +240,19 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
 kcount_gpu::ParseAndPackGPUDriver::~ParseAndPackGPUDriver() {
   cudaFree(dev_seqs);
   cudaFree(dev_kmer_targets);
+  /*
+  cudaFree(dev_supermer_targets);
+  cudaFree(dev_supermer_offsets);
+  cudaFree(dev_supermer_lens);
+  cudaFree(dev_num_supermers);
+  */
   cudaDeviceSynchronize();
   delete dstate;
 }
 
-bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, int64_t &num_Ns) {
+static bool is_valid_base(char base) { return (base != '_' && base != 'N'); }
+
+bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, int &num_valid_kmers) {
   QuickTimer func_timer, cp_timer, kernel_timer;
 
   if (seqs.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) return false;
@@ -258,16 +273,72 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, in
   parse_and_pack<<<num_blocks, block_size>>>(dev_seqs, minimizer_len, kmer_len, num_kmer_longs, seqs.length(), dev_kmer_targets,
                                              upcxx_rank_n);
   host_kmer_targets.resize(num_kmers);
+  /*
+  host_supermer_targets.resize(num_supermers);
+  host_supermer_offsets.resize(num_supermers);
+  host_supermer_lens.resize(num_supermers);
+  */
   cp_timer.start();
   cudaErrchk(cudaMemcpy(&(host_kmer_targets[0]), dev_kmer_targets, num_kmers * sizeof(int), cudaMemcpyDeviceToHost));
+  /*
+  cudaErrchk(cudaMemcpy(&(host_supermer_targets[0]), dev_supermer_targets, num_supermers * sizeof(int), cudaMemcpyDeviceToHost));
+  cudaErrchk(cudaMemcpy(&(host_supermer_offsets[0]), dev_supermer_offsets, num_supermers * sizeof(int), cudaMemcpyDeviceToHost));
+  cudaErrchk(cudaMemcpy(&(host_supermer_lens[0]), dev_supermer_lens, num_supermers * sizeof(int), cudaMemcpyDeviceToHost));
+  */
   cp_timer.stop();
   t_cp += cp_timer.get_elapsed();
+
+  int num_targets = num_kmers;
+  num_valid_kmers = 0;
+  for (int i = 0; i < num_targets; i++) {
+    if (host_kmer_targets[i] != -1) num_valid_kmers++;
+  }
+
+  host_supermer_targets.clear();
+  host_supermer_offsets.clear();
+  host_supermer_lens.clear();
+
+  int supermer_start_i = 0;
+  int supermer_len = 0;
+  int start_i = 1;
+  while (true) {
+    int target = -1;
+    // find the starting valid kmer with valid extensions to left and right
+    for (int i = start_i; i < num_targets; i++) {
+      target = host_kmer_targets[i];
+      if (target != -1 && is_valid_base(seqs[i - 1]) && is_valid_base(seqs[i + kmer_len])) {
+        supermer_start_i = i - 1;
+        supermer_len = kmer_len + 2;
+        start_i = i + 1;
+        break;
+      } else {
+        target = -1;
+      }
+    }
+    // no more valid kmers with exts to start
+    if (target == -1) break;
+    // build the supermer
+    for (int i = start_i; i < num_targets - 1; i++) {
+      auto next_target = host_kmer_targets[i];
+      int end_pos = i + kmer_len;
+      if (next_target == target && end_pos < (int)seqs.length() && is_valid_base(seqs[end_pos])) {
+        supermer_len++;
+      } else {
+        host_supermer_targets.push_back(target);
+        host_supermer_offsets.push_back(supermer_start_i);
+        host_supermer_lens.push_back(supermer_len);
+        start_i = i;
+        break;
+      }
+    }
+    if (start_i + kmer_len + 1 >= (int)seqs.length()) break;
+  }
+
   kernel_timer.stop();
   // subtract the time taken by the copy from the kernel time
   t_kernel += (kernel_timer.get_elapsed() - cp_timer.get_elapsed());
   // this is used to signal completion
   cudaErrchk(cudaEventRecord(dstate->event));
-  // cudaErrchk(cudaEventSynchronize(dstate->event));
   func_timer.stop();
   t_func += func_timer.get_elapsed();
   return true;
