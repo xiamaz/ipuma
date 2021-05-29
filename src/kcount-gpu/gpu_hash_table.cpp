@@ -58,37 +58,6 @@ using namespace std;
 using namespace gpu_common;
 using namespace kcount_gpu;
 
-__device__ int warpReduceSum(int val, int n) {
-  unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
-  unsigned mask = __ballot_sync(0xffffffff, threadid < n);
-  for (int offset = warpSize / 2; offset > 0; offset /= 2) val += __shfl_down_sync(mask, val, offset);
-  return val;
-}
-
-__device__ int blockReduceSum(int val, int n) {
-  static __shared__ int shared[32];  // Shared mem for 32 partial sums
-  int lane_id = threadIdx.x % warpSize;
-  int warp_id = threadIdx.x / warpSize;
-
-  val = warpReduceSum(val, n);  // Each warp performs partial reduction
-
-  if (lane_id == 0) shared[warp_id] = val;  // Write reduced value to shared memory
-
-  __syncthreads();  // Wait for all partial reductions
-
-  // read from shared memory only if that warp existed
-  val = (threadIdx.x < blockDim.x / warpSize) ? shared[lane_id] : 0;
-
-  if (warp_id == 0) val = warpReduceSum(val, n);  // Final reduce within first warp
-  __syncthreads();
-  return val;
-}
-
-__device__ void reduce(int count, int num, unsigned int *result) {
-  int block_num = blockReduceSum(count, num);
-  if (threadIdx.x == 0) atomicAdd(result, block_num);
-}
-
 template <int MAX_K>
 __device__ bool kmers_equal(const KmerArray<MAX_K> &kmer1, const KmerArray<MAX_K> &kmer2) {
   int n_longs = kmer1.N_LONGS;
@@ -454,10 +423,8 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block(KmerCountsMap<MAX_K> &kmer_cou
   cudaErrchk(cudaMalloc(&counts_gpu, NUM_COUNTS * sizeof(unsigned int)));
   cudaErrchk(cudaMemset(counts_gpu, 0, NUM_COUNTS * sizeof(unsigned int)));
 
-  int mingridsize = 0;
-  int threadblocksize = 0;
-  cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_insert_kmer_block<MAX_K>, 0, 0));
-  int gridsize = ((uint32_t)num_buff_entries + threadblocksize - 1) / threadblocksize;
+  int gridsize, threadblocksize;
+  get_kernel_config(num_buff_entries, gpu_insert_kmer_block<MAX_K>, gridsize, threadblocksize);
   GPUTimer t;
   t.start();
   gpu_insert_kmer_block<<<gridsize, threadblocksize>>>(kmer_counts_map, elem_buff_dev, num_buff_entries, ctg_kmers, counts_gpu);
@@ -503,10 +470,8 @@ void HashTableGPUDriver<MAX_K>::purge_invalid(int &num_purged, int &num_entries)
   cudaErrchk(cudaMemset(counts_gpu, 0, NUM_COUNTS * sizeof(unsigned int)));
   GPUTimer purge_timer;
   purge_timer.start();
-  int mingridsize = 0;
-  int threadblocksize = 0;
-  cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_purge_invalid<MAX_K>, 0, 0));
-  int gridsize = ((uint32_t)read_kmers_dev.capacity + threadblocksize - 1) / threadblocksize;
+  int gridsize, threadblocksize;
+  get_kernel_config(read_kmers_dev.capacity, gpu_purge_invalid<MAX_K>, gridsize, threadblocksize);
   // now purge all invalid kmers (do it on the gpu)
   gpu_purge_invalid<<<gridsize, threadblocksize>>>(read_kmers_dev, counts_gpu);
   purge_timer.stop();
@@ -552,10 +517,8 @@ void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_uniq
   compact_read_kmers_dev.init(num_entries);
   GPUTimer compact_timer;
   compact_timer.start();
-  int mingridsize = 0;
-  int threadblocksize = 0;
-  cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_compact_ht<MAX_K>, 0, 0));
-  int gridsize = ((uint32_t)read_kmers_dev.capacity + threadblocksize - 1) / threadblocksize;
+  int gridsize, threadblocksize;
+  get_kernel_config(read_kmers_dev.capacity, gpu_compact_ht<MAX_K>, gridsize, threadblocksize);
   gpu_compact_ht<<<gridsize, threadblocksize>>>(read_kmers_dev, compact_read_kmers_dev, counts_gpu);
   compact_timer.stop();
   read_kmers_dev.clear();
@@ -592,10 +555,8 @@ void HashTableGPUDriver<MAX_K>::done_ctg_kmer_inserts(int &attempted_inserts, in
   cudaErrchk(cudaMalloc(&counts_gpu, NUM_COUNTS * sizeof(unsigned int)));
   cudaErrchk(cudaMemset(counts_gpu, 0, NUM_COUNTS * sizeof(unsigned int)));
   GPUTimer insert_timer;
-  int mingridsize = 0;
-  int threadblocksize = 0;
-  cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, gpu_merge_ctg_kmers<MAX_K>, 0, 0));
-  int gridsize = ((uint32_t)ctg_kmers_dev.capacity + threadblocksize - 1) / threadblocksize;
+  int gridsize, threadblocksize;
+  get_kernel_config(ctg_kmers_dev.capacity, gpu_merge_ctg_kmers<MAX_K>, gridsize, threadblocksize);
   insert_timer.start();
   gpu_merge_ctg_kmers<<<gridsize, threadblocksize>>>(read_kmers_dev, ctg_kmers_dev, counts_gpu);
   insert_timer.stop();

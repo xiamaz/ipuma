@@ -68,7 +68,7 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
                               int64_t &bytes_supermers_sent) {
   bool from_ctgs = quals_block.empty();
   SLOG_VERBOSE("process_gpu_block with sequence length ", seq_block.length(), "\n");
-  int num_valid_kmers = 0;
+  unsigned int num_valid_kmers = 0;
   if (!pnp_gpu_driver->process_seq_block(seq_block, num_valid_kmers))
     DIE("seq length is too high, ", seq_block.length(), " >= ", KCOUNT_GPU_SEQ_BLOCK_SIZE);
   bytes_kmers_sent += sizeof(KmerAndExt<MAX_K>) * num_valid_kmers;
@@ -82,11 +82,11 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
       if (quals_block[i] < qual_offset + KCOUNT_QUAL_CUTOFF) quals_flag[i] = 0;
     }
   }
-  int num_targets = (int)pnp_gpu_driver->host_supermer_targets.size();
+  int num_targets = (int)pnp_gpu_driver->supermer_targets.size();
   for (int i = 0; i < num_targets; i++) {
-    auto target = pnp_gpu_driver->host_supermer_targets[i];
-    auto offset = pnp_gpu_driver->host_supermer_offsets[i];
-    auto len = pnp_gpu_driver->host_supermer_lens[i];
+    auto target = pnp_gpu_driver->supermer_targets[i];
+    auto offset = pnp_gpu_driver->supermer_offsets[i];
+    auto len = pnp_gpu_driver->supermer_lens[i];
     Supermer supermer{.seq = seq_block.substr(offset, len),
                       .quals = quals_flag.substr(offset, len),
                       .count = (from_ctgs ? depth_block[offset + 1] : (kmer_count_t)1)};
