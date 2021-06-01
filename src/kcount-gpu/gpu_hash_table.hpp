@@ -74,8 +74,9 @@ struct KmerArray {
   static const int N_LONGS = (MAX_K + 31) / 32;
   cu_uint64_t longs[N_LONGS];
 
-  KmerArray() {}
-  KmerArray(const uint64_t *x);
+  // KmerArray() {}
+  // KmerArray(const uint64_t *x);
+  void set(const cu_uint64_t *x);
 };
 
 template <int MAX_K>
@@ -158,7 +159,7 @@ class HashTableGPUDriver {
 
   void set_pass(PASS_TYPE p);
 
-  void insert_kmer(const uint64_t *kmer, count_t kmer_count, char left, char right);
+  void insert_supermer(int kmer_len, const std::string &supermer_seq, const std::string &supermer_quals, count_t supermer_count);
   void flush_inserts();
   void done_ctg_kmer_inserts(int &attempted_inserts, int &dropped_inserts, int &new_inserts);
   void done_all_inserts(int &num_dropped, int &num_unique, int &num_purged);
