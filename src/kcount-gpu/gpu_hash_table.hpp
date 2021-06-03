@@ -54,8 +54,6 @@ namespace kcount_gpu {
 
 enum PASS_TYPE { READ_KMERS_PASS, CTG_KMERS_PASS };
 
-using cu_uint64_t = unsigned long long int;
-static_assert(sizeof(cu_uint64_t) == 8);
 #define KEY_EMPTY UINT64_C(-1)
 #define KEY_EMPTY_BYTE 0xFF
 using count_t = uint32_t;
@@ -72,11 +70,11 @@ struct CountExts {
 template <int MAX_K>
 struct KmerArray {
   static const int N_LONGS = (MAX_K + 31) / 32;
-  cu_uint64_t longs[N_LONGS];
+  uint64_t longs[N_LONGS];
 
   // KmerArray() {}
   // KmerArray(const uint64_t *x);
-  void set(const cu_uint64_t *x);
+  void set(const uint64_t *x);
 };
 
 template <int MAX_K>

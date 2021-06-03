@@ -69,7 +69,7 @@ __device__ bool kmers_equal(const KmerArray<MAX_K> &kmer1, const KmerArray<MAX_K
 
 template <int MAX_K>
 __device__ size_t kmer_hash(const KmerArray<MAX_K> &kmer) {
-  return gpu_murmurhash3_64(reinterpret_cast<const void *>(kmer.longs), kmer.N_LONGS * sizeof(cu_uint64_t));
+  return gpu_murmurhash3_64(reinterpret_cast<const void *>(kmer.longs), kmer.N_LONGS * sizeof(uint64_t));
 }
 
 __device__ int8_t get_ext(count_t *ext_counts, int pos, int8_t *ext_map) {
@@ -119,17 +119,19 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
     count_t *counts = ctg_kmers.vals[threadid].data;
     if (counts[0] && !ext_conflict(counts, 1) && !ext_conflict(counts, 5)) {
       KmerArray<MAX_K> kmer = ctg_kmers.keys[threadid];
-      cu_uint64_t slot = kmer_hash(kmer) % read_kmers.capacity;
+      uint64_t slot = kmer_hash(kmer) % read_kmers.capacity;
       auto start_slot = slot;
       attempted_inserts++;
       const int MAX_PROBE = (read_kmers.capacity < 200 ? read_kmers.capacity : 200);
       int j;
       for (j = 0; j < MAX_PROBE; j++) {
-        cu_uint64_t old_key = atomicCAS(&(read_kmers.keys[slot].longs[0]), KEY_EMPTY, kmer.longs[0]);
+        uint64_t old_key =
+            atomicCAS(reinterpret_cast<unsigned long long *>(&(read_kmers.keys[slot].longs[0])), KEY_EMPTY, kmer.longs[0]);
         if (old_key == KEY_EMPTY) {
           // now all others should be empty
           for (int long_i = 1; long_i < N_LONGS; long_i++) {
-            old_key = atomicCAS(&(read_kmers.keys[slot].longs[long_i]), KEY_EMPTY, kmer.longs[long_i]);
+            old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(read_kmers.keys[slot].longs[long_i])), KEY_EMPTY,
+                                kmer.longs[long_i]);
             if (old_key != KEY_EMPTY) {
               printf("ERROR: old key is not KEY_EMPTY!! Why?\n");
               break;
@@ -144,7 +146,7 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
           bool found_slot = true;
           for (int long_i = 1; long_i < N_LONGS; long_i++) {
             // check the value atomically by adding nothing
-            old_key = atomicAdd(&(read_kmers.keys[slot].longs[long_i]), 0);
+            old_key = atomicAdd(reinterpret_cast<unsigned long long *>(&(read_kmers.keys[slot].longs[long_i])), 0);
             if (old_key != kmer.longs[long_i]) {
               found_slot = false;
               break;
@@ -182,7 +184,7 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
     if (elems.vals[threadid].data[0]) {
       KmerArray<MAX_K> kmer = elems.keys[threadid];
       count_t *counts = elems.vals[threadid].data;
-      cu_uint64_t slot = kmer_hash(kmer) % compact_elems.capacity;
+      uint64_t slot = kmer_hash(kmer) % compact_elems.capacity;
       auto start_slot = slot;
       // we set a constraint on the max probe to track whether we are getting excessive collisions and need a bigger default
       // compact table
@@ -190,7 +192,8 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
       // look for empty slot in compact hash table
       int j;
       for (j = 0; j < MAX_PROBE; j++) {
-        cu_uint64_t old_key = atomicCAS(&(compact_elems.keys[slot].longs[0]), KEY_EMPTY, kmer.longs[0]);
+        uint64_t old_key =
+            atomicCAS(reinterpret_cast<unsigned long long *>(&(compact_elems.keys[slot].longs[0])), KEY_EMPTY, kmer.longs[0]);
         if (old_key == KEY_EMPTY) {
           // found empty slot - there will be no duplicate keys since we're copying across from another hash table
           unique_inserts++;
@@ -232,7 +235,7 @@ __global__ void gpu_purge_invalid(KmerCountsMap<MAX_K> elems, unsigned int *elem
       for (int j = 1; j < 9; j++) ext_sum += elems.vals[threadid].data[j];
       if (elems.vals[threadid].data[0] < 2 || !ext_sum) {
         memset(elems.vals[threadid].data, 0, sizeof(CountsArray));
-        memset(elems.keys[threadid].longs, KEY_EMPTY_BYTE, N_LONGS * sizeof(cu_uint64_t));
+        memset(elems.keys[threadid].longs, KEY_EMPTY_BYTE, N_LONGS * sizeof(uint64_t));
         num_purged++;
       } else {
         num_elems++;
@@ -269,17 +272,19 @@ __global__ void gpu_insert_kmer_block(KmerCountsMap<MAX_K> elems, const KmerAndE
       count_t kmer_count = elem_buff[threadid].count;
       char left_ext = elem_buff[threadid].left;
       char right_ext = elem_buff[threadid].right;
-      cu_uint64_t slot = kmer_hash(kmer) % elems.capacity;
+      uint64_t slot = kmer_hash(kmer) % elems.capacity;
       auto start_slot = slot;
       int j;
       const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
       for (j = 0; j < MAX_PROBE; j++) {
-        cu_uint64_t old_key = atomicCAS(&(elems.keys[slot].longs[0]), KEY_EMPTY, kmer.longs[0]);
+        uint64_t old_key =
+            atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[0])), KEY_EMPTY, kmer.longs[0]);
         // only insert new kmers; drop duplicates
         if (old_key == KEY_EMPTY || old_key == kmer.longs[0]) {
           bool found_slot = true;
           for (int long_i = 1; long_i < N_LONGS; long_i++) {
-            cu_uint64_t old_key = atomicCAS(&(elems.keys[slot].longs[long_i]), KEY_EMPTY, kmer.longs[long_i]);
+            uint64_t old_key =
+                atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[long_i])), KEY_EMPTY, kmer.longs[long_i]);
             if (old_key != KEY_EMPTY && old_key != kmer.longs[long_i]) {
               found_slot = false;
               break;
@@ -333,8 +338,8 @@ struct HashTableGPUDriver<MAX_K>::HashTableDriverState {
 };
 
 template <int MAX_K>
-void KmerArray<MAX_K>::set(const cu_uint64_t *kmer) {
-  memcpy(longs, kmer, N_LONGS * sizeof(cu_uint64_t));
+void KmerArray<MAX_K>::set(const uint64_t *kmer) {
+  memcpy(longs, kmer, N_LONGS * sizeof(uint64_t));
 }
 
 template <int MAX_K>
@@ -451,7 +456,7 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block(KmerCountsMap<MAX_K> &kmer_cou
 }
 
 // FIXME: needs to be in the gpu (actually same as function in parse_and_pack.cpp - should be moved to common funcs)
-const cu_uint64_t _GPU_TWINS[256] = {
+const uint64_t _GPU_TWINS[256] = {
     0xFF, 0xBF, 0x7F, 0x3F, 0xEF, 0xAF, 0x6F, 0x2F, 0xDF, 0x9F, 0x5F, 0x1F, 0xCF, 0x8F, 0x4F, 0x0F, 0xFB, 0xBB, 0x7B, 0x3B,
     0xEB, 0xAB, 0x6B, 0x2B, 0xDB, 0x9B, 0x5B, 0x1B, 0xCB, 0x8B, 0x4B, 0x0B, 0xF7, 0xB7, 0x77, 0x37, 0xE7, 0xA7, 0x67, 0x27,
     0xD7, 0x97, 0x57, 0x17, 0xC7, 0x87, 0x47, 0x07, 0xF3, 0xB3, 0x73, 0x33, 0xE3, 0xA3, 0x63, 0x23, 0xD3, 0x93, 0x53, 0x13,
@@ -466,17 +471,17 @@ const cu_uint64_t _GPU_TWINS[256] = {
     0xC8, 0x88, 0x48, 0x08, 0xF4, 0xB4, 0x74, 0x34, 0xE4, 0xA4, 0x64, 0x24, 0xD4, 0x94, 0x54, 0x14, 0xC4, 0x84, 0x44, 0x04,
     0xF0, 0xB0, 0x70, 0x30, 0xE0, 0xA0, 0x60, 0x20, 0xD0, 0x90, 0x50, 0x10, 0xC0, 0x80, 0x40, 0x00};
 
-static void revcomp(cu_uint64_t *longs, cu_uint64_t *rc_longs, int kmer_len, int num_longs) {
+static void _revcomp(uint64_t *longs, uint64_t *rc_longs, int kmer_len, int num_longs) {
   int last_long = (kmer_len + 31) / 32;
   for (int i = 0; i < last_long; i++) {
-    cu_uint64_t v = longs[i];
+    uint64_t v = longs[i];
     rc_longs[last_long - 1 - i] = (_GPU_TWINS[v & 0xFF] << 56) | (_GPU_TWINS[(v >> 8) & 0xFF] << 48) |
                                   (_GPU_TWINS[(v >> 16) & 0xFF] << 40) | (_GPU_TWINS[(v >> 24) & 0xFF] << 32) |
                                   (_GPU_TWINS[(v >> 32) & 0xFF] << 24) | (_GPU_TWINS[(v >> 40) & 0xFF] << 16) |
                                   (_GPU_TWINS[(v >> 48) & 0xFF] << 8) | (_GPU_TWINS[(v >> 56)]);
   }
-  cu_uint64_t shift = (kmer_len % 32) ? 2 * (32 - (kmer_len % 32)) : 0;
-  cu_uint64_t shiftmask = (kmer_len % 32) ? (((((cu_uint64_t)1) << shift) - 1) << (64 - shift)) : ((cu_uint64_t)0);
+  uint64_t shift = (kmer_len % 32) ? 2 * (32 - (kmer_len % 32)) : 0;
+  uint64_t shiftmask = (kmer_len % 32) ? (((((uint64_t)1) << shift) - 1) << (64 - shift)) : ((uint64_t)0);
   rc_longs[0] = rc_longs[0] << shift;
   for (int i = 1; i < last_long; i++) {
     rc_longs[i - 1] |= (rc_longs[i] & shiftmask) >> (64 - shift);
@@ -512,18 +517,18 @@ static char _comp_nucleotide(char ch) {
 }
 
 // FIXME: this should be done on the GPU (and this code is taken from parse_and_pack.cpp)
-static void get_kmer_from_supermer(const char *seqs, int kmer_len, int num_longs, int seqs_len, int threadid, cu_uint64_t *kmer,
+static void get_kmer_from_supermer(const char *seqs, int kmer_len, int num_longs, int seqs_len, int threadid, uint64_t *kmer,
                                    bool *is_rc, bool *is_valid) {
   // unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
   *is_valid = false;
   int num_kmers = seqs_len - kmer_len + 1;
   const int MAX_LONGS = (MAX_BUILD_KMER + 31) / 32;
-  cu_uint64_t kmer_rc[MAX_LONGS];
+  uint64_t kmer_rc[MAX_LONGS];
   if (threadid < num_kmers) {
     int l = 0, prev_l = 0;
     bool valid_kmer = true;
-    cu_uint64_t longs = 0;
-    memset(kmer, 0, sizeof(cu_uint64_t) * num_longs);
+    uint64_t longs = 0;
+    memset(kmer, 0, sizeof(uint64_t) * num_longs);
     // each thread extracts one kmer
     for (int k = 0; k < kmer_len; k++) {
       char s = seqs[threadid + k];
@@ -540,18 +545,18 @@ static void get_kmer_from_supermer(const char *seqs, int kmer_len, int num_longs
         longs = 0;
         prev_l = l;
       }
-      cu_uint64_t x = (s & 4) >> 1;
+      uint64_t x = (s & 4) >> 1;
       longs |= ((x + ((x ^ (s & 2)) >> 1)) << (2 * (31 - j)));
     }
     kmer[l] = longs;
     if (valid_kmer) {
-      revcomp(kmer, kmer_rc, kmer_len, num_longs);
+      _revcomp(kmer, kmer_rc, kmer_len, num_longs);
       *is_rc = false;
       for (l = 0; l < num_longs; l++) {
         if (kmer_rc[l] == kmer[l]) continue;
         if (kmer_rc[l] < kmer[l]) {
           *is_rc = true;
-          memcpy(kmer, kmer_rc, num_longs * sizeof(cu_uint64_t));
+          memcpy(kmer, kmer_rc, num_longs * sizeof(uint64_t));
         }
         break;
       }
