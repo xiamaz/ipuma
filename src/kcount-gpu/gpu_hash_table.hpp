@@ -72,8 +72,6 @@ struct KmerArray {
   static const int N_LONGS = (MAX_K + 31) / 32;
   uint64_t longs[N_LONGS];
 
-  // KmerArray() {}
-  // KmerArray(const uint64_t *x);
   void set(const uint64_t *x);
 };
 
@@ -82,6 +80,12 @@ struct KmerAndExts {
   KmerArray<MAX_K> kmer;
   count_t count;
   int8_t left, right;
+};
+
+struct SupermerBuff {
+  char *seqs;
+  char *quals;
+  count_t *counts;
 };
 
 template <int MAX_K>
@@ -125,7 +129,7 @@ class HashTableGPUDriver {
   int upcxx_rank_me;
   int upcxx_rank_n;
   int kmer_len;
-  int num_buff_entries = 0;
+  int buff_len = 0;
   std::vector<KmerArray<MAX_K>> output_keys;
   std::vector<CountExts> output_vals;
   size_t output_index = 0;
@@ -134,16 +138,16 @@ class HashTableGPUDriver {
   KmerCountsMap<MAX_K> ctg_kmers_dev;
 
   // for buffering elements in the host memory
-  KmerAndExts<MAX_K> *elem_buff_host = nullptr;
+  SupermerBuff elem_buff_host = {0};
   // for transferring host memory buffer to device
-  KmerAndExts<MAX_K> *elem_buff_dev = nullptr;
+  SupermerBuff elem_buff_dev = {0};
 
   InsertStats read_kmers_stats;
   InsertStats ctg_kmers_stats;
 
   PASS_TYPE pass_type;
 
-  void insert_kmer_block(KmerCountsMap<MAX_K> &kmer_counts_map, InsertStats &stats, bool ctg_kmers);
+  void insert_supermer_block(KmerCountsMap<MAX_K> &kmer_counts_map, InsertStats &stats, bool ctg_kmers);
   void purge_invalid(int &num_purged, int &num_entries);
 
  public:
@@ -157,7 +161,7 @@ class HashTableGPUDriver {
 
   void set_pass(PASS_TYPE p);
 
-  void insert_supermer(int kmer_len, const std::string &supermer_seq, const std::string &supermer_quals, count_t supermer_count);
+  void insert_supermer(const std::string &supermer_seq, const std::string &supermer_quals, count_t supermer_count);
   void flush_inserts();
   void done_ctg_kmer_inserts(int &attempted_inserts, int &dropped_inserts, int &new_inserts);
   void done_all_inserts(int &num_dropped, int &num_unique, int &num_purged);

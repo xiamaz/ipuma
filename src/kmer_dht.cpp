@@ -99,7 +99,7 @@ void KmerDHT<MAX_K>::update_count(Supermer supermer, dist_object<KmerMap> &kmers
                                   dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver) {
 #ifdef ENABLE_KCOUNT_GPUS_HT
   num_inserts++;
-  ht_gpu_driver->insert_supermer(Kmer<MAX_K>::get_k(), supermer.seq, supermer.quals, supermer.count);
+  ht_gpu_driver->insert_supermer(supermer.seq, supermer.quals, supermer.count);
 #else
   for (int i = 0; i < supermer.seq.length(); i++) {
     if (supermer.seq[i] != 'A' && supermer.seq[i] != 'C' && supermer.seq[i] != 'G' && supermer.seq[i] != 'T')
@@ -146,7 +146,7 @@ void KmerDHT<MAX_K>::update_ctg_kmers_count(Supermer supermer, dist_object<KmerM
                                             dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver) {
 #ifdef ENABLE_KCOUNT_GPUS_HT
   num_inserts++;
-  ht_gpu_driver->insert_supermer(Kmer<MAX_K>::get_k(), supermer.seq, supermer.quals, supermer.count);
+  ht_gpu_driver->insert_supermer(supermer.seq, supermer.quals, supermer.count);
 #else
   auto kmer_len = Kmer<MAX_K>::get_k();
   vector<KmerAndExt<MAX_K>> kmers_and_exts;
