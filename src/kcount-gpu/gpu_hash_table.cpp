@@ -451,7 +451,7 @@ void HashTableGPUDriver<MAX_K>::insert_kmer_block(KmerCountsMap<MAX_K> &kmer_cou
 }
 
 // FIXME: needs to be in the gpu (actually same as function in parse_and_pack.cpp - should be moved to common funcs)
-const cu_uint64_t GPU_TWINS[256] = {
+const cu_uint64_t _GPU_TWINS[256] = {
     0xFF, 0xBF, 0x7F, 0x3F, 0xEF, 0xAF, 0x6F, 0x2F, 0xDF, 0x9F, 0x5F, 0x1F, 0xCF, 0x8F, 0x4F, 0x0F, 0xFB, 0xBB, 0x7B, 0x3B,
     0xEB, 0xAB, 0x6B, 0x2B, 0xDB, 0x9B, 0x5B, 0x1B, 0xCB, 0x8B, 0x4B, 0x0B, 0xF7, 0xB7, 0x77, 0x37, 0xE7, 0xA7, 0x67, 0x27,
     0xD7, 0x97, 0x57, 0x17, 0xC7, 0x87, 0x47, 0x07, 0xF3, 0xB3, 0x73, 0x33, 0xE3, 0xA3, 0x63, 0x23, 0xD3, 0x93, 0x53, 0x13,
@@ -470,10 +470,10 @@ static void revcomp(cu_uint64_t *longs, cu_uint64_t *rc_longs, int kmer_len, int
   int last_long = (kmer_len + 31) / 32;
   for (int i = 0; i < last_long; i++) {
     cu_uint64_t v = longs[i];
-    rc_longs[last_long - 1 - i] = (GPU_TWINS[v & 0xFF] << 56) | (GPU_TWINS[(v >> 8) & 0xFF] << 48) |
-                                  (GPU_TWINS[(v >> 16) & 0xFF] << 40) | (GPU_TWINS[(v >> 24) & 0xFF] << 32) |
-                                  (GPU_TWINS[(v >> 32) & 0xFF] << 24) | (GPU_TWINS[(v >> 40) & 0xFF] << 16) |
-                                  (GPU_TWINS[(v >> 48) & 0xFF] << 8) | (GPU_TWINS[(v >> 56)]);
+    rc_longs[last_long - 1 - i] = (_GPU_TWINS[v & 0xFF] << 56) | (_GPU_TWINS[(v >> 8) & 0xFF] << 48) |
+                                  (_GPU_TWINS[(v >> 16) & 0xFF] << 40) | (_GPU_TWINS[(v >> 24) & 0xFF] << 32) |
+                                  (_GPU_TWINS[(v >> 32) & 0xFF] << 24) | (_GPU_TWINS[(v >> 40) & 0xFF] << 16) |
+                                  (_GPU_TWINS[(v >> 48) & 0xFF] << 8) | (_GPU_TWINS[(v >> 56)]);
   }
   cu_uint64_t shift = (kmer_len % 32) ? 2 * (32 - (kmer_len % 32)) : 0;
   cu_uint64_t shiftmask = (kmer_len % 32) ? (((((cu_uint64_t)1) << shift) - 1) << (64 - shift)) : ((cu_uint64_t)0);
@@ -484,7 +484,7 @@ static void revcomp(cu_uint64_t *longs, cu_uint64_t *rc_longs, int kmer_len, int
   }
 }
 
-static char comp_nucleotide(char ch) {
+static char _comp_nucleotide(char ch) {
   switch (ch) {
     case 'A': return 'T';
     case 'C': return 'G';
@@ -574,8 +574,8 @@ void HashTableGPUDriver<MAX_K>::insert_supermer(int kmer_len, const string &supe
     if (!supermer_quals[i + kmer_len]) right_ext = '0';
     if (is_rc) {
       swap(left_ext, right_ext);
-      left_ext = comp_nucleotide(left_ext);
-      right_ext = comp_nucleotide(right_ext);
+      left_ext = _comp_nucleotide(left_ext);
+      right_ext = _comp_nucleotide(right_ext);
     };
     elem_buff_host[num_buff_entries].kmer.set(kmer.longs);
     elem_buff_host[num_buff_entries].count = supermer_count;
