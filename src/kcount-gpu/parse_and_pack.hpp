@@ -48,6 +48,12 @@ namespace kcount_gpu {
 
 struct ParseAndPackDriverState;
 
+struct SupermerInfo {
+  int target;
+  int offset;
+  uint16_t len;
+};
+
 class ParseAndPackGPUDriver {
   // this opaque data type stores CUDA specific variables
   ParseAndPackDriverState *dstate = nullptr;
@@ -63,16 +69,12 @@ class ParseAndPackGPUDriver {
   char *dev_seqs;
   int *dev_kmer_targets;
 
-  int *dev_supermer_targets;
-  int *dev_supermer_offsets;
-  int *dev_supermer_lens;
+  SupermerInfo *dev_supermers;
   unsigned int *dev_num_supermers;
   unsigned int *dev_num_valid_kmers;
 
  public:
-  std::vector<int> supermer_targets;
-  std::vector<int> supermer_offsets;
-  std::vector<int> supermer_lens;
+  std::vector<SupermerInfo> supermers;
   // FIXME: these need to be packed
   std::string supermer_seqs;
   std::string supermer_quals;
