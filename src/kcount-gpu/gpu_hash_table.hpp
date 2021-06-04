@@ -75,13 +75,6 @@ struct KmerArray {
   void set(const uint64_t *x);
 };
 
-template <int MAX_K>
-struct KmerAndExts {
-  KmerArray<MAX_K> kmer;
-  count_t count;
-  int8_t left, right;
-};
-
 struct SupermerBuff {
   char *seqs;
   count_t *counts;

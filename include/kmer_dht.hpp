@@ -183,7 +183,7 @@ struct Supermer {
   UPCXX_SERIALIZED_FIELDS(seq, count);
 
   // int get_bytes_compressed() { return ceil((double)seq.length() * 0.375) + sizeof(int) + sizeof(kmer_count_t); }
-  int get_bytes_compressed() { return seq.length() + sizeof(kmer_count_t); }
+2747/654  int get_bytes_compressed() { return seq.length() + sizeof(kmer_count_t); }
 };
 
 template <int MAX_K>
