@@ -62,7 +62,7 @@ using namespace upcxx;
 #ifdef ENABLE_KCOUNT_GPUS_PNP
 
 template <int MAX_K>
-static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &seq_block, const string &quals_block,
+static void process_block_gpu(unsigned kmer_len, int qual_offset, string &seq_block, const string &quals_block,
                               const vector<kmer_count_t> &depth_block, dist_object<KmerDHT<MAX_K>> &kmer_dht, int64_t &num_Ns,
                               int64_t &num_kmers, int64_t &num_gpu_waits, int64_t &bytes_kmers_sent,
                               int64_t &bytes_supermers_sent) {
@@ -79,7 +79,7 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
   string quals_flag(seq_block.length(), 1);
   if (!from_ctgs) {
     for (int i = 0; i < seq_block.length(); i++) {
-      if (quals_block[i] < qual_offset + KCOUNT_QUAL_CUTOFF) quals_flag[i] = 0;
+      if (quals_block[i] < qual_offset + KCOUNT_QUAL_CUTOFF) seq_block[i] = tolower(seq_block[i]);
     }
   }
   int num_targets = (int)pnp_gpu_driver->supermers.size();
@@ -87,9 +87,7 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, const string &
     auto target = pnp_gpu_driver->supermers[i].target;
     auto offset = pnp_gpu_driver->supermers[i].offset;
     auto len = pnp_gpu_driver->supermers[i].len;
-    Supermer supermer{.seq = seq_block.substr(offset, len),
-                      .quals = quals_flag.substr(offset, len),
-                      .count = (from_ctgs ? depth_block[offset + 1] : (kmer_count_t)1)};
+    Supermer supermer{.seq = seq_block.substr(offset, len), .count = (from_ctgs ? depth_block[offset + 1] : (kmer_count_t)1)};
     bytes_supermers_sent += supermer.get_bytes_compressed();
     kmer_dht->add_supermer(supermer, target);
   }

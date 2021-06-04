@@ -176,14 +176,14 @@ struct KmerAndExt {
 };
 
 struct Supermer {
+  // qualities must be represented, but only as good or bad, so this is done with lowercase for bad, uppercase otherwise
   string seq;
-  string quals;
   kmer_count_t count;
 
-  UPCXX_SERIALIZED_FIELDS(seq, quals, count);
+  UPCXX_SERIALIZED_FIELDS(seq, count);
 
   // int get_bytes_compressed() { return ceil((double)seq.length() * 0.375) + sizeof(int) + sizeof(kmer_count_t); }
-  int get_bytes_compressed() { return seq.length() * 2.0 + sizeof(kmer_count_t); }
+  int get_bytes_compressed() { return seq.length() + sizeof(kmer_count_t); }
 };
 
 template <int MAX_K>
@@ -217,7 +217,7 @@ class KmerDHT {
 
   void insert_from_gpu_hashtable();
 
-  static void get_kmers_and_exts(const Supermer &supermer, vector<KmerAndExt<MAX_K>> &kmers_and_exts);
+  static void get_kmers_and_exts(Supermer &supermer, vector<KmerAndExt<MAX_K>> &kmers_and_exts);
 
  public:
   KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS);

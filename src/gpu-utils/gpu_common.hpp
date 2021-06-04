@@ -192,10 +192,15 @@ inline __device__ void pack_seq_to_kmer(char *seqs, int kmer_len, int num_longs,
     // each thread extracts one kmer
     for (int k = 0; k < kmer_len; k++) {
       char s = seqs[threadid + k];
-      if (s == '_' || s == 'N') {
-        is_valid = false;
-        break;
+      switch (s) {
+        case 'a': s = 'A'; break;
+        case 'c': s = 'C'; break;
+        case 'g': s = 'G'; break;
+        case 't': s = 'T'; break;
+        case '_':
+        case 'N': is_valid = false; break;
       }
+      if (!is_valid) break;
       int j = k % 32;
       prev_l = l;
       l = k / 32;

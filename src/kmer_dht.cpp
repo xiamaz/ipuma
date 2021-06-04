@@ -71,7 +71,13 @@ static int64_t _num_kmers_counted = 0;
 static int num_inserts = 0;
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::get_kmers_and_exts(const Supermer &supermer, vector<KmerAndExt<MAX_K>> &kmers_and_exts) {
+void KmerDHT<MAX_K>::get_kmers_and_exts(Supermer &supermer, vector<KmerAndExt<MAX_K>> &kmers_and_exts) {
+  vector<bool> quals;
+  quals.resize(supermer.seq.length());
+  for (int i = 0; i < supermer.seq.length(); i++) {
+    quals[i] = isupper(supermer.seq[i]);
+    supermer.seq[i] = toupper(supermer.seq[i]);
+  }
   auto kmer_len = Kmer<MAX_K>::get_k();
   vector<Kmer<MAX_K>> kmers;
   Kmer<MAX_K>::get_kmers(kmer_len, supermer.seq, kmers);
@@ -79,9 +85,9 @@ void KmerDHT<MAX_K>::get_kmers_and_exts(const Supermer &supermer, vector<KmerAnd
   for (int i = 1; i < (int)(supermer.seq.length() - kmer_len); i++) {
     Kmer<MAX_K> kmer = kmers[i];
     char left_ext = supermer.seq[i - 1];
-    if (!supermer.quals[i - 1]) left_ext = '0';
+    if (!quals[i - 1]) left_ext = '0';
     char right_ext = supermer.seq[i + kmer_len];
-    if (!supermer.quals[i + kmer_len]) right_ext = '0';
+    if (!quals[i + kmer_len]) right_ext = '0';
     // get the lexicographically smallest
     Kmer<MAX_K> kmer_rc = kmer.revcomp();
     if (kmer_rc < kmer) {
@@ -99,7 +105,7 @@ void KmerDHT<MAX_K>::update_count(Supermer supermer, dist_object<KmerMap> &kmers
                                   dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver) {
 #ifdef ENABLE_KCOUNT_GPUS_HT
   num_inserts++;
-  ht_gpu_driver->insert_supermer(supermer.seq, supermer.quals, supermer.count);
+  ht_gpu_driver->insert_supermer(supermer.seq, supermer.count);
 #else
   for (int i = 0; i < supermer.seq.length(); i++) {
     if (supermer.seq[i] != 'A' && supermer.seq[i] != 'C' && supermer.seq[i] != 'G' && supermer.seq[i] != 'T')
@@ -146,7 +152,7 @@ void KmerDHT<MAX_K>::update_ctg_kmers_count(Supermer supermer, dist_object<KmerM
                                             dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver) {
 #ifdef ENABLE_KCOUNT_GPUS_HT
   num_inserts++;
-  ht_gpu_driver->insert_supermer(supermer.seq, supermer.quals, supermer.count);
+  ht_gpu_driver->insert_supermer(supermer.seq, supermer.count);
 #else
   auto kmer_len = Kmer<MAX_K>::get_k();
   vector<KmerAndExt<MAX_K>> kmers_and_exts;

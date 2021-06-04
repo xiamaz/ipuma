@@ -84,7 +84,6 @@ struct KmerAndExts {
 
 struct SupermerBuff {
   char *seqs;
-  char *quals;
   count_t *counts;
 };
 
@@ -161,7 +160,7 @@ class HashTableGPUDriver {
 
   void set_pass(PASS_TYPE p);
 
-  void insert_supermer(const std::string &supermer_seq, const std::string &supermer_quals, count_t supermer_count);
+  void insert_supermer(const std::string &supermer_seq, count_t supermer_count);
   void flush_inserts();
   void done_ctg_kmer_inserts(int &attempted_inserts, int &dropped_inserts, int &new_inserts);
   void done_all_inserts(int &num_dropped, int &num_unique, int &num_purged);

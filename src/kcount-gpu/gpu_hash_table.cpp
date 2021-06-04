@@ -246,6 +246,8 @@ __global__ void gpu_purge_invalid(KmerCountsMap<MAX_K> elems, unsigned int *elem
   reduce(num_elems, elems.capacity, &(elem_counts[1]));
 }
 
+inline __device__ bool bad_qual(char base) { return (base == 'a' || base == 'c' || base == 'g' || base == 't'); }
+
 template <int MAX_K>
 __device__ bool get_kmer_from_supermer(SupermerBuff supermer_buff, uint32_t buff_len, int kmer_len, uint64_t *kmer, char &left_ext,
                                        char &right_ext, count_t &count) {
@@ -262,8 +264,8 @@ __device__ bool get_kmer_from_supermer(SupermerBuff supermer_buff, uint32_t buff
     count = supermer_buff.counts[threadid];
   } else {
     count = 1;
-    if (!supermer_buff.quals[threadid - 1]) left_ext = '0';
-    if (!supermer_buff.quals[threadid + kmer_len]) right_ext = '0';
+    if (bad_qual(left_ext)) left_ext = '0';
+    if (bad_qual(right_ext)) right_ext = '0';
   }
   uint64_t kmer_rc[N_LONGS];
   revcomp(kmer, kmer_rc, kmer_len, N_LONGS);
@@ -432,13 +434,11 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   read_kmers_dev.init(ht_capacity);
   // for transferring elements from host to gpu
   elem_buff_host.seqs = new char[KCOUNT_GPU_HASHTABLE_BLOCK_SIZE];
-  elem_buff_host.quals = new char[KCOUNT_GPU_HASHTABLE_BLOCK_SIZE];
   // these are not used for kmers from reads
   elem_buff_host.counts = nullptr;
   // memset(elem_buff_host.seqs, '_', KCOUNT_GPU_HASHTABLE_BLOCK_SIZE);
   // buffer on the device
   cudaErrchk(cudaMalloc(&elem_buff_dev.seqs, KCOUNT_GPU_HASHTABLE_BLOCK_SIZE));
-  cudaErrchk(cudaMalloc(&elem_buff_dev.quals, KCOUNT_GPU_HASHTABLE_BLOCK_SIZE));
   elem_buff_dev.counts = nullptr;
 
   dstate = new HashTableDriverState();
@@ -470,7 +470,6 @@ void HashTableGPUDriver<MAX_K>::insert_supermer_block(KmerCountsMap<MAX_K> &kmer
   dstate->insert_timer.start();
 
   cudaErrchk(cudaMemcpy(elem_buff_dev.seqs, elem_buff_host.seqs, buff_len, cudaMemcpyHostToDevice));
-  cudaErrchk(cudaMemcpy(elem_buff_dev.quals, elem_buff_host.quals, buff_len, cudaMemcpyHostToDevice));
   if (ctg_kmers)
     cudaErrchk(cudaMemcpy(elem_buff_dev.counts, elem_buff_host.counts, buff_len * sizeof(count_t), cudaMemcpyHostToDevice));
   unsigned int *counts_gpu;
@@ -504,7 +503,7 @@ void HashTableGPUDriver<MAX_K>::insert_supermer_block(KmerCountsMap<MAX_K> &kmer
 }
 
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::insert_supermer(const string &supermer_seq, const string &supermer_quals, count_t supermer_count) {
+void HashTableGPUDriver<MAX_K>::insert_supermer(const string &supermer_seq, count_t supermer_count) {
   if (buff_len + supermer_seq.length() + 1 >= KCOUNT_GPU_HASHTABLE_BLOCK_SIZE) {
     if (pass_type == READ_KMERS_PASS)
       insert_supermer_block(read_kmers_dev, read_kmers_stats, false);
@@ -514,13 +513,11 @@ void HashTableGPUDriver<MAX_K>::insert_supermer(const string &supermer_seq, cons
     // memset(elem_buff_host.seqs, '_', KCOUNT_GPU_HASHTABLE_BLOCK_SIZE);
   }
   memcpy(&(elem_buff_host.seqs[buff_len]), supermer_seq.c_str(), supermer_seq.length());
-  memcpy(&(elem_buff_host.quals[buff_len]), supermer_quals.c_str(), supermer_quals.length());
   if (pass_type == CTG_KMERS_PASS) {
     for (int i = 0; i < (int)supermer_seq.length(); i++) elem_buff_host.counts[buff_len + i] = supermer_count;
   }
   buff_len += supermer_seq.length();
   elem_buff_host.seqs[buff_len] = '_';
-  elem_buff_host.quals[buff_len] = '\0';
   if (pass_type == CTG_KMERS_PASS) elem_buff_host.counts[buff_len] = 0;
   buff_len++;
 }
@@ -568,13 +565,9 @@ void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_uniq
   int num_entries = 0;
   purge_invalid(num_purged, num_entries);
   read_kmers_dev.num = num_entries;
-  if (elem_buff_host.seqs) {
-    delete[] elem_buff_host.seqs;
-    delete[] elem_buff_host.quals;
-  }
+  if (elem_buff_host.seqs) delete[] elem_buff_host.seqs;
   if (elem_buff_host.counts) delete[] elem_buff_host.counts;
   cudaFree(elem_buff_dev.seqs);
-  cudaFree(elem_buff_dev.quals);
   if (elem_buff_dev.counts) cudaFree(elem_buff_dev.counts);
   // overallocate to reduce collisions
   num_entries *= 1.3;
