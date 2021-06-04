@@ -87,8 +87,11 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, string &seq_bl
     auto target = pnp_gpu_driver->supermers[i].target;
     auto offset = pnp_gpu_driver->supermers[i].offset;
     auto len = pnp_gpu_driver->supermers[i].len;
-    Supermer supermer{.seq = seq_block.substr(offset, len), .count = (from_ctgs ? depth_block[offset + 1] : (kmer_count_t)1)};
-    bytes_supermers_sent += supermer.get_bytes_compressed();
+    auto seq = seq_block.substr(offset, len);
+    Supermer supermer;
+    supermer.pack(seq_block.substr(offset, len));
+    supermer.count = (from_ctgs ? depth_block[offset + 1] : (kmer_count_t)1);
+    bytes_supermers_sent += supermer.get_bytes();
     kmer_dht->add_supermer(supermer, target);
     progress();
   }
@@ -120,14 +123,14 @@ static void process_seq(unsigned kmer_len, int qual_offset, string &seq, const s
     if (target_rank == prev_target_rank) {
       supermer.seq += seq[i + kmer_len];
     } else {
-      bytes_supermers_sent += supermer.get_bytes_compressed();
+      bytes_supermers_sent += supermer.get_bytes();
       kmer_dht->add_supermer(supermer, prev_target_rank);
       supermer.seq = seq.substr(i - 1, kmer_len + 2);
       prev_target_rank = target_rank;
     }
   }
   if (supermer.seq.length() >= kmer_len + 2) {
-    bytes_supermers_sent += supermer.get_bytes_compressed();
+    bytes_supermers_sent += get_supermer_bytes_compressed(supermer.seq.length());
     kmer_dht->add_supermer(supermer, prev_target_rank);
   }
   num_kmers += seq.length() - 2 - kmer_len;

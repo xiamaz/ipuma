@@ -556,6 +556,8 @@ def main():
                     completed_round = True
 
             _err_thread.join()
+            if _proc.returncode == None:
+                _proc.returncode = 1;
             if _proc.returncode < 0:
                 _proc.returncode *= -1
             if _proc.returncode not in [0, 15] or not status:
