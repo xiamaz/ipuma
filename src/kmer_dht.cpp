@@ -109,7 +109,7 @@ void KmerDHT<MAX_K>::update_count(Supermer supermer, dist_object<KmerMap> &kmers
 #else
   for (int i = 0; i < supermer.seq.length(); i++) {
     char base = toupper(supermer.seq[i]);
-    if (base != 'A' && base != 'C' && base != 'G' && base != 'T')
+    if (base != 'A' && base != 'C' && base != 'G' && base != 'T' && base != 'N')
       DIE("bad char '", supermer.seq[i], "' in supermer seq int val ", (int)supermer.seq[i], " length ", supermer.seq.length(),
           " supermer ", supermer.seq);
   }
