@@ -96,13 +96,13 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, string &seq_bl
 #else
 
 template <int MAX_K>
-static void process_seq(unsigned kmer_len, int qual_offset, const string &seq, const string &quals, int depth,
+static void process_seq(unsigned kmer_len, int qual_offset, string &seq, const string &quals, int depth,
                         dist_object<KmerDHT<MAX_K>> &kmer_dht, int64_t &num_Ns, int64_t &num_kmers, vector<Kmer<MAX_K>> &kmers,
                         int64_t &bytes_kmers_sent, int64_t &bytes_supermers_sent) {
   string quals_flag(seq.length(), 1);
   if (!quals.empty()) {
     for (int i = 0; i < seq.length(); i++) {
-      if (quals[i] < qual_offset + KCOUNT_QUAL_CUTOFF) quals_flag[i] = 0;
+      if (quals[i] < qual_offset + KCOUNT_QUAL_CUTOFF) seq[i] = tolower(seq[i]);
     }
   }
   if (!depth) depth = 1;
@@ -115,18 +115,16 @@ static void process_seq(unsigned kmer_len, int qual_offset, const string &seq, c
 
   // FIXME: change this to be a loop through the kmers, just like we do for GPUS - then I can check the logic before enabling GPUs
 
-  Supermer supermer{.seq = seq.substr(0, kmer_len + 1), .quals = quals_flag.substr(0, kmer_len + 1), .count = (kmer_count_t)depth};
+  Supermer supermer{.seq = seq.substr(0, kmer_len + 1), .count = (kmer_count_t)depth};
   auto prev_target_rank = kmer_dht->get_kmer_target_rank(kmers[1]);
   for (int i = 1; i < (int)(seq.length() - kmer_len); i++) {
     auto target_rank = kmer_dht->get_kmer_target_rank(kmers[i]);
     if (target_rank == prev_target_rank) {
       supermer.seq += seq[i + kmer_len];
-      supermer.quals += quals_flag[i + kmer_len];
     } else {
       bytes_supermers_sent += supermer.get_bytes_compressed();
       kmer_dht->add_supermer(supermer, prev_target_rank);
       supermer.seq = seq.substr(i - 1, kmer_len + 2);
-      supermer.quals = quals_flag.substr(i - 1, kmer_len + 2);
       prev_target_rank = target_rank;
     }
   }

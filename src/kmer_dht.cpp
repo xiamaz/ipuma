@@ -108,7 +108,8 @@ void KmerDHT<MAX_K>::update_count(Supermer supermer, dist_object<KmerMap> &kmers
   ht_gpu_driver->insert_supermer(supermer.seq, supermer.count);
 #else
   for (int i = 0; i < supermer.seq.length(); i++) {
-    if (supermer.seq[i] != 'A' && supermer.seq[i] != 'C' && supermer.seq[i] != 'G' && supermer.seq[i] != 'T')
+    char base = toupper(supermer.seq[i]);
+    if (base != 'A' && base != 'C' && base != 'G' && base != 'T')
       DIE("bad char '", supermer.seq[i], "' in supermer seq int val ", (int)supermer.seq[i], " length ", supermer.seq.length(),
           " supermer ", supermer.seq);
   }
