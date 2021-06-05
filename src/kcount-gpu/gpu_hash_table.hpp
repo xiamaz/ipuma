@@ -132,7 +132,8 @@ class HashTableGPUDriver {
   // for buffering elements in the host memory
   SupermerBuff elem_buff_host = {0};
   // for transferring host memory buffer to device
-  SupermerBuff elem_buff_dev = {0};
+  SupermerBuff unpacked_elem_buff_dev = {0};
+  SupermerBuff packed_elem_buff_dev = {0};
 
   InsertStats read_kmers_stats;
   InsertStats ctg_kmers_stats;
@@ -163,7 +164,7 @@ class HashTableGPUDriver {
 
   static int get_N_LONGS();
 
-  void get_elapsed_time(double &insert_time, double &kernel_time, double &memcpy_time);
+  void get_elapsed_time(double &insert_time, double &kernel_time);
   int64_t get_capacity(PASS_TYPE p);
   InsertStats &get_stats(PASS_TYPE p);
 };

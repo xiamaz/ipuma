@@ -103,7 +103,6 @@ void KmerDHT<MAX_K>::get_kmers_and_exts(Supermer &supermer, vector<KmerAndExt<MA
 template <int MAX_K>
 void KmerDHT<MAX_K>::update_count(Supermer supermer, dist_object<KmerMap> &kmers,
                                   dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver) {
-  supermer.unpack();
 #ifdef ENABLE_KCOUNT_GPUS_HT
   num_inserts++;
   ht_gpu_driver->insert_supermer(supermer.seq, supermer.count);
@@ -152,7 +151,6 @@ void KmerDHT<MAX_K>::update_count(Supermer supermer, dist_object<KmerMap> &kmers
 template <int MAX_K>
 void KmerDHT<MAX_K>::update_ctg_kmers_count(Supermer supermer, dist_object<KmerMap> &kmers,
                                             dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver) {
-  supermer.unpack();
 #ifdef ENABLE_KCOUNT_GPUS_HT
   num_inserts++;
   ht_gpu_driver->insert_supermer(supermer.seq, supermer.count);
@@ -583,19 +581,16 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
   int64_t all_invalid = reduce_one(invalid, op_fast_add, 0).wait();
   if (!rank_me() && all_kmers_size != all_num_entries - all_invalid)
     SWARN("CPU kmer counts not equal to gpu kmer counts: ", all_kmers_size, " != ", (all_num_entries - all_invalid));
-  double gpu_insert_time = 0, gpu_kernel_time = 0, gpu_memcpy_time = 0;
-  ht_gpu_driver->get_elapsed_time(gpu_insert_time, gpu_kernel_time, gpu_memcpy_time);
+  double gpu_insert_time = 0, gpu_kernel_time = 0;
+  ht_gpu_driver->get_elapsed_time(gpu_insert_time, gpu_kernel_time);
   auto avg_gpu_insert_time = reduce_one(gpu_insert_time, op_fast_add, 0).wait() / rank_n();
   auto max_gpu_insert_time = reduce_one(gpu_insert_time, op_fast_max, 0).wait();
   auto avg_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_add, 0).wait() / rank_n();
   auto max_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_max, 0).wait();
-  auto avg_gpu_memcpy_time = reduce_one(gpu_memcpy_time, op_fast_add, 0).wait() / rank_n();
-  auto max_gpu_memcpy_time = reduce_one(gpu_memcpy_time, op_fast_max, 0).wait();
   stage_timers.kernel_kmer_analysis->inc_elapsed(max_gpu_kernel_time);
   SLOG(KLMAGENTA "Elapsed GPU time for kmer hash tables:" KNORM "\n");
   SLOG(KLMAGENTA "  insert: ", fixed, setprecision(3), avg_gpu_insert_time, " avg, ", max_gpu_insert_time, " max" KNORM "\n");
   SLOG(KLMAGENTA "  kernel: ", fixed, setprecision(3), avg_gpu_kernel_time, " avg, ", max_gpu_kernel_time, " max" KNORM "\n");
-  SLOG(KLMAGENTA "  to cpu: ", fixed, setprecision(3), avg_gpu_memcpy_time, " avg, ", max_gpu_memcpy_time, " max" KNORM "\n");
   barrier();
 #endif
 }

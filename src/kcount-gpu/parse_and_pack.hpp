@@ -84,7 +84,7 @@ class ParseAndPackGPUDriver {
   ~ParseAndPackGPUDriver();
   bool process_seq_block(const std::string &seqs, unsigned int &num_valid_kmers);
   bool kernel_is_done();
-  std::tuple<double, double, double, double> get_elapsed_times();
+  std::tuple<double, double> get_elapsed_times();
 };
 
 }  // namespace kcount_gpu

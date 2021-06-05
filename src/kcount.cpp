@@ -90,6 +90,7 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, string &seq_bl
     auto seq = seq_block.substr(offset, len);
     Supermer supermer;
     supermer.pack(seq_block.substr(offset, len));
+    // supermer.seq = seq_block.substr(offset, len);
     supermer.count = (from_ctgs ? depth_block[offset + 1] : (kmer_count_t)1);
     bytes_supermers_sent += supermer.get_bytes();
     kmer_dht->add_supermer(supermer, target);
@@ -212,10 +213,10 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   }
   progbar.done();
   SLOG(KLMAGENTA, "Number of calls to progress while PnP GPU driver was running: ", num_gpu_waits, KNORM, "\n");
-  auto [gpu_time_tot, gpu_time_malloc, gpu_time_cp, gpu_time_kernel] = pnp_gpu_driver->get_elapsed_times();
+  auto [gpu_time_tot, gpu_time_kernel] = pnp_gpu_driver->get_elapsed_times();
   SLOG(KLMAGENTA, "Number of calls to PnP GPU kernel: ", num_read_blocks, KNORM, "\n");
-  SLOG(KLMAGENTA, "Elapsed times for PnP GPU: ", fixed, setprecision(3), " total ", gpu_time_tot, ", malloc ", gpu_time_malloc,
-       ", cp ", gpu_time_cp, ", kernel ", gpu_time_kernel, KNORM, "\n");
+  SLOG(KLMAGENTA, "Elapsed times for PnP GPU: ", fixed, setprecision(3), " total ", gpu_time_tot, ", kernel ", gpu_time_kernel,
+       KNORM, "\n");
   delete pnp_gpu_driver;
   pnp_gpu_driver = nullptr;
 #else
@@ -321,10 +322,9 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     num_ctg_blocks++;
   }
   SLOG(KLMAGENTA, "Number of calls to progress while GPU PnP driver was running: ", num_gpu_waits, KNORM, "\n");
-  auto [gpu_time_tot, gpu_time_malloc, gpu_time_cp, gpu_time_kernel] = pnp_gpu_driver->get_elapsed_times();
+  auto [gpu_time_tot, gpu_time_kernel] = pnp_gpu_driver->get_elapsed_times();
   SLOG(KLMAGENTA, "Number of calls to GPU PnP kernel ", num_ctg_blocks, " times", KNORM, "\n");
-  SLOG(KLMAGENTA, "PnP GPU times (secs): ", fixed, setprecision(3), " total ", gpu_time_tot, ", malloc ", gpu_time_malloc, ", cp ",
-       gpu_time_cp, ", kernel ", gpu_time_kernel, KNORM, "\n");
+  SLOG(KLMAGENTA, "PnP GPU times: ", fixed, setprecision(3), " total ", gpu_time_tot, ", kernel ", gpu_time_kernel, KNORM, "\n");
   delete pnp_gpu_driver;
   pnp_gpu_driver = nullptr;
 #endif

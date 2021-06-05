@@ -130,9 +130,7 @@ __global__ void parse_and_pack(char *seqs, int minimizer_len, int kmer_len, int 
   uint64_t kmer[MAX_LONGS];
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
   if (threadid < num_kmers) {
-    bool is_valid = false;
-    pack_seq_to_kmer(seqs, kmer_len, num_longs, seqs_len, kmer, is_valid);
-    if (is_valid) {
+    if (pack_seq_to_kmer(&(seqs[threadid]), kmer_len, num_longs, kmer)) {
       uint64_t kmer_rc[MAX_LONGS];
       revcomp(kmer, kmer_rc, kmer_len, num_longs);
       kmer_targets[threadid] = gpu_minimizer_hash_fast(minimizer_len, kmer_len, num_longs, kmer, kmer_rc) % num_ranks;
@@ -201,10 +199,8 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
     , num_kmer_longs(num_kmer_longs)
     , minimizer_len(minimizer_len)
     , t_func(0)
-    , t_malloc(0)
-    , t_cp(0)
     , t_kernel(0) {
-  QuickTimer init_timer, malloc_timer;
+  QuickTimer init_timer;
   init_timer.start();
   int device_count = 0;
   cudaErrchk(cudaGetDeviceCount(&device_count));
@@ -212,7 +208,6 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
   cudaErrchk(cudaSetDevice(my_gpu_id));
   max_kmers = KCOUNT_GPU_SEQ_BLOCK_SIZE - kmer_len + 1;
 
-  malloc_timer.start();
   cudaErrchk(cudaMalloc((void **)&dev_seqs, KCOUNT_GPU_SEQ_BLOCK_SIZE));
   cudaErrchk(cudaMalloc((void **)&dev_kmer_targets, max_kmers * sizeof(int)));
 
@@ -221,9 +216,6 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
   cudaErrchk(cudaMalloc((void **)&dev_num_valid_kmers, sizeof(int)));
 
   // total storage required is approx KCOUNT_GPU_SEQ_BLOCK_SIZE * (1 + num_kmers_longs * sizeof(uint64_t) + sizeof(int) + 1)
-  malloc_timer.stop();
-  t_malloc += malloc_timer.get_elapsed();
-
   dstate = new ParseAndPackDriverState();
   init_timer.stop();
   init_time = init_timer.get_elapsed();
@@ -242,7 +234,7 @@ kcount_gpu::ParseAndPackGPUDriver::~ParseAndPackGPUDriver() {
 }
 
 bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, unsigned int &num_valid_kmers) {
-  QuickTimer func_timer, cp_timer, kernel_timer;
+  QuickTimer func_timer, kernel_timer;
 
   if (seqs.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) return false;
   if (seqs.length() == 0) return false;
@@ -252,13 +244,11 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, un
   cudaErrchk(cudaEventCreateWithFlags(&dstate->event, cudaEventDisableTiming | cudaEventBlockingSync));
 
   int num_kmers = seqs.length() - kmer_len + 1;
-  kernel_timer.start();
-  cp_timer.start();
   cudaErrchk(cudaMemcpy(dev_seqs, &seqs[0], seqs.length(), cudaMemcpyHostToDevice));
-  cp_timer.stop();
 
   int gridsize, threadblocksize;
   get_kernel_config(seqs.length(), parse_and_pack, gridsize, threadblocksize);
+  kernel_timer.start();
   parse_and_pack<<<gridsize, threadblocksize>>>(dev_seqs, minimizer_len, kmer_len, num_kmer_longs, seqs.length(), dev_kmer_targets,
                                                 upcxx_rank_n);
 
@@ -272,14 +262,10 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, un
   unsigned int num_supermers;
   cudaErrchk(cudaMemcpy(&num_supermers, dev_num_supermers, sizeof(unsigned int), cudaMemcpyDeviceToHost));
   supermers.resize(num_supermers);
-  cp_timer.start();
   cudaErrchk(cudaMemcpy(&(supermers[0]), dev_supermers, num_supermers * sizeof(SupermerInfo), cudaMemcpyDeviceToHost));
-  cp_timer.stop();
-  t_cp += cp_timer.get_elapsed();
 
   kernel_timer.stop();
-  // subtract the time taken by the copy from the kernel time
-  t_kernel += (kernel_timer.get_elapsed() - cp_timer.get_elapsed());
+  t_kernel += kernel_timer.get_elapsed();
   // this is used to signal completion
   cudaErrchk(cudaEventRecord(dstate->event));
   func_timer.stop();
@@ -287,9 +273,7 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, un
   return true;
 }
 
-tuple<double, double, double, double> kcount_gpu::ParseAndPackGPUDriver::get_elapsed_times() {
-  return {t_func, t_malloc, t_cp, t_kernel};
-}
+tuple<double, double> kcount_gpu::ParseAndPackGPUDriver::get_elapsed_times() { return {t_func, t_kernel}; }
 
 bool kcount_gpu::ParseAndPackGPUDriver::kernel_is_done() {
   if (cudaEventQuery(dstate->event) != cudaSuccess) return false;

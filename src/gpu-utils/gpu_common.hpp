@@ -158,7 +158,7 @@ inline __device__ char comp_nucleotide(char ch) {
     case 'D':
     case 'H':
     case 'V': return 'N';
-    default: printf("Invalid char for nucleotide '%c' %d\n", ch, (int)ch); return 0;
+    default: return 0;
   }
 }
 
@@ -180,41 +180,38 @@ inline __device__ void revcomp(uint64_t *longs, uint64_t *rc_longs, int kmer_len
   }
 }
 
-inline __device__ void pack_seq_to_kmer(char *seqs, int kmer_len, int num_longs, int seqs_len, uint64_t *kmer, bool &is_valid) {
-  unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
-  int num_kmers = seqs_len - kmer_len + 1;
-  is_valid = false;
-  if (threadid < num_kmers) {
-    int l = 0, prev_l = 0;
-    is_valid = true;
-    uint64_t longs = 0;
-    memset(kmer, 0, sizeof(uint64_t) * num_longs);
-    // each thread extracts one kmer
-    for (int k = 0; k < kmer_len; k++) {
-      char s = seqs[threadid + k];
-      switch (s) {
-        case 'a': s = 'A'; break;
-        case 'c': s = 'C'; break;
-        case 'g': s = 'G'; break;
-        case 't': s = 'T'; break;
-        case '_':
-        case 'N': is_valid = false; break;
-      }
-      if (!is_valid) break;
-      int j = k % 32;
-      prev_l = l;
-      l = k / 32;
-      // we do it this way so we can operate on the variable longs in a register, rather than local memory in the array
-      if (l > prev_l) {
-        kmer[prev_l] = longs;
-        longs = 0;
-        prev_l = l;
-      }
-      uint64_t x = (s & 4) >> 1;
-      longs |= ((x + ((x ^ (s & 2)) >> 1)) << (2 * (31 - j)));
+inline __device__ bool pack_seq_to_kmer(char *seqs, int kmer_len, int num_longs, uint64_t *kmer) {
+  int l = 0, prev_l = 0;
+  uint64_t longs = 0;
+  memset(kmer, 0, sizeof(uint64_t) * num_longs);
+  // each thread extracts one kmer
+  for (int k = 0; k < kmer_len; k++) {
+    char s = seqs[k];
+    switch (s) {
+      case 'a': s = 'A'; break;
+      case 'c': s = 'C'; break;
+      case 'g': s = 'G'; break;
+      case 't': s = 'T'; break;
+      case 'A':
+      case 'C':
+      case 'G':
+      case 'T': break;
+      default: return false;
     }
-    kmer[l] = longs;
+    int j = k % 32;
+    prev_l = l;
+    l = k / 32;
+    // we do it this way so we can operate on the variable longs in a register, rather than local memory in the array
+    if (l > prev_l) {
+      kmer[prev_l] = longs;
+      longs = 0;
+      prev_l = l;
+    }
+    uint64_t x = (s & 4) >> 1;
+    longs |= ((x + ((x ^ (s & 2)) >> 1)) << (2 * (31 - j)));
   }
+  kmer[l] = longs;
+  return true;
 }
 
 }  // namespace gpu_common
