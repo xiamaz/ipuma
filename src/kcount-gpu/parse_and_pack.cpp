@@ -200,7 +200,8 @@ inline __device__ uint8_t get_packed_val(char base) {
     case 'C': return 6;
     case 'G': return 7;
     case 'T': return 8;
-    case 'N': return 9;
+    case 'N': 
+    case 'n': return 9;
     case '_':
     case 0: return 0;
     default: printf("Invalid value encountered when packing: %d\n", (int)base);
