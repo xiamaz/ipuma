@@ -82,6 +82,7 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, string &seq_bl
       if (quals_block[i] < qual_offset + KCOUNT_QUAL_CUTOFF) seq_block[i] = tolower(seq_block[i]);
     }
   }
+  pnp_gpu_driver->pack_seq_block(seq_block);
   int num_targets = (int)pnp_gpu_driver->supermers.size();
   for (int i = 0; i < num_targets; i++) {
     auto target = pnp_gpu_driver->supermers[i].target;
@@ -89,7 +90,26 @@ static void process_block_gpu(unsigned kmer_len, int qual_offset, string &seq_bl
     auto len = pnp_gpu_driver->supermers[i].len;
     auto seq = seq_block.substr(offset, len);
     Supermer supermer;
-    supermer.pack(seq_block.substr(offset, len));
+    // supermer.pack(seq_block.substr(offset, len));
+    int packed_len = len / 2;
+    if (offset % 2 || len % 2) packed_len++;
+    supermer.seq = pnp_gpu_driver->packed_seqs.substr(offset / 2, packed_len);
+    if (offset % 2) supermer.seq[0] &= 15;
+    if ((offset + len) % 2) supermer.seq[supermer.seq.length() - 1] &= 240;
+    /*
+    if (supermer.seq != gpu_packed_seq) {
+      ostringstream os;
+      os << "GPU pack != CPU pack, offset " << offset << " len " << len << "\n";
+      string s = seq_block.substr(offset, len);
+      for (int j = 0; j < s.length(); j += 2) os << setw(4) << s.substr(j, 2);
+      os << "\n";
+      for (auto ch : gpu_packed_seq) os << setw(4) << ((int)(ch) < 0 ? 256 + (int)ch : int(ch));
+      os << "\n";
+      for (auto ch : supermer.seq) os << setw(4) << ((int)(ch) < 0 ? 256 + (int)ch : int(ch));
+      os << "\n";
+      DIE(os.str());
+    }
+    */
     // supermer.seq = seq_block.substr(offset, len);
     supermer.count = (from_ctgs ? depth_block[offset + 1] : (kmer_count_t)1);
     bytes_supermers_sent += supermer.get_bytes();

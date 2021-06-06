@@ -190,6 +190,37 @@ __global__ void build_supermers(char *seqs, int *kmer_targets, int num_kmers, in
   reduce(my_valid_kmers, num_kmers, num_valid_kmers);
 }
 
+inline __device__ uint8_t get_packed_val(char base) {
+  switch (base) {
+    case 'a': return 1;
+    case 'c': return 2;
+    case 'g': return 3;
+    case 't': return 4;
+    case 'A': return 5;
+    case 'C': return 6;
+    case 'G': return 7;
+    case 'T': return 8;
+    case 'N': return 9;
+    case '_':
+    case 0: return 0;
+    default: printf("Invalid value encountered when packing: %d\n", (int)base);
+  };
+  return 0;
+}
+
+__global__ void pack_seqs(char *dev_seqs, char *dev_packed_seqs, int seqs_len) {
+  unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
+  int packed_seqs_len = seqs_len / 2 + seqs_len % 2;
+  if (threadid < packed_seqs_len) {
+    int seqs_i = threadid * 2;
+    char packed = (get_packed_val(dev_seqs[seqs_i]) << 4);
+    packed |= get_packed_val(dev_seqs[seqs_i + 1]);
+    dev_packed_seqs[threadid] = packed;
+  }
+}
+
+inline int halve_up(int x) { return x / 2 + x % 2; }
+
 kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int qual_offset, int kmer_len,
                                                          int num_kmer_longs, int minimizer_len, double &init_time)
     : upcxx_rank_me(upcxx_rank_me)
@@ -212,6 +243,7 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
   cudaErrchk(cudaMalloc((void **)&dev_kmer_targets, max_kmers * sizeof(int)));
 
   cudaErrchk(cudaMalloc((void **)&dev_supermers, max_kmers * sizeof(SupermerInfo)));
+  cudaErrchk(cudaMalloc((void **)&dev_packed_seqs, halve_up(KCOUNT_GPU_SEQ_BLOCK_SIZE)));
   cudaErrchk(cudaMalloc((void **)&dev_num_supermers, sizeof(int)));
   cudaErrchk(cudaMalloc((void **)&dev_num_valid_kmers, sizeof(int)));
 
@@ -226,6 +258,7 @@ kcount_gpu::ParseAndPackGPUDriver::~ParseAndPackGPUDriver() {
   cudaFree(dev_kmer_targets);
 
   cudaFree(dev_supermers);
+  cudaFree(dev_packed_seqs);
   cudaFree(dev_num_supermers);
   cudaFree(dev_num_valid_kmers);
 
@@ -257,7 +290,6 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, un
   get_kernel_config(num_kmers, build_supermers, gridsize, threadblocksize);
   build_supermers<<<gridsize, threadblocksize>>>(dev_seqs, dev_kmer_targets, num_kmers, kmer_len, seqs.length(), dev_supermers,
                                                  dev_num_supermers, dev_num_valid_kmers, upcxx_rank_me);
-
   cudaErrchk(cudaMemcpy(&num_valid_kmers, dev_num_valid_kmers, sizeof(unsigned int), cudaMemcpyDeviceToHost));
   unsigned int num_supermers;
   cudaErrchk(cudaMemcpy(&num_supermers, dev_num_supermers, sizeof(unsigned int), cudaMemcpyDeviceToHost));
@@ -271,6 +303,21 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, un
   func_timer.stop();
   t_func += func_timer.get_elapsed();
   return true;
+}
+
+void kcount_gpu::ParseAndPackGPUDriver::pack_seq_block(const string &seqs) {
+  int packed_seqs_len = halve_up(seqs.length());
+  cudaErrchk(cudaMemcpy(dev_seqs, &seqs[0], seqs.length(), cudaMemcpyHostToDevice));
+  cudaErrchk(cudaMemset(dev_packed_seqs, 0, packed_seqs_len));
+  int gridsize, threadblocksize;
+  get_kernel_config(packed_seqs_len, pack_seqs, gridsize, threadblocksize);
+  GPUTimer t;
+  t.start();
+  pack_seqs<<<gridsize, threadblocksize>>>(dev_seqs, dev_packed_seqs, seqs.length());
+  t.stop();
+  t_kernel += t.get_elapsed();
+  packed_seqs.resize(packed_seqs_len);
+  cudaErrchk(cudaMemcpy(&(packed_seqs[0]), dev_packed_seqs, packed_seqs_len, cudaMemcpyDeviceToHost));
 }
 
 tuple<double, double> kcount_gpu::ParseAndPackGPUDriver::get_elapsed_times() { return {t_func, t_kernel}; }

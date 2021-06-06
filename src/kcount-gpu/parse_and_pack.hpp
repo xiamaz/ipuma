@@ -70,20 +70,21 @@ class ParseAndPackGPUDriver {
   int *dev_kmer_targets;
 
   SupermerInfo *dev_supermers;
+  char *dev_packed_seqs;
   unsigned int *dev_num_supermers;
   unsigned int *dev_num_valid_kmers;
 
  public:
   std::vector<SupermerInfo> supermers;
-  // FIXME: these need to be packed
-  std::string supermer_seqs;
-  std::string supermer_quals;
+  std::string packed_seqs;
 
   ParseAndPackGPUDriver(int upcxx_rank_me, int upcxx_rank_n, int qual_offset, int kmer_len, int num_kmer_longs, int minimizer_len,
                         double &init_time);
   ~ParseAndPackGPUDriver();
   bool process_seq_block(const std::string &seqs, unsigned int &num_valid_kmers);
+  void pack_seq_block(const std::string &seqs);
   bool kernel_is_done();
+
   std::tuple<double, double> get_elapsed_times();
 };
 
