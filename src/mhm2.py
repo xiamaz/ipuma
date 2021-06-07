@@ -486,8 +486,6 @@ def main():
         os.mkdir(stats_dir)
         # collect in /dev/shm so that each rank can access its own data
         runtime_vars += ' GASNET_STATSFILE="%s/stats.%%", ' % stats_dir
-        # collect data for every rank locally
-        runtime_vars += ' GASNET_STATSNODES="*", '
         runtime_vars += runtime_output_vars
 
     # it appears that this GASNET_COLL_SCRATCH_SIZE  is still needed
