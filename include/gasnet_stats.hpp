@@ -56,20 +56,30 @@
 #include <gasnetex.h>
 #include <gasnet_tools.h>
 
-inline string _gasnet_stats_stage = "";
-inline void mhm2_stats_set_mask(const char *newmask) { GASNETT_STATS_SETMASK(newmask); }
-
-// ALL collects stats for the whole execution, including between stages
-// ANY collects stats for each of the named stages
-#define BEGIN_GASNET_STATS(stage)                                                                     \
-  if (_gasnet_stats_stage == stage || _gasnet_stats_stage == "ALL" || _gasnet_stats_stage == "ANY") { \
-    mhm2_stats_set_mask("PGA");                                                                       \
-    SWARN("Collecting communication stats for ", stage);                                              \
+inline bool _gasnet_stats = false;
+/*
+inline void begin_gasnet_stats(const string &stage) {
+  if (_gasnet_stats) {
+    GASNETT_STATS_SETMASK("PGAU");
+    SWARN("Collecting communication stats for ", stage);
+    GASNETT_STATS_PRINTF_FORCE("MHM2 stage %s\n", stage.c_str());
   }
-#define END_GASNET_STATS() \
-  if (_gasnet_stats_stage != "" && _gasnet_stats_stage != "ALL") mhm2_stats_set_mask("")
+}
+
+inline void end_gasnet_stats() {
+  if (_gasnet_stats) {
+    upcxx::barrier();
+    GASNETT_STATS_DUMP(1);
+    GASNETT_STATS_SETMASK("");
+  }
+}
+*/
+void begin_gasnet_stats(const string &stage);
+
+void end_gasnet_stats();
 
 #else
-#define BEGIN_GASNET_STATS(stage)
-#define END_GASNET_STATS()
+inline void begin_gasnet_stats(const string &stage) {}
+
+inline void end_gasnet_stats() {}
 #endif

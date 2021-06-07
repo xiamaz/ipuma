@@ -55,6 +55,7 @@ import io
 import string
 import multiprocessing
 import collections
+import shutil
 
 SIGNAMES = ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGTRAP', 'SIGABRT', 'SIGBUS', 'SIGFPE', 'SIGKILL', 'SIGUSR1',
             'SIGSEGV', 'SIGUSR2', 'SIGPIPE', 'SIGALRM', 'SIGTERM', 'SIGSTKFLT', 'SIGCHLD', 'SIGCONT', 'SIGSTOP', 'SIGTSTP',
@@ -419,8 +420,7 @@ def main():
     argparser.add_argument("--shared-heap", default="10%", help="Shared heap as a percentage of memory")
     #argparser.add_argument("--procs-per-node", default=0, help="Processes to spawn per node (default auto-detect cores)")
     argparser.add_argument("--procs", default=0, type=int, help="Total numer of processes")
-    argparser.add_argument("--trace-dir", default=None, help="Output directory for stacktrace")
-    argparser.add_argument("--stats-dir", default=None, help="Output directory for stacktrace")
+    argparser.add_argument("--gasnet-stats", action="store_true", help="Collect GASNet communication statistics")
     argparser.add_argument("--preproc", default=None, help="Comma separated preprocesses and options like (valgrind,--leak-check=full) or options to upcxx-run before binary")
     argparser.add_argument("--binary", default="mhm2", help="File name for UPC++ binary (default mhm2)")
 
@@ -479,21 +479,16 @@ def main():
         runtime_vars = ''
     runtime_output_vars = ''
 
-    if options.stats_dir is not None:
-        if not os.path.isdir(options.stats_dir):
-            os.mkdir(options.stats_dir)
-        runtime_vars += ' GASNET_STATSFILE="%s/stats.%%", ' % (os.path.realpath(options.stats_dir))
+    if options.gasnet_stats:
+        stats_dir = '/dev/shm/gasnet-stats'
+        if os.path.isdir(stats_dir):
+            shutil.rmtree(stats_dir, ignore_errors=True)
+        os.mkdir(stats_dir)
+        # collect in /dev/shm so that each rank can access its own data
+        runtime_vars += ' GASNET_STATSFILE="%s/stats.%%", ' % stats_dir
+        # collect data for every rank locally
+        runtime_vars += ' GASNET_STATSNODES="*", '
         runtime_vars += runtime_output_vars
-        if os.environ.get("GASNET_STATSNODES") is None:
-            runtime_vars += ' GASNET_STATSNODES="%s", ' % noderanks
-    if options.trace_dir is not None:
-        if not os.path.isdir(options.trace_dir):
-            os.mkdir(options.trace_dir)
-        runtime_vars += ' GASNET_TRACEFILE="%s/trace.%%", ' % (os.path.realpath(options.trace_dir))
-        if os.environ.get("GASNET_TRACENODES") is None:
-            runtime_vars += ' GASNET_TRACENODES="%s", ' % halfnoderanks
-        if os.environ.get("GASNET_TRACEMASK") is None:
-            runtime_vars += ' GASNET_TRACEMASK="GPWBNIH", ' # some of the more useful and less verbose trace options
 
     # it appears that this GASNET_COLL_SCRATCH_SIZE  is still needed
     print("Setting GASNET_COLL_SCRATCH_SIZE=4M", runtime_vars)
@@ -556,8 +551,6 @@ def main():
                     completed_round = True
 
             _err_thread.join()
-            if _proc.returncode == None:
-                _proc.returncode = 1;
             if _proc.returncode < 0:
                 _proc.returncode *= -1
             if _proc.returncode not in [0, 15] or not status:

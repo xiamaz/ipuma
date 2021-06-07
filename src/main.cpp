@@ -74,13 +74,11 @@ int main(int argc, char **argv) {
   auto init_timings_fut = init_timer.reduce_timings();
   upcxx::promise<> report_init_timings(1);
 
-#if defined(ENABLE_GASNET_STATS)
-  const char *gasnet_stats_stage = getenv("MHM2_GSTATS_STAGE");
   const char *gasnet_statsfile = getenv("GASNET_STATSFILE");
-  if (gasnet_stats_stage && gasnet_statsfile) {
-    mhm2_stats_set_mask("");
-    _gasnet_stats_stage = string(gasnet_stats_stage);
-  }
+#if defined(ENABLE_GASNET_STATS)
+  if (gasnet_statsfile) _gasnet_stats = true;
+#else
+  if (gasnet_statsfile) SWARN("No GASNet statistics will be collected - use Debug or RelWithDebInfo modes to enable collection.");
 #endif
 
   // we wish to have all ranks start at the same time to determine actual timing
@@ -198,11 +196,11 @@ int main(int argc, char **argv) {
     double elapsed_write_io_t = 0;
     if (!options->restart | !options->checkpoint_merged) {
       // merge the reads and insert into the packed reads memory cache
-      BEGIN_GASNET_STATS("merge_reads");
+      begin_gasnet_stats("merge_reads");
       stage_timers.merge_reads->start();
       merge_reads(options->reads_fnames, options->qual_offset, elapsed_write_io_t, packed_reads_list, options->checkpoint_merged);
       stage_timers.merge_reads->stop();
-      END_GASNET_STATS();
+      end_gasnet_stats();
     } else {
       // since this is a restart with checkpoint_merged true, the merged reads should be on disk already
       // load the merged reads instead of merge the original ones again

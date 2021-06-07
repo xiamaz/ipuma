@@ -87,31 +87,31 @@ void scaffolding(int scaff_i, int max_kmer_len, int rlen_limit, vector<PackedRea
     auto max_kmer_store = options->max_kmer_store_mb * ONE_MB;
     int seed_space = KLIGN_SEED_SPACE;
     if (options->dump_gfa && scaff_i == options->scaff_kmer_lens.size() - 1) seed_space = 1;
-    BEGIN_GASNET_STATS("alignment");
+    begin_gasnet_stats("alignment");
     double kernel_elapsed = find_alignments<MAX_K>(scaff_kmer_len, packed_reads_list, max_kmer_store, options->max_rpcs_in_flight,
                                                    ctgs, alns, seed_space, rlen_limit, false, false, 0, options->ranks_per_gpu);
-    END_GASNET_STATS();
+    end_gasnet_stats();
     stage_timers.kernel_alns->inc_elapsed(kernel_elapsed);
     stage_timers.alignments->stop();
 #ifdef DEBUG
     alns.dump_rank_file("scaff-" + to_string(scaff_kmer_len) + ".alns.gz");
 #endif
-    BEGIN_GASNET_STATS("alignment_depths");
+    begin_gasnet_stats("alignment_depths");
     compute_aln_depths("", ctgs, alns, max_kmer_len, 0, options->reads_fnames, true);
-    END_GASNET_STATS();
+    end_gasnet_stats();
     // always recalculate the insert size because we may need it for resumes of failed runs
-    BEGIN_GASNET_STATS("insert_size");
+    begin_gasnet_stats("insert_size");
     tie(ins_avg, ins_stddev) = calculate_insert_size(alns, options->insert_size[0], options->insert_size[1], max_expected_ins_size);
-    END_GASNET_STATS();
+    end_gasnet_stats();
     // insert size should never be larger than this; if it is that signals some
     // error in the assembly
     max_expected_ins_size = ins_avg + 8 * ins_stddev;
     int break_scaff_Ns = (scaff_kmer_len == options->scaff_kmer_lens.back() ? options->break_scaff_Ns : 1);
     stage_timers.cgraph->start();
-    BEGIN_GASNET_STATS("traverse_ctg_graph");
+    begin_gasnet_stats("traverse_ctg_graph");
     traverse_ctg_graph(ins_avg, ins_stddev, max_kmer_len, scaff_kmer_len, options->min_ctg_print_len, packed_reads_list,
                        break_scaff_Ns, ctgs, alns, (gfa_iter ? "final_assembly" : ""));
-    END_GASNET_STATS();
+    end_gasnet_stats();
     stage_timers.cgraph->stop();
     ctgs.print_stats(options->min_ctg_print_len);
     int max_scaff_i = (options->dump_gfa ? options->scaff_kmer_lens.size() - 2 : options->scaff_kmer_lens.size() - 1);
