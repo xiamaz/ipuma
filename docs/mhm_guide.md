@@ -354,4 +354,17 @@ Set the number of processes for MHM2 to run with. By default, MHM2 automatically
 all of them. This setting allows a user to run MHM2 on a subset of available processors, which may be desirable if running on a
 server that is running other applications.
 
+**`--trace-dir STRING`**
 
+Set the name of the directory for collecting communication traces of program execution. When run with a build of the form `Debug` or
+`RelWithDebInfo`, this will produce 2 files per node, each containing the trace for that process. For more about what data are
+collected, consult the [GASNet documentation](https://gasnet.lbl.gov/dist-ex/README), in particular, the section about GASNet
+tracing and statistical collection. The `--trace-dir` option sets the trace mask as a set of useful and sensible defaults,
+i.e. setting the GASNet environment variable: `GASNET_TRACEMASK="GPWBNIH"`. This can be overriden by explicitly setting that environment variable.
+
+**`--stats-dir STRING`**
+
+Set the name of the directory for collecting communication statistics of program execution. When run with a build of the form `Debug` or
+`RelWithDebInfo`, this will produce 2 files per node, each containing the trace for that process. For more about what data are
+collected, consult the [GASNet documentation](https://gasnet.lbl.gov/dist-ex/README), in particular, the section about GASNet
+tracing and statistical collection. 
