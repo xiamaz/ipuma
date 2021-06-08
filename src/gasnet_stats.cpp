@@ -88,20 +88,27 @@ struct MsgStats {
       , max_tot_size(0) {}
 
   void set_from_str(const string &num_str, const string &s) {
-    num = stol(num_str);
-    if (!num) return;
+    long num_here = stol(num_str);
+    if (!num_here) return;
+    num += num_here;
     auto sizes = split_string(s, "/");
-    min_size = stol(sizes[1]);
-    max_size = stol(sizes[2]);
-    tot_size = stol(sizes[3]);
+    min_size += stol(sizes[1]);
+    max_size += stol(sizes[2]);
+    tot_size += stol(sizes[3]);
   }
 
   void reduce_sizes() {
-    num = reduce_one(num, op_fast_add, 0).wait() / rank_n();
-    min_size = reduce_one(min_size, op_fast_min, 0).wait();
-    max_size = reduce_one(max_size, op_fast_max, 0).wait();
-    max_tot_size = reduce_one(tot_size, op_fast_max, 0).wait();
-    tot_size = reduce_one(tot_size, op_fast_add, 0).wait() / rank_n();
+    auto all_num = reduce_one(num, op_fast_add, 0).wait();
+    auto all_min_size = reduce_one(min_size, op_fast_min, 0).wait();
+    auto all_max_size = reduce_one(max_size, op_fast_max, 0).wait();
+    auto all_max_tot_size = reduce_one(tot_size, op_fast_max, 0).wait();
+    auto all_tot_size = reduce_one(tot_size, op_fast_add, 0).wait();
+    barrier();
+    num = all_num;
+    min_size = all_min_size;
+    max_size = all_max_size;
+    max_tot_size = all_max_tot_size;
+    tot_size = all_tot_size;
   }
 
   static string get_headers() { return "num min_size max_size tot_size avg_size load_balance"; }
@@ -117,21 +124,33 @@ struct MsgStats {
 };
 
 static void aggregate_stats() {
-  string my_fname = "/dev/shm/gasnet-stats/stats." + to_string(rank_me());
+  string my_fname = "/dev/shm/gasnet_stats." + to_string(rank_me());
   ifstream stats_file(my_fname);
-  string line;
   MsgStats gets_stats, puts_stats, am_med_stats, am_long_stats;
-  while (getline(stats_file, line)) {
-    auto tokens = split_string(line, "\\s+");
-    if (tokens.size() < 3) continue;
-    if (tokens[1] == "Total" && tokens[2] == "gets:")
-      gets_stats.set_from_str(tokens[3], tokens[7]);
-    else if (tokens[1] == "Total" && tokens[2] == "puts:")
-      puts_stats.set_from_str(tokens[3], tokens[7]);
-    else if (tokens[1] == "AMREQUEST_MEDIUM:")
-      am_med_stats.set_from_str(tokens[2], tokens[6]);
-    else if (tokens[1] == "AMREQUEST_LONG:")
-      am_long_stats.set_from_str(tokens[2], tokens[6]);
+  if (!stats_file) {
+    WARN("Could not open ", my_fname, " containing GASNet statistics");
+  } else {
+    string line;
+    // this stage will always be last in the stats file
+    while (getline(stats_file, line) && line.find(_current_stats_stage) == string::npos);
+    //SLOG(line, "\n");
+    while (getline(stats_file, line)) {
+      //SLOG(line, "\n");
+      auto tokens = split_string(line, "\\s+");
+      if (tokens.size() < 3) continue;
+      if (tokens[1] == "Total" && tokens[2] == "gets:")
+        gets_stats.set_from_str(tokens[3], tokens[7]);
+      else if (tokens[1] == "Total" && tokens[2] == "puts:")
+        puts_stats.set_from_str(tokens[3], tokens[7]);
+      else if (tokens[1] == "AMREQUEST_MEDIUM:")
+        am_med_stats.set_from_str(tokens[2], tokens[6]);
+      else if (tokens[1] == "PREP_REQUEST_MEDIUM:")
+        am_med_stats.set_from_str(tokens[2], tokens[6]);
+      else if (tokens[1] == "AMREQUEST_LONG:")
+        am_long_stats.set_from_str(tokens[2], tokens[6]);
+      else if (tokens[1] == "PREP_REQUEST_LONG:")
+        am_long_stats.set_from_str(tokens[2], tokens[6]);
+    }
   }
   barrier();
   gets_stats.reduce_sizes();

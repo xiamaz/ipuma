@@ -87,7 +87,7 @@ void scaffolding(int scaff_i, int max_kmer_len, int rlen_limit, vector<PackedRea
     auto max_kmer_store = options->max_kmer_store_mb * ONE_MB;
     int seed_space = KLIGN_SEED_SPACE;
     if (options->dump_gfa && scaff_i == options->scaff_kmer_lens.size() - 1) seed_space = 1;
-    begin_gasnet_stats("alignment");
+    begin_gasnet_stats("alignment k = " + to_string(scaff_kmer_len));
     double kernel_elapsed = find_alignments<MAX_K>(scaff_kmer_len, packed_reads_list, max_kmer_store, options->max_rpcs_in_flight,
                                                    ctgs, alns, seed_space, rlen_limit, false, false, 0, options->ranks_per_gpu);
     end_gasnet_stats();
@@ -96,11 +96,11 @@ void scaffolding(int scaff_i, int max_kmer_len, int rlen_limit, vector<PackedRea
 #ifdef DEBUG
     alns.dump_rank_file("scaff-" + to_string(scaff_kmer_len) + ".alns.gz");
 #endif
-    begin_gasnet_stats("alignment_depths");
+    begin_gasnet_stats("alignment_depths k = " + to_string(scaff_kmer_len));
     compute_aln_depths("", ctgs, alns, max_kmer_len, 0, options->reads_fnames, true);
     end_gasnet_stats();
     // always recalculate the insert size because we may need it for resumes of failed runs
-    begin_gasnet_stats("insert_size");
+    begin_gasnet_stats("insert_size k = " + to_string(scaff_kmer_len));
     tie(ins_avg, ins_stddev) = calculate_insert_size(alns, options->insert_size[0], options->insert_size[1], max_expected_ins_size);
     end_gasnet_stats();
     // insert size should never be larger than this; if it is that signals some
@@ -108,7 +108,7 @@ void scaffolding(int scaff_i, int max_kmer_len, int rlen_limit, vector<PackedRea
     max_expected_ins_size = ins_avg + 8 * ins_stddev;
     int break_scaff_Ns = (scaff_kmer_len == options->scaff_kmer_lens.back() ? options->break_scaff_Ns : 1);
     stage_timers.cgraph->start();
-    begin_gasnet_stats("traverse_ctg_graph");
+    begin_gasnet_stats("traverse_ctg_graph k = " + to_string(scaff_kmer_len));
     traverse_ctg_graph(ins_avg, ins_stddev, max_kmer_len, scaff_kmer_len, options->min_ctg_print_len, packed_reads_list,
                        break_scaff_Ns, ctgs, alns, (gfa_iter ? "final_assembly" : ""));
     end_gasnet_stats();

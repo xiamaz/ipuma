@@ -122,14 +122,14 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     dist_object<KmerDHT<MAX_K>> kmer_dht(world(), my_num_kmers, max_kmer_store, options->max_rpcs_in_flight,
                                          options->use_heavy_hitters);
     barrier();
-    begin_gasnet_stats("kmer_analysis");
+    begin_gasnet_stats("kmer_analysis k = " + to_string(kmer_len));
     analyze_kmers(kmer_len, prev_kmer_len, options->qual_offset, packed_reads_list, options->dmin_thres, ctgs, kmer_dht,
                   options->dump_kmers);
     end_gasnet_stats();
     stage_timers.analyze_kmers->stop();
     barrier();
     stage_timers.dbjg_traversal->start();
-    begin_gasnet_stats("dbjg_traversal");
+    begin_gasnet_stats("dbjg_traversal k = " + to_string(kmer_len));
     traverse_debruijn_graph(kmer_len, kmer_dht, ctgs);
     end_gasnet_stats();
     stage_timers.dbjg_traversal->stop();
@@ -143,7 +143,7 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
   if (kmer_len < options->kmer_lens.back()) {
     Alns alns;
     stage_timers.alignments->start();
-    begin_gasnet_stats("alignment");
+    begin_gasnet_stats("alignment k = " + to_string(kmer_len));
     bool first_ctg_round = (kmer_len == options->kmer_lens[0]);
     double kernel_elapsed =
         find_alignments<MAX_K>(kmer_len, packed_reads_list, max_kmer_store, options->max_rpcs_in_flight, ctgs, alns,
@@ -183,7 +183,7 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     max_expected_ins_size = ins_avg + 8 * ins_stddev;
     barrier();
     stage_timers.localassm->start();
-    begin_gasnet_stats("local_assembly");
+    begin_gasnet_stats("local_assembly k = " + to_string(kmer_len));
     localassm(LASSM_MAX_KMER_LEN, kmer_len, packed_reads_list, ins_avg, ins_stddev, options->qual_offset, ctgs, alns);
     end_gasnet_stats();
     stage_timers.localassm->stop();

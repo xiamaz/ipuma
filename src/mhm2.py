@@ -56,6 +56,7 @@ import string
 import multiprocessing
 import collections
 import shutil
+import glob
 
 SIGNAMES = ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGTRAP', 'SIGABRT', 'SIGBUS', 'SIGFPE', 'SIGKILL', 'SIGUSR1',
             'SIGSEGV', 'SIGUSR2', 'SIGPIPE', 'SIGALRM', 'SIGTERM', 'SIGSTKFLT', 'SIGCHLD', 'SIGCONT', 'SIGSTOP', 'SIGTSTP',
@@ -480,12 +481,9 @@ def main():
     runtime_output_vars = ''
 
     if options.gasnet_stats:
-        stats_dir = '/dev/shm/gasnet-stats'
-        if os.path.isdir(stats_dir):
-            shutil.rmtree(stats_dir, ignore_errors=True)
-        os.mkdir(stats_dir)
         # collect in /dev/shm so that each rank can access its own data
-        runtime_vars += ' GASNET_STATSFILE="%s/stats.%%", ' % stats_dir
+        runtime_vars += ' GASNET_STATSFILE="/dev/shm/gasnet_stats.%", '
+        #runtime_vars += ' GASNET_STATSNODES="0-%d", ' % (cores * num_nodes)
         runtime_vars += runtime_output_vars
 
     # it appears that this GASNET_COLL_SCRATCH_SIZE  is still needed
