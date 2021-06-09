@@ -246,10 +246,20 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     }
   }
 
+  upcxx::barrier(upcxx::local_team());
+  double init_mem_free = get_free_mem();
+  upcxx::barrier(upcxx::local_team());
+
   if (use_bloom)
     kmer_store_bloom.set_size("bloom", max_kmer_store_bytes, max_rpcs_in_flight, useHHSS);
   else
     kmer_store.set_size("kmers", max_kmer_store_bytes, max_rpcs_in_flight, useHHSS);
+
+  upcxx::barrier(upcxx::local_team());
+  auto new_mem = get_free_mem();
+  SLOG_VERBOSE("Kmer stores used ", get_size_str(init_mem_free - new_mem), " memory on node 0\n");
+  init_mem_free = new_mem;
+  upcxx::barrier(upcxx::local_team());
 
   if (use_bloom) {
 #if defined(ENABLE_GPUS) & defined(KCOUNT_ENABLE_GPUS)
@@ -258,11 +268,12 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
 
     // in this case we get an accurate estimate of the hash table size after the first bloom round, so the hash table space
     // is reserved then
-    double init_mem_free = get_free_mem();
     bloom_filter1->init(my_num_kmers, KCOUNT_BLOOM_FP);
     // second bloom has far fewer kmers
     bloom_filter2->init(my_num_kmers * adjustment_factor, KCOUNT_BLOOM_FP);
+    upcxx::barrier(upcxx::local_team());
     SLOG_VERBOSE("Bloom filters used ", get_size_str(init_mem_free - get_free_mem()), " memory on node 0\n");
+    upcxx::barrier(upcxx::local_team());
   } else {
     barrier();
     // in this case we have to roughly estimate the hash table size because the space is reserved now
@@ -274,9 +285,13 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     double kmers_space_reserved = my_adjusted_num_kmers * (sizeof(Kmer<MAX_K>) + sizeof(KmerCounts));
     SLOG_VERBOSE("Reserving at least ", get_size_str(node0_cores * kmers_space_reserved), " for kmer hash tables with ",
                  node0_cores * my_adjusted_num_kmers, " entries on node 0\n");
-    double init_free_mem = get_free_mem();
     if (my_adjusted_num_kmers <= 0) DIE("no kmers to reserve space for");
+
     kmers->reserve(my_adjusted_num_kmers);
+    upcxx::barrier(upcxx::local_team());
+    SLOG_VERBOSE("Kmer hashtables used ", get_size_str(init_mem_free - get_free_mem()), " memory on node 0\n");
+    upcxx::barrier(upcxx::local_team());
+
 #if defined(ENABLE_GPUS) & defined(KCOUNT_ENABLE_GPUS)
     // vector<GPUKmerCounts> gpu_kmer_counts;
     // gpu_kmer_counts.reserve(KCOUNT_GPU_MAX_HT_ENTRIES);
