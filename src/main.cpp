@@ -234,10 +234,8 @@ int main(int argc, char **argv) {
       init_gpu_thread = false;
       detect_gpu_fut.wait();
     }
-    if (num_gpus > 0) {
-      int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
-      SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
-    }
+    int max_dev_id = reduce_one(num_gpus > 0 ? gpu_utils::get_gpu_device_pci_id() : 0, op_fast_max, 0).wait();
+    SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
 #endif
 
     // contigging loops
