@@ -205,7 +205,7 @@ void Contigs::load_contigs(const string &ctgs_fname) {
   SLOG_VERBOSE("Loading contigs from fasta file ", ctgs_fname, "\n");
   BarrierTimer timer(__FILEFUNC__);
   contigs.clear();
-  dist_object<promise<size_t>> dist_stop_prom(world());
+  dist_object<upcxx::promise<size_t>> dist_stop_prom(world());
   string line;
   string ctg_prefix = ">Contig";
   string cname, seq, buf;

@@ -3,6 +3,14 @@
 
 This is the ChangeLog for MetaHipMer with development at [bitbucket](https://bitbucket.org/berkeleylab/mhm2)
 
+### More fixes not in the tagged versions below
+   * PR #40, 42
+   * Minor bugfixes Issues #97 
+   * Fixed mhm2.py script for PBS
+
+### 2.0.1.2 2021-04-22
+   * A very minor bugfix release to facilitate building against UPC++ 2021.3.0
+
 ### 2.0.1 2020-12-17
    * Use minimizer hashes to improve locality of kmers and greatly speed up deBruijn graph traversal - pull request #18
    * Aggregate messages in LocalAssem reducing overall time other optimizations in preparation for GPU acceleration - pull request #17, #16
