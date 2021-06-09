@@ -69,6 +69,7 @@ enum class Dirn { LEFT, RIGHT, NONE };
 
 enum class WalkStatus { RUNNING = '-', DEADEND = 'X', FORK = 'F', CONFLICT = 'O', REPEAT = 'R', VISITED = 'V' };
 
+struct FragElem;
 struct FragElem {
   global_ptr<FragElem> left_gptr, right_gptr;
   bool left_is_rc, right_is_rc;
@@ -155,8 +156,9 @@ static string gptr_str(global_ptr<FragElem> gptr) {
 template <int MAX_K>
 static bool check_kmers(const string &seq, dist_object<KmerDHT<MAX_K>> &kmer_dht, int kmer_len) {
   vector<Kmer<MAX_K>> kmers;
-  Kmer<MAX_K>::get_kmers(kmer_len, seq, kmers);
-  for (auto kmer : kmers) {
+  Kmer<MAX_K>::get_kmers(kmer_len, seq, kmers, true);
+  for (auto &kmer : kmers) {
+    assert(kmer.is_valid());
     if (!kmer_dht->kmer_exists(kmer)) return false;
   }
   return true;
@@ -221,10 +223,6 @@ StepInfo<MAX_K> get_next_step(dist_object<KmerDHT<MAX_K>> &kmer_dht, const Kmer<
     }
     step_info.walk_status = WalkStatus::RUNNING;
     step_info.sum_depths += kmer_counts->count;
-
-#ifndef USE_MINIMIZERS
-    break;
-#endif
 
     revisit_allowed = false;
     auto kmer = step_info.kmer;

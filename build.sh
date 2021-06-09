@@ -25,7 +25,10 @@ rootdir=`pwd`
 
 INSTALL_PATH=${MHM2_INSTALL_PATH:=$rootdir/install}
 
+BINARY="${MHM2_BINARY:=mhm2}"
+
 rm -rf $INSTALL_PATH/bin/mhm2
+rm -rf $INSTALL_PATH/bin/${BINARY}
 
 if [ "$1" == "clean" ]; then
     rm -rf .build/*
@@ -38,11 +41,14 @@ else
     if [ "$1" == "Debug" ] || [ "$1" == "Release" ] || [ "$1" == "RelWithDebInfo" ]; then
         rm -rf *
         rm -rf $INSTALL_PATH/cmake
-        cmake $rootdir -DCMAKE_BUILD_TYPE=$1 -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH $MHM2_CMAKE_EXTRAS
+        cmake $rootdir -DCMAKE_BUILD_TYPE=$1 -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH $MHM2_CMAKE_EXTRAS #-DENABLE_CUDA=0
     fi
     make -j ${MHM2_BUILD_THREADS} all install
     # this check could fail on cross-compiled systems, so don't abort
 #    make -j ${MHM2_BUILD_THREADS} check
+    if [ "$BINARY" != "mhm2" ]; then
+        mv -f $INSTALL_PATH/bin/mhm2 $INSTALL_PATH/bin/${BINARY}
+    fi
 fi
 
 echo "Build took $((SECONDS))s"

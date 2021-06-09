@@ -80,7 +80,7 @@ def get_hdw_cores_per_node():
         import psutil
         cores = psutil.cpu_count(logical=False)
         print("Found %d cpus from psutil" % cores)
-    except (NameError, ImportError):
+    except (NameError, ImportError, TypeError):
         #print("Could not get cpus from psutil")
         pass
     # always trust lscpu, not psutil
@@ -208,11 +208,11 @@ def get_pbs_job_nodes():
     """Query the PBS job environment for the number of nodes"""
     nodesfile = os.environ.get('PBS_NODEFILE')
     if nodesfile is not None:
-        nodes = 0
+        nodes = dict()
         with open(nodesfile, 'r') as f:
             for line in f:
-                nodes += 1
-        return nodes
+                nodes[line] = 1
+        return len(nodes)
     print("Warning: could not determine the number of nodes in this PBS job (%d). Only using 1" % (get_job_id()))
     return 1
 
@@ -420,8 +420,10 @@ def main():
     #argparser.add_argument("--procs-per-node", default=0, help="Processes to spawn per node (default auto-detect cores)")
     argparser.add_argument("--procs", default=0, type=int, help="Total numer of processes")
     argparser.add_argument("--trace-dir", default=None, help="Output directory for stacktrace")
-    argparser.add_argument("--stats-dir", default=None, help="Output directory for stacktrace")
-    argparser.add_argument("--preproc", default=None, help="Comma separated preprocesses and options like (valgrind,--leak-check=full) or options to upcxx-run before binary")
+    argparser.add_argument("--stats-dir", default=None, help="Output directory for GASNet communication statistics")
+    argparser.add_argument("--preproc", default=None,
+        help="Comma separated preprocesses and options like (valgrind,--leak-check=full) or options to upcxx-run before binary")
+    argparser.add_argument("--binary", default="mhm2", help="File name for UPC++ binary (default mhm2)")
 
     options, unknown_options = argparser.parse_known_args()
 
@@ -430,9 +432,9 @@ def main():
 
     check_exec('upcxx-run', '-h', 'UPC++')
     # expect mhm2 to be in same directory as mhm2.py
-    mhm2_binary_path = os.path.split(sys.argv[0])[0] + '/mhm2'
+    mhm2_binary_path = os.path.split(sys.argv[0])[0] + '/' + options.binary
     if not (os.path.exists(mhm2_binary_path) or which(mhm2_binary_path)):
-        die("Cannot find binary mhm2 in '", mhm2_binary_path, "'")
+        die("Cannot find binary ", options.binary + " in '", mhm2_binary_path, "'")
 
     #cores_per_node = int(options.procs_per_node)
     #if cores_per_node == 0:
@@ -445,9 +447,9 @@ def main():
 
     # special spawner for summit -- executes jsrun and picks up job size from the environment!
     if 'LMOD_SYSTEM_NAME' in os.environ and os.environ['LMOD_SYSTEM_NAME'] == "summit":
-        print("This is Summit - executing custom script mhm2-upcxx-run-summit to spawn the job")
         # expect mhm2-upcxx-run-summit to be in same directory as mhm2.py too
-        cmd = [mhm2_binary_path + "-upcxx-run-summit"]
+        cmd = [os.path.split(sys.argv[0])[0] + '/mhm2-upcxx-run-summit']
+        print("This is Summit - executing custom script mhm2-upcxx-run-summit to spawn the job", cmd)
         if 'UPCXX_RUN_SUMMIT_OPTS' in os.environ:
             cmd.extend(os.environ['UPCXX_RUN_SUMMIT_OPTS'].split())
 
@@ -533,7 +535,7 @@ def main():
                     pass
                 sys.stdout.write(line)
                 sys.stdout.flush()
-                if '  output = ' in line:
+                if len(_output_dir) == 0 and ('  output = ' in line or 'Using output dir: ' in line):
                     _output_dir = line.split()[3]
                     onlyascii = ''.join([s for s in _output_dir if ord(s) < 127 and ord(s) >= 32])
                     _output_dir = onlyascii
@@ -544,10 +546,10 @@ def main():
                     # get rid of any leftover error logs if not restarting
                     try:
                         # always rename the error log if it already exists
-                        new_err_log = _output_dir + 'err.log' + str(datetime.datetime.now().isoformat())
+                        new_err_log = _output_dir + 'err.log-' + str(datetime.datetime.now().isoformat())
                         os.rename(_output_dir + 'err.log', new_err_log)
                         print("Renamed old err.log to ", new_err_log)
-                        os.unlink(_output_dir + '/rank_path/err.log')
+                        os.unlink(_output_dir + '/per_rank/err.log')
                     except:
                         pass
 
@@ -576,7 +578,8 @@ def main():
                         return 127
                     else:
                         return 0
-                print_red("\nERROR: subprocess terminated with return code ", _proc.returncode)
+                print_red("\nERROR: subprocess terminated with return code ", _proc.returncode,
+                          (" (OOM)" if _proc.returncode == 137 else ""))
                 signals_found = {}
                 for err_msg in err_msgs:
                     for signame in SIGNAMES:

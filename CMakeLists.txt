@@ -178,7 +178,7 @@ message(STATUS "Building for ${CMAKE_BUILD_TYPE}: CMAKE_CXX_FLAGS=${CMAKE_CXX_FL
 
 find_package(Threads REQUIRED)
 find_package(ZLIB 1.2.3 REQUIRED)
-include_directories(BEFORE ${ZLIB_INCLUDE_DIRECTORIES})
+include_directories(BEFORE ${ZLIB_INCLUDE_DIRS})
 get_filename_component(ZLIB_BASEPATH ${ZLIB_INCLUDE_DIRS} PATH)
 link_directories(${ZLIB_BASEPATH}/lib64 ${ZLIB_BASEPATH}/lib)
 message("Adding ZLIB for -I${ZLIB_INCLUDE_DIRS} and -L${ZLIB_BASEPATH}/lib64 -L${ZLIB_BASEPATH}/lib)")
@@ -254,7 +254,7 @@ include_directories("zstr/src")
 
 add_subdirectory(src)
 install(PROGRAMS upcxx-run-summit DESTINATION ${CMAKE_INSTALL_PREFIX}/bin RENAME mhm2-upcxx-run-summit)
-install(PROGRAMS ci/check_asm_quality.py ci/ci_asm_qual_test.sh DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+install(PROGRAMS ci/check_asm_quality.py ci/ci_asm_qual_test.sh ci/ci_asm_qual_test-full.sh DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 install(FILES ci/good-arctic-sample0.txt ci/good-arctic-sample0-k63.txt ci/good-arctic-sample0-k31k63.txt ci/good-arcticsynth.txt DESTINATION ${CMAKE_INSTALL_PREFIX}/share)
 
 option(MHM2_ENABLE_TESTING "Enable testing in MHM2" ON)

@@ -45,6 +45,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cstdlib>
 #include <iostream>
 #include <regex>
 #include <sstream>
@@ -84,7 +85,10 @@ bool Options::extract_previous_lens(vector<unsigned> &lens, unsigned k) {
 
 bool Options::find_restart(string stage_type, int k) {
   string new_ctgs_fname(stage_type + "-" + to_string(k) + ".fasta");
-  if (!file_exists(new_ctgs_fname)) return false;
+  if (!file_exists(new_ctgs_fname)) {
+    SLOG("Could not find restart file: ", new_ctgs_fname, "\n");
+    return false;
+  }
   if (stage_type == "contigs") {
     if (k == kmer_lens.back() && stage_type == "contigs") {
       max_kmer_len = kmer_lens.back();
@@ -151,7 +155,8 @@ void Options::get_restart_options() {
   }
 }
 
-void Options::setup_output_dir() {
+double Options::setup_output_dir() {
+  auto t_start = chrono::high_resolution_clock::now();
   if (output_dir.empty()) DIE("Invalid empty ouput_dir");
   if (!upcxx::rank_me()) {
     // create the output directory (and possibly stripe it)
@@ -172,8 +177,6 @@ void Options::setup_output_dir() {
       } else {
         SDIE("Could not create output directory '", output_dir, "': ", strerror(errno), "\n");
       }
-    } else {
-      cout << "Created " << output_dir << "\n";
     }
 
     // always ensure striping is set or reset wide when lustre is available
@@ -224,7 +227,7 @@ void Options::setup_output_dir() {
     // this should avoid contention on the filesystem when ranks start racing to creating these top levels
     char basepath[256];
     for (int i = 0; i < rank_n(); i += 1000) {
-      sprintf(basepath, "%s/%08d", per_rank.c_str(), i);
+      sprintf(basepath, "%s/%08d", per_rank.c_str(), i / 1000);
       status = mkdir(basepath, S_IRWXU | S_IRWXG | S_IRWXO | S_ISGID /*use default mode/umask */);
       if (status != 0 && errno != EEXIST) {
         SWARN("Could not create '", basepath, "'! ", strerror(errno));
@@ -234,6 +237,8 @@ void Options::setup_output_dir() {
     sprintf(basepath, "%s/00000000/%08d", per_rank.c_str(), 0);
     status = mkdir(basepath, S_IRWXU | S_IRWXG | S_IRWXO | S_ISGID /*use default mode/umask */);
     if (status != 0 && errno != EEXIST) SDIE("Could not mkdir rank 0 per thread directory '", basepath, "'! ", strerror(errno));
+
+    cout << "Using output dir: " << output_dir << "\n";  // required for mhm2.py to find the output_dir when not verbose!
 
     cout.flush();
     cerr.flush();
@@ -265,9 +270,13 @@ void Options::setup_output_dir() {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
   }
   upcxx::barrier();
+
+  chrono::duration<double> t_elapsed = chrono::high_resolution_clock::now() - t_start;
+  return t_elapsed.count();
 }
 
-void Options::setup_log_file() {
+double Options::setup_log_file() {
+  auto t_start = chrono::high_resolution_clock::now();
   if (!upcxx::rank_me()) {
     // check to see if mhm2.log exists. If so, and not restarting, rename it
     if (file_exists("mhm2.log") && !restart) {
@@ -282,6 +291,19 @@ void Options::setup_log_file() {
     }
   }
   upcxx::barrier();
+  chrono::duration<double> t_elapsed = chrono::high_resolution_clock::now() - t_start;
+  return t_elapsed.count();
+}
+
+string Options::get_job_id() {
+  static const char *env_ids[] = {"SLURM_JOBID", "LSB_JOBID", "JOB_ID", "COBALT_JOBID", "LOAD_STEP_ID", "PBS_JOBID"};
+  for (auto env : env_ids) {
+    auto env_p = std::getenv(env);
+    if (env_p) return string(env_p);
+  }
+  // no job, broadcast the pid of rank 0
+  auto pid = upcxx::broadcast(getpid(), 0, upcxx::world()).wait();
+  return std::to_string(pid);
 }
 
 Options::Options() {
@@ -293,7 +315,7 @@ Options::Options() {
   upcxx::broadcast(buf, sizeof(buf), 0, world()).wait();
   setup_time = string(buf);
   output_dir = string("mhm2-run-<reads_fname[0]>-n") + to_string(upcxx::rank_n()) + "-N" +
-               to_string(upcxx::rank_n() / upcxx::local_team().rank_n()) + "-" + setup_time;
+               to_string(upcxx::rank_n() / upcxx::local_team().rank_n()) + "-" + setup_time + "-" + get_job_id();
 }
 Options::~Options() {
   flush_logger();
@@ -340,6 +362,7 @@ bool Options::load(int argc, char **argv) {
       ->capture_default_str()
       ->check(CLI::Range(0, 100000));
   auto *output_dir_opt = app.add_option("-o,--output", output_dir, "Output directory.")->capture_default_str();
+  app.add_flag("--shuffle-reads", shuffle_reads, "Shuffle reads to improve locality")->capture_default_str();
   app.add_flag("--checkpoint", checkpoint, "Enable checkpointing.")
       ->default_val(checkpoint ? "true" : "false")
       ->capture_default_str()
@@ -351,11 +374,16 @@ bool Options::load(int argc, char **argv) {
   app.add_flag("--restart", restart,
                "Restart in previous directory where a run failed (must specify the previous directory with -o).")
       ->capture_default_str();
+  app.add_flag("--klign-kmer-cache", klign_kmer_cache,
+               "Include a cache of kmer seed to contigs which helps avoid repeat lookups of the same kmer -- most useful after "
+               "shuffle-reads localization")
+      ->capture_default_str();
   app.add_flag("--post-asm-align", post_assm_aln, "Align reads to final assembly")->capture_default_str();
   app.add_flag("--post-asm-abd", post_assm_abundances, "Compute and output abundances for final assembly (used by MetaBAT).")
       ->capture_default_str();
   app.add_flag("--post-asm-only", post_assm_only, "Only run post assembly (alignment and/or abundances).")->capture_default_str();
   app.add_flag("--write-gfa", dump_gfa, "Write scaffolding contig graphs in GFA2 format.")->capture_default_str();
+  app.add_flag("--dump-kmers", dump_kmers, "Write kmers out after kmer counting.")->capture_default_str();
   app.add_option("-Q, --quality-offset", qual_offset, "Phred encoding offset (auto-detected by default).")
       ->check(CLI::IsMember({0, 33, 64}));
   app.add_flag("--progress", show_progress, "Show progress bars for operations.");
@@ -384,6 +412,8 @@ bool Options::load(int argc, char **argv) {
   app.add_flag("--use-heavy-hitters", use_heavy_hitters, "Enable the Heavy Hitter Streaming Store (experimental).");
   app.add_option("--ranks-per-gpu", ranks_per_gpu, "Number of processes multiplexed to each GPU (default depends on hardware).")
       ->check(CLI::Range(0, (int)upcxx::local_team().rank_n() * 8));
+  app.add_option("--max-worker-threads", max_worker_threads, "Number of threads in the worker ThreadPool (default 3)")
+      ->check(CLI::Range(0, (int)4 * upcxx::local_team().rank_n()));
   auto *bloom_opt = app.add_flag("--force-bloom", force_bloom, "Always use bloom filters.")
                         //      ->default_val(force_bloom ? "true" : "false")
                         ->multi_option_policy();
@@ -453,12 +483,13 @@ bool Options::load(int argc, char **argv) {
     auto spos = first_read_fname.find_first_of(':');
     if (spos != string::npos) first_read_fname = first_read_fname.substr(0, spos);
     output_dir = "mhm2-run-" + first_read_fname + "-n" + to_string(upcxx::rank_n()) + "-N" +
-                 to_string(upcxx::rank_n() / upcxx::local_team().rank_n()) + "-" + setup_time;
+                 to_string(upcxx::rank_n() / upcxx::local_team().rank_n()) + "-" + setup_time + "-" + get_job_id();
     output_dir_opt->default_val(output_dir);
   }
 
-  setup_output_dir();
-  setup_log_file();
+  double setup_time = 0;
+  setup_time += setup_output_dir();
+  setup_time += setup_log_file();
 
   // make sure we only use defaults for kmer lens if none of them were set by the user
   if (!*kmer_lens_opt && !*scaff_kmer_lens_opt) {
@@ -501,7 +532,7 @@ bool Options::load(int argc, char **argv) {
   if (max_kmer_store_mb == 0) {
     // use 1% of the minimum available memory
     max_kmer_store_mb = get_free_mem() / 1024 / 1024 / 100;
-    max_kmer_store_mb = upcxx::reduce_all(max_kmer_store_mb / local_team().rank_n(), upcxx::op_fast_min).wait();
+    max_kmer_store_mb = upcxx::reduce_all(max_kmer_store_mb / upcxx::local_team().rank_n(), upcxx::op_fast_min).wait();
   }
 
   auto logger_t = chrono::high_resolution_clock::now();
@@ -510,20 +541,22 @@ bool Options::load(int argc, char **argv) {
     // all have logs in per_rank
     if (rank_me() == 0 && restart) {
       auto ret = rename("mhm2.log", "per_rank/00000000/00000000/mhm2.log");
-      if (ret != 0) SWARN("For this restart, could not rename mhm2.log to per_rank/00000000/00000000/mhm2.log\n");
+      if (ret != 0)
+        SWARN("For this restart, could not rename mhm2.log to per_rank/00000000/00000000/mhm2.log: ", strerror(errno), "\n");
     }
     init_logger("mhm2.log", verbose, true);
     // if not restarting, hardlink just the rank0 log to the output dir
     // this ensures a stripe count of 1 even when the output dir is striped wide
     if (rank_me() == 0) {
       auto ret = link("per_rank/00000000/00000000/mhm2.log", "mhm2.log");
-      if (ret != 0) SWARN("Could not hard link mhm2.log from per_rank/00000000/00000000/mhm2.log\n");
+      if (ret != 0) SWARN("Could not hard link mhm2.log from per_rank/00000000/00000000/mhm2.log: ", strerror(errno), "\n");
     }
   }
 
   barrier();
   chrono::duration<double> logger_t_elapsed = chrono::high_resolution_clock::now() - logger_t;
-  SLOG_VERBOSE("init_logger took ", setprecision(2), fixed, logger_t_elapsed.count(), " s at ", get_current_time(), "\n");
+  SLOG_VERBOSE("init_logger took ", setprecision(2), fixed, logger_t_elapsed.count(), " s at ", get_current_time(), " (",
+               setup_time, " s for io)\n");
 
 #ifdef DEBUG
   open_dbg("debug");
@@ -552,6 +585,8 @@ bool Options::load(int argc, char **argv) {
 #ifdef DEBUG
   SWARN("Running low-performance debug mode");
 #endif
+  if (!post_assm_only & klign_kmer_cache & !shuffle_reads)
+    SWARN("klign-kmer-cache option selected but shuffle-reads is not, performance may suffer");
   if (!upcxx::rank_me()) {
     // write out configuration file for restarts
     ofstream ofs(config_file);

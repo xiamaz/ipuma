@@ -1,3 +1,46 @@
+
+/*
+ HipMer v 2.0, Copyright (c) 2020, The Regents of the University of California,
+ through Lawrence Berkeley National Laboratory (subject to receipt of any required
+ approvals from the U.S. Dept. of Energy).  All rights reserved."
+
+ Redistribution and use in source and binary forms, with or without modification,
+ are permitted provided that the following conditions are met:
+
+ (1) Redistributions of source code must retain the above copyright notice, this
+ list of conditions and the following disclaimer.
+
+ (2) Redistributions in binary form must reproduce the above copyright notice,
+ this list of conditions and the following disclaimer in the documentation and/or
+ other materials provided with the distribution.
+
+ (3) Neither the name of the University of California, Lawrence Berkeley National
+ Laboratory, U.S. Dept. of Energy nor the names of its contributors may be used to
+ endorse or promote products derived from this software without specific prior
+ written permission.
+
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+ EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
+ SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+ TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ DAMAGE.
+
+ You are under no obligation whatsoever to provide any bug fixes, patches, or upgrades
+ to the features, functionality or performance of the source code ("Enhancements") to
+ anyone; however, if you choose to make your Enhancements available either publicly,
+ or directly to Lawrence Berkeley National Laboratory, without imposing a separate
+ written license agreement for such Enhancements, then you hereby grant the following
+ license: a  non-exclusive, royalty-free perpetual license to install, use, modify,
+ prepare derivative works, incorporate into other computer software, distribute, and
+ sublicense such enhancements or derivative works thereof, in binary and source code
+ form.
+*/
+
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <thrust/scan.h>
@@ -6,75 +49,14 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <chrono>
 
 #include <cuda_runtime_api.h>
 #include <cuda.h>
 
 #include "driver.hpp"
 #include "kernel.hpp"
-#include <chrono>
-
-#define cudaErrchk(ans) \
-  { gpuAssert((ans), __FILE__, __LINE__); }
-
-static void gpuAssert(cudaError_t code, const char* file, int line, bool abort = true) {
-  if (code != cudaSuccess) {
-    std::ostringstream os;
-    os << "GPU assert " << cudaGetErrorString(code) << " " << file << ":" << line << "\n";
-    throw std::runtime_error(os.str());
-  }
-}
-
-size_t adept_sw::get_avail_gpu_mem_per_rank(int totRanks, int num_devices) {
-  if (num_devices == 0) num_devices = get_num_node_gpus();
-  if (!num_devices) return 0;
-  int ranksPerDevice = totRanks / num_devices;
-  return (get_tot_gpu_mem() * 0.8) / ranksPerDevice;
-}
-
-std::string adept_sw::get_device_name(int device_id) {
-    char dev_id[256];
-    cudaErrchk( cudaDeviceGetPCIBusId ( dev_id, 256, device_id ) );
-    return std::string(dev_id);
-}  
-
-size_t adept_sw::get_tot_gpu_mem() {
-  cudaDeviceProp prop;
-  cudaErrchk(cudaGetDeviceProperties(&prop, 0));
-  return prop.totalGlobalMem;
-}
-
-int adept_sw::get_num_node_gpus() {
-  int deviceCount = 0;
-  auto res = cudaGetDeviceCount(&deviceCount);
-  if (res != cudaSuccess) return 0;
-  return deviceCount;
-}
-
-bool adept_sw::initialize_gpu(double &time_to_initialize, int &device_count, size_t &total_mem) {
-    using timepoint_t = std::chrono::time_point<std::chrono::high_resolution_clock>;
-    double *first_touch;
-
-    timepoint_t t = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed;
-
-    device_count = get_num_node_gpus();
-    if (device_count > 0) {
-        total_mem = get_tot_gpu_mem();
-        cudaErrchk(cudaMallocHost(&first_touch, sizeof (double)));
-        cudaErrchk(cudaFreeHost(first_touch));
-    }
-    elapsed = std::chrono::high_resolution_clock::now() - t;
-    time_to_initialize = elapsed.count();
-    return device_count > 0;
-}
-
-bool adept_sw::initialize_gpu() {
-  double t;
-  int c;
-  size_t m;
-  return initialize_gpu(t,c,m);
-}
+#include "gpu_common.hpp"
 
 struct gpu_alignments {
   short* ref_start_gpu;
@@ -196,60 +178,60 @@ struct adept_sw::DriverState {
 };
 
 double adept_sw::GPUDriver::init(int upcxx_rank_me, int upcxx_rank_n, short match_score, short mismatch_score,
-                               short gap_opening_score, short gap_extending_score, int max_rlen) {
+                                 short gap_opening_score, short gap_extending_score, int max_rlen) {
   using timepoint_t = std::chrono::time_point<std::chrono::high_resolution_clock>;
   timepoint_t t = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> elapsed;
   driver_state = new DriverState();
-  //elapsed =  std::chrono::high_resolution_clock::now() - t; os << " new=" << elapsed.count();
+  // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " new=" << elapsed.count();
   driver_state->matchScore = match_score;
   driver_state->misMatchScore = mismatch_score;
   driver_state->startGap = gap_opening_score;
   driver_state->extendGap = gap_extending_score;
-  
-  driver_state->device_count = get_num_node_gpus();
-  //elapsed =  std::chrono::high_resolution_clock::now() - t; os << " get_num_gpus=" << elapsed.count();
-  
+  cudaErrchk(cudaGetDeviceCount(&driver_state->device_count));
+
+  // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " get_num_gpus=" << elapsed.count();
+
   cudaErrchk(cudaMallocHost(&(alignments.ref_begin), sizeof(short) * KLIGN_GPU_BLOCK_SIZE));
   cudaErrchk(cudaMallocHost(&(alignments.ref_end), sizeof(short) * KLIGN_GPU_BLOCK_SIZE));
   cudaErrchk(cudaMallocHost(&(alignments.query_begin), sizeof(short) * KLIGN_GPU_BLOCK_SIZE));
   cudaErrchk(cudaMallocHost(&(alignments.query_end), sizeof(short) * KLIGN_GPU_BLOCK_SIZE));
   cudaErrchk(cudaMallocHost(&(alignments.top_scores), sizeof(short) * KLIGN_GPU_BLOCK_SIZE));
-  //elapsed =  std::chrono::high_resolution_clock::now() - t; os << " mallocHost=" << elapsed.count();
-  
+  // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " mallocHost=" << elapsed.count();
+
   driver_state->my_gpu_id = upcxx_rank_me % driver_state->device_count;
   cudaErrchk(cudaSetDevice(driver_state->my_gpu_id));
-  //elapsed =  std::chrono::high_resolution_clock::now() - t; os << " set_device=" << elapsed.count();
-  
+  // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " set_device=" << elapsed.count();
+
   for (int stm = 0; stm < NSTREAMS; stm++) {
     cudaErrchk(cudaStreamCreate(&driver_state->streams_cuda[stm]));
   }
-  //elapsed =  std::chrono::high_resolution_clock::now() - t; os << " streamcreate=" << elapsed.count();
-  
+  // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " streamcreate=" << elapsed.count();
+
   cudaErrchk(cudaMallocHost(&driver_state->offsetA_h, sizeof(int) * KLIGN_GPU_BLOCK_SIZE));
   cudaErrchk(cudaMallocHost(&driver_state->offsetB_h, sizeof(int) * KLIGN_GPU_BLOCK_SIZE));
-  //elapsed =  std::chrono::high_resolution_clock::now() - t; os << " mallocHost2=" << elapsed.count();
+  // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " mallocHost2=" << elapsed.count();
 
-  // FIXME: hack for max contig and read size
-  cudaErrchk(cudaMalloc(&driver_state->strA_d, max_rlen * KLIGN_GPU_BLOCK_SIZE * sizeof(char)));
+  // FIXME: hack for max contig and read size -> multiplying max_rlen by 2 for contigs
+  cudaErrchk(cudaMalloc(&driver_state->strA_d, 2 * max_rlen * KLIGN_GPU_BLOCK_SIZE * sizeof(char)));
   cudaErrchk(cudaMalloc(&driver_state->strB_d, max_rlen * KLIGN_GPU_BLOCK_SIZE * sizeof(char)));
-  //elapsed =  std::chrono::high_resolution_clock::now() - t; os << " mallocs=" << elapsed.count();
+  // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " mallocs=" << elapsed.count();
 
-  cudaErrchk(cudaMallocHost(&driver_state->strA, sizeof(char) * max_rlen * KLIGN_GPU_BLOCK_SIZE));
+  cudaErrchk(cudaMallocHost(&driver_state->strA, 2 * sizeof(char) * max_rlen * KLIGN_GPU_BLOCK_SIZE));
   cudaErrchk(cudaMallocHost(&driver_state->strB, sizeof(char) * max_rlen * KLIGN_GPU_BLOCK_SIZE));
-  //elapsed =  std::chrono::high_resolution_clock::now() - t; os << " mallocHost3=" << elapsed.count();
-  
+  // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " mallocHost3=" << elapsed.count();
+
   driver_state->gpu_data = new gpu_alignments(KLIGN_GPU_BLOCK_SIZE);  // gpu mallocs
-  //elapsed =  std::chrono::high_resolution_clock::now() - t; os << " final=" << elapsed.count();
-  
-  elapsed =  std::chrono::high_resolution_clock::now() - t;
+  // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " final=" << elapsed.count();
+
+  elapsed = std::chrono::high_resolution_clock::now() - t;
   return elapsed.count();
 }
 
 adept_sw::GPUDriver::~GPUDriver() {
   // won't have been allocated if there was no GPU present
   if (!alignments.ref_begin) return;
-  
+  cudaErrchk(cudaSetDevice(driver_state->my_gpu_id)); // setting device mapping again
   cudaErrchk(cudaFreeHost(alignments.ref_begin));
   cudaErrchk(cudaFreeHost(alignments.ref_end));
   cudaErrchk(cudaFreeHost(alignments.query_begin));
@@ -274,12 +256,13 @@ bool adept_sw::GPUDriver::kernel_is_done() {
 }
 
 void adept_sw::GPUDriver::kernel_block() {
-    cudaErrchk(cudaEventSynchronize(driver_state->event));
-    cudaErrchk(cudaEventDestroy(driver_state->event));
+  cudaErrchk(cudaEventSynchronize(driver_state->event));
+  cudaErrchk(cudaEventDestroy(driver_state->event));
 }
 
 void adept_sw::GPUDriver::run_kernel_forwards(std::vector<std::string>& reads, std::vector<std::string>& contigs,
                                               unsigned maxReadSize, unsigned maxContigSize) {
+  cudaErrchk(cudaSetDevice(driver_state->my_gpu_id)); // setting device mapping again
   unsigned totalAlignments = contigs.size();  // assuming that read and contig vectors are same length
 
   short* alAend = alignments.ref_end;
@@ -413,10 +396,4 @@ void adept_sw::GPUDriver::run_kernel_backwards(std::vector<std::string>& reads, 
   asynch_mem_copies_dth(driver_state->gpu_data, alAbeg, alBbeg, top_scores_cpu, sequences_per_stream, sequences_stream_leftover,
                         driver_state->streams_cuda);
   cudaErrchk(cudaEventRecord(driver_state->event));
-
-  alAbeg += totalAlignments;
-  alBbeg += totalAlignments;
-  alAend += totalAlignments;
-  alBend += totalAlignments;
-  top_scores_cpu += totalAlignments;
 }

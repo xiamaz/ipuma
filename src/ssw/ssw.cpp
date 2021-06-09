@@ -427,13 +427,17 @@ namespace StripedSmithWaterman {
     return true;
   }
 
-
   bool Aligner::Align(const char* query, const char* ref, const int& ref_len,
+                      const Filter& filter, Alignment* alignment, const int32_t maskLen) const
+  {
+    return Align(query, strlen(query), ref, ref_len, filter, alignment, maskLen);
+  }
+
+  bool Aligner::Align(const char* query, const int& query_len, const char* ref, const int& ref_len,
                       const Filter& filter, Alignment* alignment, const int32_t maskLen) const
   {
     if (!translation_matrix_) return false;
 
-    int query_len = strlen(query);
     if (query_len == 0) return false;
     int8_t* translated_query = new int8_t[query_len];
     TranslateBase(query, query_len, translated_query);

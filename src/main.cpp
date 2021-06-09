@@ -52,6 +52,7 @@
 #include "upcxx_utils.hpp"
 #include "upcxx_utils/thread_pool.hpp"
 #include "utils.hpp"
+#include "gpu-utils/gpu_utils.hpp"
 
 #include "kmer.hpp"
 
@@ -64,19 +65,33 @@ void merge_reads(vector<string> reads_fname_list, int qual_offset, double &elaps
                  vector<PackedReads *> &packed_reads_list, bool checkpoint);
 
 int main(int argc, char **argv) {
+  BaseTimer init_timer("upcxx::init");
+  BaseTimer first_barrier("FirstBarrier");
+  init_timer.start();
   upcxx::init();
+  auto init_entry_msm_fut = init_timer.reduce_start();
+  init_timer.stop();
+  auto init_timings_fut = init_timer.reduce_timings();
+  upcxx::promise<> report_init_timings(1);
+
 #if defined(ENABLE_GASNET_STATS)
-  const char *gasnet_stats_stage = getenv("GASNET_STATS_STAGE");
-  const char *gasnet_statsfile = getenv("GASNET_STATSFILE");
-  if (gasnet_stats_stage && gasnet_statsfile) {
-    mhm2_stats_set_mask("");
-    _gasnet_stats_stage = string(gasnet_stats_stage);
-  }
+  mhm2_gasnet_stats_start();
 #endif
+
   // we wish to have all ranks start at the same time to determine actual timing
+  first_barrier.start();
   barrier();
+  first_barrier.stop();
+  when_all(report_init_timings.get_future(), init_entry_msm_fut, init_timings_fut, first_barrier.reduce_timings())
+      .then([](upcxx_utils::MinSumMax<double> entry_msm, upcxx_utils::ShTimings sh_timings,
+               upcxx_utils::ShTimings sh_first_barrier_timings) {
+        SLOG_VERBOSE("upcxx::init Before=", entry_msm.to_string(), "\n");
+        SLOG_VERBOSE("upcxx::init After=", sh_timings->to_string(), "\n");
+        SLOG_VERBOSE("upcxx::init FirstBarrier=", sh_first_barrier_timings->to_string(), "\n");
+      });
   auto start_t = std::chrono::high_resolution_clock::now();
   auto init_start_t = start_t;
+
   // keep the exact command line arguments before options may have modified anything
   string executed = argv[0];
   executed += ".py";  // assume the python wrapper was actually called
@@ -85,6 +100,9 @@ int main(int argc, char **argv) {
   // if we don't load, return "command not found"
   if (!options->load(argc, argv)) return 127;
   SLOG_VERBOSE("Executed as: ", executed, "\n");
+  report_init_timings.fulfill_anonymous(1);
+
+  SLOG_VERBOSE(KLCYAN, "Timing reported as min/my/average/max, balance", KNORM, "\n");
 
   ProgressBar::SHOW_PROGRESS = options->show_progress;
   auto max_kmer_store = options->max_kmer_store_mb * ONE_MB;
@@ -110,8 +128,9 @@ int main(int argc, char **argv) {
     }
     if (status != 0) SWARN("Could not get/set rlimits for NOFILE\n");
   }
-  const int num_threads = 3;  // reserve up to 3 threads in the singleton thread pool TODO make an option
+  const int num_threads = options->max_worker_threads;  // reserve up to threads in the singleton thread pool.
   upcxx_utils::ThreadPool::get_single_pool(num_threads);
+  // FIXME if (!options->max_worker_threads) upcxx_utils::FASRPCCounts::use_worker_thread() = false;
   SLOG_VERBOSE("Allowing up to ", num_threads, " extra threads in the thread pool\n");
 
   if (!upcxx::rank_me()) {
@@ -148,21 +167,17 @@ int main(int argc, char **argv) {
   int num_gpus = -1;
   size_t gpu_mem = 0;
   bool init_gpu_thread = true;
-  SLOG_VERBOSE("Detecting GPUs\n");
   auto detect_gpu_fut = execute_in_thread_pool(
-      [&gpu_startup_duration, &num_gpus, &gpu_mem]() { adept_sw::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
+      [&gpu_startup_duration, &num_gpus, &gpu_mem]() { gpu_utils::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
   detect_gpu_fut = detect_gpu_fut.then([&gpu_startup_duration, &num_gpus, &gpu_mem]() {
     if (num_gpus > 0) {
-      SLOG_VERBOSE("Using ", num_gpus, " GPUs on node 0, with ", get_size_str(gpu_mem), " available memory. Detected in ",
-                   gpu_startup_duration, " s.\n");
+      SLOG_VERBOSE(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
+                   get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
+      SLOG_VERBOSE(gpu_utils::get_gpu_device_description());
     } else {
       SWARN("Compiled for GPUs but no GPUs available...");
     }
   });
-#endif
-
-#ifdef USE_MINIMIZERS
-  SLOG_VERBOSE("Using minimizers for kmer analysis and deBruijn graph traversal\n");
 #endif
 
   Contigs ctgs;
@@ -179,11 +194,10 @@ int main(int argc, char **argv) {
     double elapsed_write_io_t = 0;
     if (!options->restart | !options->checkpoint_merged) {
       // merge the reads and insert into the packed reads memory cache
-      BEGIN_GASNET_STATS("merge_reads");
       stage_timers.merge_reads->start();
       merge_reads(options->reads_fnames, options->qual_offset, elapsed_write_io_t, packed_reads_list, options->checkpoint_merged);
       stage_timers.merge_reads->stop();
-      END_GASNET_STATS();
+      mhm2_gasnet_stats_dump("merge reads\n");
     } else {
       // since this is a restart with checkpoint_merged true, the merged reads should be on disk already
       // load the merged reads instead of merge the original ones again
@@ -214,11 +228,22 @@ int main(int argc, char **argv) {
     int ins_avg = 0;
     int ins_stddev = 0;
 
+#ifdef ENABLE_GPUS
+    if (init_gpu_thread) {
+      Timer t("Waiting for GPU to be initialized (should be noop)");
+      init_gpu_thread = false;
+      detect_gpu_fut.wait();
+    }
+    int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
+    SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
+#endif
+
     // contigging loops
     if (options->kmer_lens.size()) {
       max_kmer_len = options->kmer_lens.back();
       for (auto kmer_len : options->kmer_lens) {
         auto max_k = (kmer_len / 32 + 1) * 32;
+        LOG(upcxx_utils::GasNetVars::getUsedShmMsg(), "\n");
 
 #define CONTIG_K(KMER_LEN)                                                                                                         \
   case KMER_LEN:                                                                                                                   \
@@ -248,14 +273,6 @@ int main(int argc, char **argv) {
       }
     }
 
-#ifdef ENABLE_GPUS
-    if (init_gpu_thread) {
-      Timer t("Waiting for GPU to be initialized (should be noop)");
-      init_gpu_thread = false;
-      detect_gpu_fut.wait();
-    }
-#endif
-
     // scaffolding loops
     if (options->dump_gfa) {
       if (options->scaff_kmer_lens.size())
@@ -273,6 +290,7 @@ int main(int argc, char **argv) {
       for (unsigned i = 0; i < options->scaff_kmer_lens.size(); ++i) {
         auto scaff_kmer_len = options->scaff_kmer_lens[i];
         auto max_k = (scaff_kmer_len / 32 + 1) * 32;
+        LOG(upcxx_utils::GasNetVars::getUsedShmMsg(), "\n");
 
 #define SCAFFOLD_K(KMER_LEN)                                                                                                \
   case KMER_LEN:                                                                                                            \
@@ -334,6 +352,7 @@ int main(int argc, char **argv) {
     SLOG("    ", stage_timers.alignments->get_final(), "\n");
     SLOG("      -> ", stage_timers.kernel_alns->get_final(), "\n");
     SLOG("    ", stage_timers.localassm->get_final(), "\n");
+    if (options->shuffle_reads) SLOG("    ", stage_timers.shuffle_reads->get_final(), "\n");
     SLOG("    ", stage_timers.cgraph->get_final(), "\n");
     SLOG("    FASTQ total read time: ", FastqReader::get_io_time(), "\n");
     SLOG("    merged FASTQ write time: ", elapsed_write_io_t, "\n");

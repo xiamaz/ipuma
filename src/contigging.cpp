@@ -63,6 +63,7 @@ template <int MAX_K>
 void traverse_debruijn_graph(unsigned kmer_len, dist_object<KmerDHT<MAX_K>> &kmer_dht, Contigs &my_uutigs);
 void localassm(int max_kmer_len, int kmer_len, vector<PackedReads *> &packed_reads_list, int insert_avg, int insert_stddev,
                int qual_offset, Contigs &ctgs, const Alns &alns);
+void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Alns &alns, size_t num_ctgs);
 
 static uint64_t estimate_num_kmers(unsigned kmer_len, vector<PackedReads *> &packed_reads_list) {
   BarrierTimer timer(__FILEFUNC__);
@@ -92,12 +93,12 @@ static uint64_t estimate_num_kmers(unsigned kmer_len, vector<PackedReads *> &pac
   auto all_num_kmers = reduce_all(num_kmers, op_fast_add).wait();
 
   SLOG_VERBOSE("Processed ", perc_str(all_num_reads, all_tot_num_reads), " reads, and estimated a maximum of ",
-               all_num_kmers * (all_tot_num_reads / all_num_reads), " kmers\n");
+               (all_num_reads > 0 ? all_num_kmers * (all_tot_num_reads / all_num_reads) : 0), " kmers\n");
   return num_reads > 0 ? num_kmers * tot_num_reads / num_reads : 0;
 }
 
 template <int MAX_K>
-void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedReads *> packed_reads_list, Contigs &ctgs,
+void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedReads *> &packed_reads_list, Contigs &ctgs,
                 int &max_expected_ins_size, int &ins_avg, int &ins_stddev, shared_ptr<Options> options) {
   auto loop_start_t = std::chrono::high_resolution_clock::now();
   SLOG(KBLUE, "_________________________", KNORM, "\n");
@@ -121,15 +122,14 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     dist_object<KmerDHT<MAX_K>> kmer_dht(world(), my_num_kmers, max_kmer_store, options->max_rpcs_in_flight, options->force_bloom,
                                          options->use_heavy_hitters);
     barrier();
-    BEGIN_GASNET_STATS("kmer_analysis");
-    analyze_kmers(kmer_len, prev_kmer_len, options->qual_offset, packed_reads_list, options->dmin_thres, ctgs, kmer_dht);
-    END_GASNET_STATS();
+    analyze_kmers(kmer_len, prev_kmer_len, options->qual_offset, packed_reads_list, options->dmin_thres, ctgs, kmer_dht,
+                  options->ranks_per_gpu, options->dump_kmers);
+    mhm2_gasnet_stats_dump("kmer analylis\n");
     stage_timers.analyze_kmers->stop();
     barrier();
     stage_timers.dbjg_traversal->start();
-    BEGIN_GASNET_STATS("dbjg_traversal");
     traverse_debruijn_graph(kmer_len, kmer_dht, ctgs);
-    END_GASNET_STATS();
+    mhm2_gasnet_stats_dump("dbjg traversal\n");
     stage_timers.dbjg_traversal->stop();
     if (is_debug || options->checkpoint) {
       stage_timers.dump_ctgs->start();
@@ -141,13 +141,36 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
   if (kmer_len < options->kmer_lens.back()) {
     Alns alns;
     stage_timers.alignments->start();
-    BEGIN_GASNET_STATS("alignment");
-    double kernel_elapsed = find_alignments<MAX_K>(kmer_len, packed_reads_list, max_kmer_store, options->max_rpcs_in_flight, ctgs,
-                                                   alns, KLIGN_SEED_SPACE, rlen_limit, false, 0, options->ranks_per_gpu);
-    END_GASNET_STATS();
+    bool first_ctg_round = (kmer_len == options->kmer_lens[0]);
+    double kernel_elapsed = find_alignments<MAX_K>(
+        kmer_len, packed_reads_list, max_kmer_store, options->max_rpcs_in_flight, ctgs, alns, KLIGN_SEED_SPACE, rlen_limit,
+        (options->klign_kmer_cache & !first_ctg_round), false, 0, options->ranks_per_gpu);
     stage_timers.kernel_alns->inc_elapsed(kernel_elapsed);
     stage_timers.alignments->stop();
     barrier();
+    if (kmer_len == options->kmer_lens.front()) {
+      size_t num_reads = 0;
+      for (auto packed_reads : packed_reads_list) {
+        num_reads += packed_reads->get_local_num_reads();
+      }
+      auto avg_num_reads = reduce_one(num_reads, op_fast_add, 0).wait() / rank_n();
+      auto max_num_reads = reduce_one(num_reads, op_fast_max, 0).wait();
+      SLOG_VERBOSE("Avg reads per rank ", avg_num_reads, " max ", max_num_reads, " (balance ",
+                   (double)avg_num_reads / max_num_reads, ")\n");
+      if (options->shuffle_reads) {
+        stage_timers.shuffle_reads->start();
+        shuffle_reads(options->qual_offset, packed_reads_list, alns, ctgs.size());
+        stage_timers.shuffle_reads->stop();
+        num_reads = 0;
+        for (auto packed_reads : packed_reads_list) {
+          num_reads += packed_reads->get_local_num_reads();
+        }
+        avg_num_reads = reduce_one(num_reads, op_fast_add, 0).wait() / rank_n();
+        max_num_reads = reduce_one(num_reads, op_fast_max, 0).wait();
+        SLOG_VERBOSE("After shuffle: avg reads per rank ", avg_num_reads, " max ", max_num_reads, " (load balance ",
+                     (double)avg_num_reads / max_num_reads, ")\n");
+      }
+    }
 #ifdef DEBUG
     alns.dump_rank_file("ctg-" + to_string(kmer_len) + ".alns.gz");
 #endif
@@ -156,9 +179,8 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     max_expected_ins_size = ins_avg + 8 * ins_stddev;
     barrier();
     stage_timers.localassm->start();
-    BEGIN_GASNET_STATS("local_assembly");
     localassm(LASSM_MAX_KMER_LEN, kmer_len, packed_reads_list, ins_avg, ins_stddev, options->qual_offset, ctgs, alns);
-    END_GASNET_STATS();
+    mhm2_gasnet_stats_dump("local assembly\n");
     stage_timers.localassm->stop();
   }
   barrier();

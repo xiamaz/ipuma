@@ -258,7 +258,7 @@ function(DETECT_HOST_ARCHITECTURE _CPU_ARCH_VAR)
                 set(TARGET_ARCHITECTURE "kaby-lake")
             elseif(_cpu_model EQUAL 85) # 55
                 set(TARGET_ARCHITECTURE "skylake-avx512")
-            elseif(_cpu_model EQUAL 78 OR _cpu_model EQUAL 94) # 4E, 5E
+            elseif(_cpu_model EQUAL 78 OR _cpu_model EQUAL 94 OR _cpu_model EQUAL 165) # 4E, 5E
                 set(TARGET_ARCHITECTURE "skylake")
             elseif(_cpu_model EQUAL 61 OR _cpu_model EQUAL 71 OR
                     _cpu_model EQUAL 79 OR _cpu_model EQUAL 86) # 3D, 47, 4F, 56

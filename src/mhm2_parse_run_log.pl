@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use File::stat;
+use File::Basename;
 
 our %stats;
 # translated modules from hipmer's parse_run_log.pl as best as possible with same number of columns
@@ -38,9 +39,8 @@ $stats{'StageTime'} = 0;
 
 
 sub printStats {
-
-   print join(";", @fields) . "\n";
-   print join(";", @stats{@fields}) . "\n";
+   print join("\t", @fields) . "\n";
+   print join("\t", @stats{@fields}) . "\n";
 }
 
 $stats{"Operator"} = $ENV{"USER"};
@@ -55,11 +55,12 @@ my $post_processing = 0;
 my $knowGB = 0;
 my $firstUFX = 1;
 $stats{"MinDepth"} = 2.0;
+my $restarted = 0;
 while (<>) {
     s/[\000-\037]\[(\d|;)+m//g; # remove any control characters from the log
     if (/Total size of \d+ input .* is (\d+\.\d\d)(.)/) {
       my $unit = $h_units{$2};
-      $stats{"GBofFASTQ"} += ($1+0.0) * $unit;
+      $stats{"GBofFASTQ"} = ($1+0.0) * $unit;
     }
 
     if (/Executed as: (.+)/) {
@@ -68,12 +69,13 @@ while (<>) {
         }
         if (/--restart/) {
             $stats{"NumRestarts"}++;
+            $restarted = 1;
         }
     }
     if (/MHM2 version (\S+) with upcxx-utils /) {
         $stats{"Version"} = $1;
     }
-    if (/Starting run with (\d+) processes on (\d+) node.? at/) {
+    if (!$restarted && /Starting run with (\d+) processes on (\d+) node.? at/) {
         $stats{"Threads"} = $1;
         $stats{"Nodes"} = $2;
     }
@@ -94,7 +96,7 @@ while (<>) {
         }
     }
     if (/ scaff-kmer-lens =\s+(\S+)/) {
-        $cgraph = ($1 > 0) ? 1 : 0;
+        $cgraph = ($1 ne "" and $1 ne "0") ? 1 : 0;
     }
 
     if (/ min-depth-thres =\s+ (\d+\.?\d*)$/) {
@@ -192,7 +194,9 @@ if ($post_processing) {
 }
 
 $stats{"DataSetName"} = $stats{"RunDir"};
-$stats{"DataSetName"} =~ s/.*\///;
+if ($stats{"DataSetName"} =~ /\//) {
+    $stats{"DataSetName"} = basename($stats{"DataSetName"});
+}
 foreach my $module (@modules) {
     $stats{$module} =~ s/\..*//;
 }
@@ -201,5 +205,7 @@ $stats{"GBofFASTQ"} =~ s/(\.\d)\d*/$1/;
 
 printStats();
 
-print "MHM2, version " . $stats{"Version"} . ", was executed on " . $stats{"NumReads"} . " reads" . " and " . $stats{"GBofFASTQ"} . " GB of fastq " . "for " . $stats{"TotalTime"} . " seconds in a job over " . $stats{"Nodes"} . " nodes (" . $stats{"Threads"} . " threads) using the " . $stats{"HipmerWorkflow"} . " workflow.\n";
+print "MHM2, version " . $stats{"Version"} . ", was executed on " . $stats{"NumReads"} . " reads" . " and " 
+       . $stats{"GBofFASTQ"} . " GB of fastq " . "for " . $stats{"TotalTime"} . " seconds in a job over " 
+       . $stats{"Nodes"} . " nodes (" . $stats{"Threads"} . " threads) using the " . $stats{"HipmerWorkflow"} . " workflow.\n";
 

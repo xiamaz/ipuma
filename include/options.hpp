@@ -71,11 +71,13 @@ class Options {
 
   void get_restart_options();
 
-  void setup_output_dir();
+  double setup_output_dir();
 
-  void setup_log_file();
+  double setup_log_file();
 
   bool find_restart(string stage_type, int k);
+
+  static string get_job_id();
 
  public:
   vector<string> reads_fnames;
@@ -94,23 +96,24 @@ class Options {
   int dmin_thres = 2.0;
   bool checkpoint = true;
   bool checkpoint_merged = false;
+  bool klign_kmer_cache = false;
   bool post_assm_aln = false;
   bool post_assm_abundances = false;
   bool post_assm_only = false;
   bool dump_gfa = false;
   bool show_progress = false;
-  string pin_by = "core";
+  string pin_by = "numa";
   int ranks_per_gpu = 0;  // autodetect
+  int max_worker_threads = 3;
   string ctgs_fname;
-#ifdef USE_KMER_DEPTHS
-  string kmer_depths_fname;
-#endif
   vector<int> insert_size = {0, 0};
   int min_ctg_print_len = 500;
   int break_scaff_Ns = 10;
   string output_dir;
   string setup_time;
   bool restart = false;
+  bool shuffle_reads = false;
+  bool dump_kmers = false;
 
   Options();
   ~Options();
