@@ -151,7 +151,7 @@ static void process_seq(unsigned kmer_len, int qual_offset, string &seq, const s
     }
   }
   if (supermer.seq.length() >= kmer_len + 2) {
-    bytes_supermers_sent += get_supermer_bytes_compressed(supermer.seq.length());
+    bytes_supermers_sent += supermer.get_bytes();
     kmer_dht->add_supermer(supermer, prev_target_rank);
   }
   num_kmers += seq.length() - 2 - kmer_len;
