@@ -159,4 +159,6 @@ class PackedReads {
   static void load_reads(PackedReadsList &);
 
   void report_size();
+
+  int64_t get_bases();
 };

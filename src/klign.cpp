@@ -310,7 +310,7 @@ class KmerCtgDHT {
   static void ssw_align_read(StripedSmithWaterman::Aligner &ssw_aligner, StripedSmithWaterman::Filter &ssw_filter, Alns *alns,
                              AlnScoring &aln_scoring, IntermittentTimer &aln_kernel_timer, Aln &aln, const string_view &cseq,
                              const string_view &rseq, int read_group_id) {
-    assert(aln.clen >= cseq.length() && "contig seq is containd within the greater contig");
+    assert(aln.clen >= cseq.length() && "contig seq is contained within the greater contig");
     assert(aln.rlen >= rseq.length() && "read seq is contained with the greater read");
 
     StripedSmithWaterman::Alignment ssw_aln;
@@ -708,26 +708,27 @@ class KmerCtgDHT {
 
   future<vector<KmerAndCtgLoc<MAX_K>>> get_ctgs_with_kmers(int target_rank, vector<Kmer<MAX_K>> &kmers) {
     DBG_VERBOSE("Sending request for ", kmers.size(), " to ", target_rank, "\n");
-    return rpc(target_rank,
-               [](vector<Kmer<MAX_K>> kmers, kmer_map_t &kmer_map) {
-                 vector<KmerAndCtgLoc<MAX_K>> kmer_ctg_locs;
-                 kmer_ctg_locs.reserve(kmers.size());
-                 for (auto &kmer : kmers) {
-                   assert(kmer.is_least());
-                   assert(kmer.is_valid());
-                   const auto it = kmer_map->find(kmer);
-                   if (it == kmer_map->end()) continue;
-                   // skip conflicts
-                   if (it->second.first) continue;
-                   // now add it
-                   kmer_ctg_locs.push_back({kmer, it->second.second});
-                 }
-                 DBG_VERBOSE("processed get_ctgs_with_kmers ", kmers.size(), " ", get_size_str(kmers.size() * sizeof(Kmer<MAX_K>)),
-                             ", returning ", kmer_ctg_locs.size(), " ",
-                             get_size_str(kmer_ctg_locs.size() * sizeof(KmerAndCtgLoc<MAX_K>)), "\n");
-                 return kmer_ctg_locs;
-               },
-               kmers, kmer_map);
+    return rpc(
+        target_rank,
+        [](vector<Kmer<MAX_K>> kmers, kmer_map_t &kmer_map) {
+          vector<KmerAndCtgLoc<MAX_K>> kmer_ctg_locs;
+          kmer_ctg_locs.reserve(kmers.size());
+          for (auto &kmer : kmers) {
+            assert(kmer.is_least());
+            assert(kmer.is_valid());
+            const auto it = kmer_map->find(kmer);
+            if (it == kmer_map->end()) continue;
+            // skip conflicts
+            if (it->second.first) continue;
+            // now add it
+            kmer_ctg_locs.push_back({kmer, it->second.second});
+          }
+          DBG_VERBOSE("processed get_ctgs_with_kmers ", kmers.size(), " ", get_size_str(kmers.size() * sizeof(Kmer<MAX_K>)),
+                      ", returning ", kmer_ctg_locs.size(), " ", get_size_str(kmer_ctg_locs.size() * sizeof(KmerAndCtgLoc<MAX_K>)),
+                      "\n");
+          return kmer_ctg_locs;
+        },
+        kmers, kmer_map);
   }
 
 #ifdef DEBUG
