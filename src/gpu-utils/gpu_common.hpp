@@ -133,7 +133,7 @@ inline __device__ void reduce(int count, int num, unsigned int *result) {
 template <class T>
 inline void get_kernel_config(unsigned max_val, T func, int &gridsize, int &threadblocksize) {
   int mingridsize = 0;
-  threadblocksize = 0;
+  threadblocksize = 0;  // 1024
   cudaErrchk(cudaOccupancyMaxPotentialBlockSize(&mingridsize, &threadblocksize, func, 0, 0));
   gridsize = (max_val + threadblocksize - 1) / threadblocksize;
 }

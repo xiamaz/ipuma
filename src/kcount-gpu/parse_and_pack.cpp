@@ -200,7 +200,7 @@ inline __device__ uint8_t get_packed_val(char base) {
     case 'C': return 6;
     case 'G': return 7;
     case 'T': return 8;
-    case 'N': 
+    case 'N':
     case 'n': return 9;
     case '_':
     case 0: return 0;
@@ -263,7 +263,6 @@ kcount_gpu::ParseAndPackGPUDriver::~ParseAndPackGPUDriver() {
   cudaFree(dev_num_supermers);
   cudaFree(dev_num_valid_kmers);
 
-  cudaDeviceSynchronize();
   delete dstate;
 }
 
