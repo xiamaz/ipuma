@@ -438,8 +438,8 @@ void KmerDHT<MAX_K>::flush_updates() {
   ht_gpu_driver->flush_inserts();
   // a bunch of stats about the hash table on the GPU
   auto insert_stats = ht_gpu_driver->get_stats(static_cast<kcount_gpu::PASS_TYPE>(pass_type));
-  auto avg_num_gpu_calls = reduce_one(insert_stats.num_gpu_calls, op_fast_add, 0).wait() / rank_n();
-  auto max_num_gpu_calls = reduce_one(insert_stats.num_gpu_calls, op_fast_max, 0).wait();
+  auto avg_num_gpu_calls = reduce_one(ht_gpu_driver->get_num_gpu_calls(), op_fast_add, 0).wait() / rank_n();
+  auto max_num_gpu_calls = reduce_one(ht_gpu_driver->get_num_gpu_calls(), op_fast_max, 0).wait();
   SLOG(KLMAGENTA "Number of calls to ", (pass_type == READ_KMERS_PASS ? "read" : "ctg"),
        " hash table GPU driver: ", avg_num_gpu_calls, " avg, ", max_num_gpu_calls, " max" KNORM "\n");
   int64_t num_dropped_elems = reduce_one(insert_stats.dropped, op_fast_add, 0).wait();

@@ -49,8 +49,7 @@
 
 // Functions that are common to all cuda code; not to be used by upcxx code
 
-#define cudaErrchk(ans) \
-  { gpu_common::gpu_die((ans), __FILE__, __LINE__); }
+#define cudaErrchk(ans) gpu_common::gpu_die((ans), __FILE__, __LINE__)
 
 // we are typecasting uint64_t into this, so we need to check them
 static_assert(sizeof(unsigned long long) == sizeof(uint64_t));

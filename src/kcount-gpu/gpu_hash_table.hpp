@@ -103,11 +103,10 @@ struct KmerExtsMap {
 };
 
 struct InsertStats {
-  int64_t dropped = 0;
-  int64_t attempted = 0;
-  int64_t new_inserts = 0;
-  int64_t key_empty_overlaps = 0;
-  int num_gpu_calls = 0;
+  unsigned int dropped = 0;
+  unsigned int attempted = 0;
+  unsigned int new_inserts = 0;
+  unsigned int key_empty_overlaps = 0;
 };
 
 template <int MAX_K>
@@ -137,10 +136,12 @@ class HashTableGPUDriver {
 
   InsertStats read_kmers_stats;
   InsertStats ctg_kmers_stats;
+  InsertStats *gpu_insert_stats;
+  int num_gpu_calls = 0;
 
   PASS_TYPE pass_type;
 
-  void insert_supermer_block(KmerCountsMap<MAX_K> &kmer_counts_map, InsertStats &stats, bool ctg_kmers);
+  void insert_supermer_block();
   void purge_invalid(int &num_purged, int &num_entries);
 
  public:
@@ -167,6 +168,7 @@ class HashTableGPUDriver {
   void get_elapsed_time(double &insert_time, double &kernel_time);
   int64_t get_capacity(PASS_TYPE p);
   InsertStats &get_stats(PASS_TYPE p);
+  int get_num_gpu_calls();
 };
 
 }  // namespace kcount_gpu
