@@ -103,7 +103,7 @@ class CtgsDepths {
     assert(num_read_groups > 0);
   }
 
-  int64_t get_num_ctgs() { return upcxx::reduce_one(ctgs_depths->size(), upcxx::op_fast_add, 0).wait(); }
+  int64_t get_num_ctgs() { return reduce_one((int64_t)ctgs_depths->size(), upcxx::op_fast_add, 0).wait(); }
 
   void add_new_ctg(int64_t cid, int num_read_groups, int clen) {
     upcxx::rpc(
