@@ -122,7 +122,11 @@ add_executable(mhm2 main.cpp ${MHM2_TARGET_OBJECTS})
 set(MHM2_LINK_LIBRARIES Threads::Threads SSW_LIBRARY ${ZLIB_LIBRARIES} MHM2_VERSION_LIB)
 
 if(ENABLE_CUDA)
+
     include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
+    # include the gpu directories
+    set_property(TARGET mhm2 PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF) # just to be sure. It should be off in parent dir
     include_directories("gpu-utils")
     add_subdirectory(gpu-utils)
     include_directories("adept-sw")
@@ -151,11 +155,11 @@ set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} PARENT_SCOPE)
 install(TARGETS mhm2 DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-  SET(MHM2PY_RUNTIME_ENV "GASNET_BACKTRACE='1', ")
+  SET(MHM2PY_RUNTIME_ENV "GASNET_BACKTRACE='1',GASNET_BACKTRACE_MT='1', ")
 elseif("${CMAKE_BUILD_TYPE}" STREQUAL "RelWithDebug")
-  SET(MHM2PY_RUNTIME_ENV "GASNET_BACKTRACE='1', ")
+  SET(MHM2PY_RUNTIME_ENV "GASNET_BACKTRACE='1',GASNET_BACKTRACE_MT='1', ")
 elseif("${CMAKE_BUILD_TYPE}" STREQUAL "RelWithDebInfo")
-  SET(MHM2PY_RUNTIME_ENV "GASNET_BACKTRACE='1', ")
+  SET(MHM2PY_RUNTIME_ENV "GASNET_BACKTRACE='1',GASNET_BACKTRACE_MT='1', ")
 endif()
 configure_file(mhm2.py ${CMAKE_CURRENT_BINARY_DIR}/mhm2.py )
 install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/mhm2.py DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)

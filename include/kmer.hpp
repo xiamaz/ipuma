@@ -78,6 +78,10 @@ class Kmer {
 
   void swap(Kmer &other);
 
+  static const Kmer &get_invalid();
+
+  bool is_valid() const;
+
   static void set_k(unsigned int k);
 
   static unsigned int get_k();
@@ -86,19 +90,21 @@ class Kmer {
 
   static unsigned int get_MAX_K();
 
-  static void get_kmers(unsigned kmer_len, std::string seq, std::vector<Kmer> &kmers);
+  static void get_kmers(unsigned kmer_len, std::string seq, std::vector<Kmer> &kmers, bool check_n = false);
+
+  static void get_kmers(unsigned kmer_len, const std::string_view &seq, std::vector<Kmer> &kmers, bool check_n = false);
 
   Kmer &operator=(const Kmer &o);
 
   bool operator<(const Kmer &o) const;
+
+  bool operator<=(const Kmer &o) const;
 
   bool operator==(const Kmer &o) const;
 
   bool operator!=(const Kmer &o) const;
 
   void set_kmer(const char *s);
-
-  static std::string mer_to_string(longs_t mmer, int m);
 
   std::string get_minimizer_slow(int m);
 
@@ -126,6 +132,8 @@ class Kmer {
 
   Kmer revcomp() const;
 
+  bool is_least() const;
+
   Kmer forward_base(const char b) const;
 
   Kmer backward_base(const char b) const;
@@ -134,9 +142,13 @@ class Kmer {
 
   char back();
 
-  void to_string(char *s) const;
+  void to_string(char *s, bool add_null = true) const;
 
   std::string to_string() const;
+
+  static void mer_to_string(char *s, const longs_t mmer, const int m, bool add_null = true);
+
+  static std::string mer_to_string(longs_t mmer, int m);
 
   std::string to_hex() const;
 

@@ -51,7 +51,7 @@
 #include "upcxx_utils/flat_aggr_store.hpp"
 #include "upcxx_utils/three_tier_aggr_store.hpp"
 
-#ifdef ENABLE_GPUS
+#ifdef ENABLE_KCOUNT_GPUS_HT
 #include "gpu-utils/gpu_utils.hpp"
 #include "kcount-gpu/gpu_hash_table.hpp"
 #else
@@ -227,7 +227,7 @@ class KmerDHT {
   upcxx::dist_object<KmerMap> kmers;
   dist_object<HashTableGPUDriver<MAX_K>> ht_gpu_driver;
 
-  upcxx_utils::ThreeTierAggrStore<Supermer, dist_object<KmerMap> &, dist_object<HashTableGPUDriver<MAX_K>> &> kmer_store;
+  upcxx_utils::ThreeTierAggrStore<Supermer> kmer_store;
   int64_t max_kmer_store_bytes;
   int64_t initial_kmer_dht_reservation;
   int64_t my_num_kmers;

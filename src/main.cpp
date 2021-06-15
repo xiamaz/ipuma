@@ -131,8 +131,9 @@ int main(int argc, char **argv) {
     }
     if (status != 0) SWARN("Could not get/set rlimits for NOFILE\n");
   }
-  const int num_threads = 3;  // reserve up to 3 threads in the singleton thread pool TODO make an option
+  const int num_threads = options->max_worker_threads;  // reserve up to threads in the singleton thread pool.
   upcxx_utils::ThreadPool::get_single_pool(num_threads);
+  // FIXME if (!options->max_worker_threads) upcxx_utils::FASRPCCounts::use_worker_thread() = false;
   SLOG_VERBOSE("Allowing up to ", num_threads, " extra threads in the thread pool\n");
 
   if (!upcxx::rank_me()) {
@@ -173,9 +174,9 @@ int main(int argc, char **argv) {
       [&gpu_startup_duration, &num_gpus, &gpu_mem]() { gpu_utils::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
   detect_gpu_fut = detect_gpu_fut.then([&gpu_startup_duration, &num_gpus, &gpu_mem]() {
     if (num_gpus > 0) {
-      SLOG(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
-           get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
-      SLOG(gpu_utils::get_gpu_device_description());
+      SLOG_VERBOSE(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
+                   get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
+      SLOG_VERBOSE(gpu_utils::get_gpu_device_description());
     } else {
       SWARN("Compiled for GPUs but no GPUs available...");
     }
@@ -237,8 +238,8 @@ int main(int argc, char **argv) {
       init_gpu_thread = false;
       detect_gpu_fut.wait();
     }
-    int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
-    SLOG(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
+    int max_dev_id = reduce_one(num_gpus > 0 ? gpu_utils::get_gpu_device_pci_id() : 0, op_fast_max, 0).wait();
+    SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
 #endif
 
     // contigging loops
@@ -246,6 +247,7 @@ int main(int argc, char **argv) {
       max_kmer_len = options->kmer_lens.back();
       for (auto kmer_len : options->kmer_lens) {
         auto max_k = (kmer_len / 32 + 1) * 32;
+        LOG(upcxx_utils::GasNetVars::getUsedShmMsg(), "\n");
 
 #define CONTIG_K(KMER_LEN)                                                                                                         \
   case KMER_LEN:                                                                                                                   \
@@ -292,6 +294,7 @@ int main(int argc, char **argv) {
       for (unsigned i = 0; i < options->scaff_kmer_lens.size(); ++i) {
         auto scaff_kmer_len = options->scaff_kmer_lens[i];
         auto max_k = (scaff_kmer_len / 32 + 1) * 32;
+        LOG(upcxx_utils::GasNetVars::getUsedShmMsg(), "\n");
 
 #define SCAFFOLD_K(KMER_LEN)                                                                                                \
   case KMER_LEN:                                                                                                            \

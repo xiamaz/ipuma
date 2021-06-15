@@ -69,6 +69,7 @@ enum class Dirn { LEFT, RIGHT, NONE };
 
 enum class WalkStatus { RUNNING = '-', DEADEND = 'X', FORK = 'F', CONFLICT = 'O', REPEAT = 'R', VISITED = 'V' };
 
+struct FragElem;
 struct FragElem {
   global_ptr<FragElem> left_gptr, right_gptr;
   bool left_is_rc, right_is_rc;
@@ -145,7 +146,6 @@ static string gptr_str(global_ptr<FragElem> gptr) {
   if (!gptr) return string(10, '0');
   ostringstream oss;
   oss << setw(11);
-  //oss << gptr.raw_ptr_;
   oss << gptr;
   string s = oss.str();
   s.erase(0, s.length() - 6);
@@ -156,8 +156,9 @@ static string gptr_str(global_ptr<FragElem> gptr) {
 template <int MAX_K>
 static bool check_kmers(const string &seq, dist_object<KmerDHT<MAX_K>> &kmer_dht, int kmer_len) {
   vector<Kmer<MAX_K>> kmers;
-  Kmer<MAX_K>::get_kmers(kmer_len, seq, kmers);
-  for (auto kmer : kmers) {
+  Kmer<MAX_K>::get_kmers(kmer_len, seq, kmers, true);
+  for (auto &kmer : kmers) {
+    assert(kmer.is_valid());
     if (!kmer_dht->kmer_exists(kmer)) return false;
   }
   return true;

@@ -134,43 +134,42 @@ class ReadsToCtgsDHT {
   int64_t get_num_mappings() { return reduce_one(reads_to_ctgs_map->size(), op_fast_add, 0).wait(); }
 
   vector<CtgInfo> get_ctgs(string &read_id) {
-    return upcxx::rpc(
-               get_target_rank(read_id),
-               [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, string read_id) -> vector<CtgInfo> {
-                 const auto it = reads_to_ctgs_map->find(read_id);
-                 if (it == reads_to_ctgs_map->end()) return {};
-                 return it->second;
-               },
-               reads_to_ctgs_map, read_id)
+    return upcxx::rpc(get_target_rank(read_id),
+                      [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, string read_id) -> vector<CtgInfo> {
+                        const auto it = reads_to_ctgs_map->find(read_id);
+                        if (it == reads_to_ctgs_map->end()) return {};
+                        return it->second;
+                      },
+                      reads_to_ctgs_map, read_id)
         .wait();
   }
 
   future<vector<vector<CtgInfo>>> get_ctgs(intrank_t target_rank, vector<string> &read_ids) {
     DBG_VERBOSE("Sending get_ctgs ", read_ids.size(), " to ", target_rank, "\n");
-    return upcxx::rpc(
-        target_rank,
-        [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, intrank_t source_rank,
-           view<string> read_ids) -> vector<vector<CtgInfo>> {
-          DBG_VERBOSE("Received request for ", read_ids.size(), " reads from ", source_rank, "\n");
-          size_t bytes = 0, nonempty = 0;
-          vector<vector<CtgInfo>> results(read_ids.size());
-          size_t i = 0;
-          for (const auto &read_id : read_ids) {
-            assert(get_target_rank(read_id) == rank_me());
-            const auto it = reads_to_ctgs_map->find(read_id);
-            assert(i < results.size());
-            assert(results[i].empty());
-            if (it != reads_to_ctgs_map->end()) {
-              nonempty++;
-              bytes += it->second.size() * sizeof(CtgInfo);
-              results[i] = it->second;
-            }
-            i++;
-          }
-          DBG_VERBOSE("Returning ", results.size(), " results nonempty=", nonempty, " bytes=", bytes, " to ", source_rank, "\n");
-          return results;
-        },
-        reads_to_ctgs_map, rank_me(), make_view(read_ids.begin(), read_ids.end()));
+    return upcxx::rpc(target_rank,
+                      [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, intrank_t source_rank,
+                         view<string> read_ids) -> vector<vector<CtgInfo>> {
+                        DBG_VERBOSE("Received request for ", read_ids.size(), " reads from ", source_rank, "\n");
+                        size_t bytes = 0, nonempty = 0;
+                        vector<vector<CtgInfo>> results(read_ids.size());
+                        size_t i = 0;
+                        for (const auto &read_id : read_ids) {
+                          assert(get_target_rank(read_id) == rank_me());
+                          const auto it = reads_to_ctgs_map->find(read_id);
+                          assert(i < results.size());
+                          assert(results[i].empty());
+                          if (it != reads_to_ctgs_map->end()) {
+                            nonempty++;
+                            bytes += it->second.size() * sizeof(CtgInfo);
+                            results[i] = it->second;
+                          }
+                          i++;
+                        }
+                        DBG_VERBOSE("Returning ", results.size(), " results nonempty=", nonempty, " bytes=", bytes, " to ",
+                                    source_rank, "\n");
+                        return results;
+                      },
+                      reads_to_ctgs_map, rank_me(), make_view(read_ids.begin(), read_ids.end()));
   }
 };
 

@@ -57,23 +57,7 @@
 #include <gasnet_tools.h>
 
 inline bool _gasnet_stats = false;
-/*
-inline void begin_gasnet_stats(const string &stage) {
-  if (_gasnet_stats) {
-    GASNETT_STATS_SETMASK("PGAU");
-    SWARN("Collecting communication stats for ", stage);
-    GASNETT_STATS_PRINTF_FORCE("MHM2 stage %s\n", stage.c_str());
-  }
-}
 
-inline void end_gasnet_stats() {
-  if (_gasnet_stats) {
-    upcxx::barrier();
-    GASNETT_STATS_DUMP(1);
-    GASNETT_STATS_SETMASK("");
-  }
-}
-*/
 void begin_gasnet_stats(const string &stage);
 
 void end_gasnet_stats();

@@ -45,6 +45,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cstdlib>
 #include <iostream>
 #include <regex>
 #include <sstream>
@@ -294,6 +295,17 @@ double Options::setup_log_file() {
   return t_elapsed.count();
 }
 
+string Options::get_job_id() {
+  static const char *env_ids[] = {"SLURM_JOBID", "LSB_JOBID", "JOB_ID", "COBALT_JOBID", "LOAD_STEP_ID", "PBS_JOBID"};
+  for (auto env : env_ids) {
+    auto env_p = std::getenv(env);
+    if (env_p) return string(env_p);
+  }
+  // no job, broadcast the pid of rank 0
+  auto pid = upcxx::broadcast(getpid(), 0, upcxx::world()).wait();
+  return std::to_string(pid);
+}
+
 Options::Options() {
   char buf[32];
   if (!upcxx::rank_me()) {
@@ -303,7 +315,7 @@ Options::Options() {
   upcxx::broadcast(buf, sizeof(buf), 0, world()).wait();
   setup_time = string(buf);
   output_dir = string("mhm2-run-<reads_fname[0]>-n") + to_string(upcxx::rank_n()) + "-N" +
-               to_string(upcxx::rank_n() / upcxx::local_team().rank_n()) + "-" + setup_time;
+               to_string(upcxx::rank_n() / upcxx::local_team().rank_n()) + "-" + setup_time + "-" + get_job_id();
 }
 Options::~Options() {
   flush_logger();
@@ -362,6 +374,10 @@ bool Options::load(int argc, char **argv) {
   app.add_flag("--restart", restart,
                "Restart in previous directory where a run failed (must specify the previous directory with -o).")
       ->capture_default_str();
+  app.add_flag("--klign-kmer-cache", klign_kmer_cache,
+               "Include a cache of kmer seed to contigs which helps avoid repeat lookups of the same kmer -- most useful after "
+               "shuffle-reads localization")
+      ->capture_default_str();
   app.add_flag("--post-asm-align", post_assm_aln, "Align reads to final assembly")->capture_default_str();
   app.add_flag("--post-asm-abd", post_assm_abundances, "Compute and output abundances for final assembly (used by MetaBAT).")
       ->capture_default_str();
@@ -396,6 +412,8 @@ bool Options::load(int argc, char **argv) {
   app.add_flag("--use-heavy-hitters", use_heavy_hitters, "Enable the Heavy Hitter Streaming Store (experimental).");
   app.add_option("--ranks-per-gpu", ranks_per_gpu, "Number of processes multiplexed to each GPU (default depends on hardware).")
       ->check(CLI::Range(0, (int)upcxx::local_team().rank_n() * 8));
+  app.add_option("--max-worker-threads", max_worker_threads, "Number of threads in the worker ThreadPool (default 3)")
+      ->check(CLI::Range(0, (int)4 * upcxx::local_team().rank_n()));
   app.add_flag("--pin", pin_by,
                "Restrict processes according to logical CPUs, cores (groups of hardware threads), "
                "or NUMA domains (cpu, core, numa, none).")
@@ -462,7 +480,7 @@ bool Options::load(int argc, char **argv) {
     auto spos = first_read_fname.find_first_of(':');
     if (spos != string::npos) first_read_fname = first_read_fname.substr(0, spos);
     output_dir = "mhm2-run-" + first_read_fname + "-n" + to_string(upcxx::rank_n()) + "-N" +
-                 to_string(upcxx::rank_n() / upcxx::local_team().rank_n()) + "-" + setup_time;
+                 to_string(upcxx::rank_n() / upcxx::local_team().rank_n()) + "-" + setup_time + "-" + get_job_id();
     output_dir_opt->default_val(output_dir);
   }
 
@@ -564,6 +582,8 @@ bool Options::load(int argc, char **argv) {
 #ifdef DEBUG
   SWARN("Running low-performance debug mode");
 #endif
+  if (!post_assm_only & klign_kmer_cache & !shuffle_reads)
+    SWARN("klign-kmer-cache option selected but shuffle-reads is not, performance may suffer");
   if (!upcxx::rank_me()) {
     // write out configuration file for restarts
     ofstream ofs(config_file);

@@ -221,7 +221,7 @@ template <int MAX_K>
 KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS)
     : kmers({})
     , ht_gpu_driver({})
-    , kmer_store(kmers, ht_gpu_driver)
+    , kmer_store()
     , max_kmer_store_bytes(max_kmer_store_bytes)
     , initial_kmer_dht_reservation(0)
     , my_num_kmers(my_num_kmers)
@@ -346,13 +346,17 @@ void KmerDHT<MAX_K>::set_pass(PASS_TYPE pass_type) {
 #ifdef ENABLE_KCOUNT_GPUS_HT
       ht_gpu_driver->set_pass(kcount_gpu::READ_KMERS_PASS);
 #endif
-      kmer_store.set_update_func(update_count);
+      kmer_store.set_update_func([&kmers = this->kmers, &ht_gpu_driver = this->ht_gpu_driver](Supermer supermer) {
+        update_count(supermer, kmers, ht_gpu_driver);
+      });
       break;
     case CTG_KMERS_PASS:
 #ifdef ENABLE_KCOUNT_GPUS_HT
       ht_gpu_driver->set_pass(kcount_gpu::CTG_KMERS_PASS);
 #endif
-      kmer_store.set_update_func(update_ctg_kmers_count);
+      kmer_store.set_update_func([&kmers = this->kmers, &ht_gpu_driver = this->ht_gpu_driver](Supermer supermer) {
+        update_ctg_kmers_count(supermer, kmers, ht_gpu_driver);
+      });
       break;
   };
 }
@@ -396,6 +400,7 @@ double KmerDHT<MAX_K>::get_estimated_error_rate() {
 
 template <int MAX_K>
 upcxx::intrank_t KmerDHT<MAX_K>::get_kmer_target_rank(const Kmer<MAX_K> &kmer, const Kmer<MAX_K> *kmer_rc) const {
+  assert(&kmer != kmer_rc && "Can be a palindrome, cannot be the same Kmer instance");
   return kmer.minimizer_hash_fast(minimizer_len, kmer_rc) % rank_n();
 }
 
@@ -408,17 +413,18 @@ KmerCounts *KmerDHT<MAX_K>::get_local_kmer_counts(Kmer<MAX_K> &kmer) {
 
 #ifdef DEBUG
 template <int MAX_K>
-bool KmerDHT<MAX_K>::kmer_exists(Kmer<MAX_K> kmer) {
-  Kmer<MAX_K> kmer_rc = kmer.revcomp();
-  if (kmer_rc < kmer) kmer.swap(kmer_rc);
+bool KmerDHT<MAX_K>::kmer_exists(Kmer<MAX_K> kmer_fw) {
+  const Kmer<MAX_K> kmer_rc = kmer_fw.revcomp();
+  const Kmer<MAX_K> *kmer = (kmer_rc < kmer_fw) ? &kmer_rc : &kmer_fw;
+
   return rpc(
-             get_kmer_target_rank(kmer, &kmer_rc),
+             get_kmer_target_rank(kmer_fw, &kmer_rc),
              [](Kmer<MAX_K> kmer, dist_object<KmerMap> &kmers) -> bool {
                const auto it = kmers->find(kmer);
                if (it == kmers->end()) return false;
                return true;
              },
-             kmer, kmers)
+             *kmer, kmers)
       .wait();
 }
 #endif

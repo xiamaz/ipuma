@@ -93,7 +93,7 @@ static uint64_t estimate_num_kmers(unsigned kmer_len, vector<PackedReads *> &pac
   auto all_num_kmers = reduce_all(num_kmers, op_fast_add).wait();
 
   SLOG_VERBOSE("Processed ", perc_str(all_num_reads, all_tot_num_reads), " reads, and estimated a maximum of ",
-               all_num_kmers * (all_tot_num_reads / all_num_reads), " kmers\n");
+               (all_num_reads > 0 ? all_num_kmers * (all_tot_num_reads / all_num_reads) : 0), " kmers\n");
   return num_reads > 0 ? num_kmers * tot_num_reads / num_reads : 0;
 }
 
@@ -145,9 +145,9 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     stage_timers.alignments->start();
     begin_gasnet_stats("alignment k = " + to_string(kmer_len));
     bool first_ctg_round = (kmer_len == options->kmer_lens[0]);
-    double kernel_elapsed =
-        find_alignments<MAX_K>(kmer_len, packed_reads_list, max_kmer_store, options->max_rpcs_in_flight, ctgs, alns,
-                               KLIGN_SEED_SPACE, rlen_limit, first_ctg_round, false, 0, options->ranks_per_gpu);
+    double kernel_elapsed = find_alignments<MAX_K>(
+        kmer_len, packed_reads_list, max_kmer_store, options->max_rpcs_in_flight, ctgs, alns, KLIGN_SEED_SPACE, rlen_limit,
+        (options->klign_kmer_cache & !first_ctg_round), false, 0, options->ranks_per_gpu);
     end_gasnet_stats();
     stage_timers.kernel_alns->inc_elapsed(kernel_elapsed);
     stage_timers.alignments->stop();

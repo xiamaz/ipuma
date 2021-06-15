@@ -10,7 +10,7 @@ variables:
   APPLICATION: mhm2
   TEST_IMAGE: $REGISTRY/$REGISTRY_USER/$APPLICATION:latest
   RELEASE_IMAGE: $REGISTRY/$REGISTRY_USER/$APPLICATION:$CI_BUILD_REF_NAME
-  HULK_UPCXX_VER: 2020.3.8
+  HULK_UPCXX_VER: 2021.3.0
 
 stages:
   - build
@@ -124,9 +124,14 @@ Cori:validation:
     - export ARCTIC=/global/cscratch1/sd/regan/GitlabCIData/
     - export OPTS="-r ${ARCTIC}/arctic_sample_0.fq -v --checkpoint=yes"
     - export GASNET_BACKTRACE=1
-
     - echo "Submitting job on 3 nodes - on 2 nodes roughly RWDI=400s, DBG --kmer-lens 63 =456s  ...REL=170s"
     - knl_job=$(sbatch --parsable --job-name="CImhv-${CI_COMMIT_SHORT_SHA}" --account=mp215 -C knl --nodes=3 --qos=debug --time=30:00 --wrap="${RWDI}/mhm2.py $OPTS -o ${RUN_PREFIX}/rwdi && ${DBG}/mhm2.py ${OPTS} --kmer-lens 63 -o ${RUN_PREFIX}/dbg && echo Good")
+    - echo "KNL JOB ${knl_job}"
+    - echo "Submitting build on cori gpu"
+    - mkdir -p ${SCRATCH}/src
+    - rsync -a --exclude '.git*' ${MHM2_SOURCE}/ ${SCRATCH}/src/
+    - gpu_job=$(module load cgpu; sbatch --parsable -C gpu -t 30 -c 5 -G 1 -A m342 --wrap="source ${SCRATCH}/src/contrib/environments/cori-gpu/gnu.sh ; mkdir -p build-cori-gpu && cd build-cori-gpu && cmake \$MHM2_CMAKE_EXTRAS -DCMAKE_INSTALL_PREFIX=install ${SCRATCH}/src && make VERBOSE=1 -j 10 all install && srun install/bin/mhm2_test")
+    - echo "GPU Build job $gpu_job"
     - echo "Waiting for knl job $knl_job"
     - date
     - while /bin/true ; do sleep 120 ; date ; sacct=$(sacct -j $knl_job -o state -X -n 2>/dev/null || true) ; if [ -n "${sacct}" -a -z "$(echo "${sacct}" | grep ING)" ] ; then break ; fi ; done
@@ -140,6 +145,15 @@ Cori:validation:
     - ${RWDI}/check_asm_quality.py --asm-dir ${RUN_PREFIX}/rwdi --expected-quals ${RWDI}/../share/good-arctic-sample0.txt --refs ${ARCTIC}/arcticsynth-refs.fa || FAILED="${FAILED} Did not pass check_asm_quality.py on rwdi"
     - if [ ! -f ${RUN_PREFIX}/dbg/final_assembly.fasta ] ; then FAILED="${FAILED} Did not find final_assembly.fasta on dbg" ; fi
     - ${RWDI}/check_asm_quality.py --asm-dir ${RUN_PREFIX}/dbg --expected-quals ${RWDI}/../share/good-arctic-sample0-k63.txt --refs ${ARCTIC}/arcticsynth-refs.fa || echo "WARN Did not pass check_asm_quality.py on dbg with reduced workflow k63"
+    - echo "Waiting for gpu job ${gpu_job}"
+    - module load cgpu
+    - date
+    - while /bin/true ; do sleep 120 ; date ; sacct=$(sacct -j $gpu_job -o state -X -n 2>/dev/null || true) ; if [ -n "${sacct}" -a -z "$(echo "${sacct}" | grep ING)" ] ; then break ; fi ; done
+    - echo "sacct $sacct"
+    - sacct=$(sacct -j $gpu_job -X -n)
+    - cat slurm-${gpu_job}.out
+    - wasgood=$(echo "${sacct}" | grep -v '0:0' || true)
+    - if [ -z "$wasgood" ] ; then  true ; else FAILED="${FAILED} -- gpu job ${gpu_job} failed somehow - ${wasgood}"; fi
     - if [ -z "$FAILED" ] ; then  true ; else echo "Something failed somehow - ${FAILED}"; false ; fi
     - echo "Completed"
 
@@ -232,7 +246,7 @@ HULK:build:
     - echo "Verifing and/or downloading test arctic data set"
     - export ARCTIC_URL=https://portal.nersc.gov/project/hipmer/MetaHipMer_datasets_12_2019/ArcticSynth/samples/
     - bash -c "[ -f ${HIPMER_DATA}/arcticsynth-refs.fa ] || ( curl -LO ${ARCTIC_URL}/arcticsynth-refs.fa.gz && gunzip arcticsynth-refs.fa.gz && mv arcticsynth-refs.fa ${HIPMER_DATA}/arcticsynth-refs.fa )"
-    - bash -c "[ -f ${HIPMER_DATA}/arctic_sample_0.fq ] || ( curl -LO ${ARCTIC_URL}/arctic_sample_0.fq.gz && gunzip arctic_sample_0.fq.gz && mv arctic_sample_0.fq ${HIPMER_DATA}/arctic_sample_0.fq )"
+    - bash -c "for i in 0 1 2 3 4 5 6 7 8 9 10 11 ; do [ -f ${HIPMER_DATA}/arctic_sample_\$i.fq ] || ( curl -LO ${ARCTIC_URL}/arctic_sample_\$i.fq.gz && gunzip arctic_sample_\$i.fq.gz && mv arctic_sample_\$i.fq ${HIPMER_DATA}/arctic_sample_\$i.fq ) ; done"
     - echo "Establishing all tests under BASE=$BASE and SCRATCH=$SCRATCH"
     - rm -rf ${SCRATCH}
     - mkdir -p ${SCRATCH}
@@ -317,8 +331,8 @@ HULK:validation:
     - export RWDI=${INSTALL_PREFIX}/mhm2-rwdi/bin/
     - export REL=${INSTALL_PREFIX}/mhm2-rel/bin/
     - echo "Starting RelWithDebInfo mhm2 on Arctic $reads"
-    - if [ ! -f arctic_sample_0.fq ] ; then ln -s $reads ; fi
-    - if [ ! -f arcticsynth-refs.fa ] ; then ln -s ${HIPMER_DATA}/arcticsynth-refs.fa ; fi
+    - if [ ! -f arctic_sample_0.fq -a -f $reads ] ; then ln -s $reads ; fi
+    - if [ ! -f arcticsynth-refs.fa -a -f ${HIPMER_DATA}/arcticsynth-refs.fa ] ; then ln -s ${HIPMER_DATA}/arcticsynth-refs.fa ; fi
     - ${RWDI}/ci_asm_qual_test.sh || FAILED="${FAILED} Could not run ci_asm_qual_test"
     - if [ ! -f ./test-arctic-sample0/final_assembly.fasta ] ; then FAILED="${FAILED} Did not find final_assembly.fasta for rwdi in test-arctic-sample0" ; fi
     - mv test-arctic-sample0 ${RUN_PREFIX}/rwdi-test-arctic-sample0
@@ -360,14 +374,27 @@ HULK:accuracy:
     - upcxx --version
     - cd ${SCRATCH}
     - FAILED=""
-    - reads=${HIPMER_DATA}/arctic_sample_0.fq 
     - export REL=${INSTALL_PREFIX}/mhm2-rel/bin/
-    - echo "Starting Release mhm2 on Arctic $reads"
-    - if [ ! -f arctic_sample_0.fq ] ; then ln -s $reads ; fi
-    - if [ ! -f arcticsynth-refs.fa ] ; then ln -s ${HIPMER_DATA}/arcticsynth-refs.fa ; fi
+    - echo "Starting Release mhm2 on Arctic"
+    - if [ ! -f arctic_sample_0.fq -a -f ${HIPMER_DATA}/arctic_sample_0.fq ] ; then ln -s ${HIPMER_DATA}/arctic_sample_0.fq ; fi
+    - if [ ! -f arctic_sample_1.fq -a -f ${HIPMER_DATA}/arctic_sample_1.fq ] ; then ln -s ${HIPMER_DATA}/arctic_sample_1.fq ; fi
+    - if [ ! -f arctic_sample_2.fq -a -f ${HIPMER_DATA}/arctic_sample_2.fq ] ; then ln -s ${HIPMER_DATA}/arctic_sample_2.fq ; fi
+    - if [ ! -f arctic_sample_3.fq -a -f ${HIPMER_DATA}/arctic_sample_3.fq ] ; then ln -s ${HIPMER_DATA}/arctic_sample_3.fq ; fi
+    - if [ ! -f arctic_sample_4.fq -a -f ${HIPMER_DATA}/arctic_sample_4.fq ] ; then ln -s ${HIPMER_DATA}/arctic_sample_4.fq ; fi
+    - if [ ! -f arctic_sample_5.fq -a -f ${HIPMER_DATA}/arctic_sample_5.fq ] ; then ln -s ${HIPMER_DATA}/arctic_sample_5.fq ; fi
+    - if [ ! -f arctic_sample_6.fq -a -f ${HIPMER_DATA}/arctic_sample_6.fq ] ; then ln -s ${HIPMER_DATA}/arctic_sample_6.fq ; fi
+    - if [ ! -f arctic_sample_7.fq -a -f ${HIPMER_DATA}/arctic_sample_7.fq ] ; then ln -s ${HIPMER_DATA}/arctic_sample_7.fq ; fi
+    - if [ ! -f arctic_sample_8.fq -a -f ${HIPMER_DATA}/arctic_sample_8.fq ] ; then ln -s ${HIPMER_DATA}/arctic_sample_8.fq ; fi
+    - if [ ! -f arctic_sample_9.fq -a -f ${HIPMER_DATA}/arctic_sample_9.fq ] ; then ln -s ${HIPMER_DATA}/arctic_sample_9.fq ; fi
+    - if [ ! -f arctic_sample_10.fq -a -f ${HIPMER_DATA}/arctic_sample_10.fq ] ; then ln -s ${HIPMER_DATA}/arctic_sample_10.fq ; fi
+    - if [ ! -f arctic_sample_11.fq -a -f ${HIPMER_DATA}/arctic_sample_11.fq ] ; then ln -s ${HIPMER_DATA}/arctic_sample_11.fq ; fi
+    - if [ ! -f arcticsynth-refs.fa -a -f ${HIPMER_DATA}/arcticsynth-refs.fa ] ; then ln -s ${HIPMER_DATA}/arcticsynth-refs.fa ; fi
     - ${REL}/ci_asm_qual_test.sh || FAILED="${FAILED} Could not run ci_asm_qual_test"
     - if [ ! -f ./test-arctic-sample0/final_assembly.fasta ] ; then FAILED="${FAILED} Did not find final_assembly.fasta on rel" ; fi
     - mv test-arctic-sample0 ${RUN_PREFIX}/rel-test-arctic-sample0
+    - ${REL}/ci_asm_qual_test-full.sh || FAILED="${FAILED} Could not run ci_asm_qual_test-full"
+    - if [ ! -f ./test-arctic-samples/final_assembly.fasta ] ; then FAILED="${FAILED} Did not find final_assembly.fasta on rel" ; fi
+    - mv test-arctic-samples ${RUN_PREFIX}/rel-test-arctic-samples
     - if [ -z "$FAILED" ] ; then  true ; else echo "Something failed somehow - ${FAILED}"; false ; fi
     - echo "Completed"
 

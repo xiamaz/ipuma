@@ -10,7 +10,8 @@ module rm craype-haswell
 
 module load esslurm
 module load cuda
-module load cmake
+module rm cmake
+module load cmake/3.18.2
 module load git
 module load upcxx-gpu
 

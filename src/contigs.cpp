@@ -70,9 +70,12 @@ using upcxx::barrier;
 using upcxx::dist_object;
 using upcxx::op_fast_add;
 using upcxx::op_fast_max;
+using upcxx::promise;
 using upcxx::rank_me;
 using upcxx::rank_n;
 using upcxx::reduce_one;
+using upcxx::rpc;
+using upcxx::rpc_ff;
 
 using namespace upcxx_utils;
 
@@ -202,7 +205,7 @@ void Contigs::load_contigs(const string &ctgs_fname) {
   SLOG_VERBOSE("Loading contigs from fasta file ", ctgs_fname, "\n");
   BarrierTimer timer(__FILEFUNC__);
   contigs.clear();
-  dist_object<promise<size_t>> dist_stop_prom(world());
+  dist_object<upcxx::promise<size_t>> dist_stop_prom(world());
   string line;
   string ctg_prefix = ">Contig";
   string cname, seq, buf;
