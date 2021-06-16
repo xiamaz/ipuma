@@ -447,21 +447,23 @@ class KmerCtgDHT {
   }
 
   upcxx::future<> gpu_align_block(IntermittentTimer &aln_kernel_timer, int read_group_id) {
-    AsyncTimer t("gpu_align_block (thread)");
+    //AsyncTimer t("gpu_align_block (thread)");
     auto &myself = *this;
     shared_ptr<AlignBlockData> sh_abd = make_shared<AlignBlockData>(myself, read_group_id);
     assert(kernel_alns.empty());
 
-    future<> fut = upcxx_utils::execute_in_thread_pool([&myself, t, sh_abd, &aln_kernel_timer] {
-      t.start();
+    //future<> fut = upcxx_utils::execute_in_thread_pool([&myself, t, sh_abd, &aln_kernel_timer] {
+    future<> fut = upcxx_utils::execute_in_thread_pool([&myself, sh_abd, &aln_kernel_timer] {
+        //t.start();
       _gpu_align_block_kernel(*sh_abd, aln_kernel_timer);
-      t.stop();
+      //t.stop();
     });
-    fut = fut.then([&myself, t, sh_abd]() {
-      SLOG_VERBOSE("Finished GPU SSW aligning block of ", sh_abd->kernel_alns.size(), " in ", t.get_elapsed(), "s (",
-                   (t.get_elapsed() > 0 ? sh_abd->kernel_alns.size() / t.get_elapsed() : 0.0), " aln/s)\n");
-      DBG_VERBOSE("appending and returning ", sh_abd->alns->size(), "\n");
-      myself.alns->append(*(sh_abd->alns));
+    //fut = fut.then([&myself, t, sh_abd]() {
+    fut = fut.then([&myself, sh_abd]() {
+        //SLOG_VERBOSE("Finished GPU SSW aligning block of ", sh_abd->kernel_alns.size(), " in ", t.get_elapsed(), "s (",
+        //           (t.get_elapsed() > 0 ? sh_abd->kernel_alns.size() / t.get_elapsed() : 0.0), " aln/s)\n");
+        DBG_VERBOSE("appending and returning ", sh_abd->alns->size(), "\n");
+        myself.alns->append(*(sh_abd->alns));
     });
 
     return fut;
@@ -697,9 +699,9 @@ class KmerCtgDHT {
     bool is_ready = active_kernel_fut.ready();
     active_kernel_fut.wait();
     t.stop();
-    if (num || !is_ready) {
-      SLOG_VERBOSE("Aligned and waited for final block with ", num, " alignments in ", t.get_elapsed(), "\n");
-    }
+    //if (num || !is_ready) {
+    //  SLOG_VERBOSE("Aligned and waited for final block with ", num, " alignments in ", t.get_elapsed(), "\n");
+    //}
   }
 
   future<vector<KmerAndCtgLoc<MAX_K>>> get_ctgs_with_kmers(int target_rank, vector<Kmer<MAX_K>> &kmers) {
