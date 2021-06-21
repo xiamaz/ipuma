@@ -268,7 +268,7 @@ class KmerDHT {
 
   int get_minimizer_len();
 
-  int64_t get_num_kmers(bool all = false);
+  uint64_t get_num_kmers(bool all = false);
 
   float max_load_factor();
 

@@ -67,7 +67,7 @@ using namespace upcxx_utils;
 #define DBG_INSERT_KMER(...)
 
 // global variables to avoid passing dist objs to rpcs
-static int64_t _num_kmers_counted = 0;
+static uint64_t _num_kmers_counted = 0;
 static int num_inserts = 0;
 
 template <int MAX_K>
@@ -367,11 +367,11 @@ int KmerDHT<MAX_K>::get_minimizer_len() {
 }
 
 template <int MAX_K>
-int64_t KmerDHT<MAX_K>::get_num_kmers(bool all) {
+uint64_t KmerDHT<MAX_K>::get_num_kmers(bool all) {
   if (!all)
-    return reduce_one(kmers->size(), op_fast_add, 0).wait();
+    return reduce_one((uint64_t)kmers->size(), op_fast_add, 0).wait();
   else
-    return reduce_all(kmers->size(), op_fast_add).wait();
+    return reduce_all((uint64_t)kmers->size(), op_fast_add).wait();
 }
 
 template <int MAX_K>
@@ -448,14 +448,14 @@ void KmerDHT<MAX_K>::flush_updates() {
   auto max_num_gpu_calls = reduce_one(ht_gpu_driver->get_num_gpu_calls(), op_fast_max, 0).wait();
   SLOG(KLMAGENTA "Number of calls to ", (pass_type == READ_KMERS_PASS ? "read" : "ctg"),
        " hash table GPU driver: ", avg_num_gpu_calls, " avg, ", max_num_gpu_calls, " max" KNORM "\n");
-  int64_t num_dropped_elems = reduce_one(insert_stats.dropped, op_fast_add, 0).wait();
-  int64_t num_attempted_inserts = reduce_one(insert_stats.attempted, op_fast_add, 0).wait();
-  int64_t capacity = ht_gpu_driver->get_capacity(static_cast<kcount_gpu::PASS_TYPE>(pass_type));
-  int64_t all_capacity = reduce_one(capacity, op_fast_add, 0).wait();
+  uint64_t num_dropped_elems = reduce_one((uint64_t)insert_stats.dropped, op_fast_add, 0).wait();
+  uint64_t num_attempted_inserts = reduce_one((uint64_t)insert_stats.attempted, op_fast_add, 0).wait();
+  uint64_t capacity = ht_gpu_driver->get_capacity(static_cast<kcount_gpu::PASS_TYPE>(pass_type));
+  uint64_t all_capacity = reduce_one(capacity, op_fast_add, 0).wait();
   if (num_dropped_elems)
     SWARN("GPU ", (pass_type == READ_KMERS_PASS ? "read" : "ctg"), " hash table: failed to insert ",
           perc_str(num_dropped_elems, num_attempted_inserts), " elements; capacity ", all_capacity);
-  int64_t key_empty_overlaps = reduce_one(insert_stats.key_empty_overlaps, op_fast_add, 0).wait();
+  uint64_t key_empty_overlaps = reduce_one((uint64_t)insert_stats.key_empty_overlaps, op_fast_add, 0).wait();
   if (key_empty_overlaps)
     SWARN("GPU ", (pass_type == READ_KMERS_PASS ? "read" : "ctg"), " hash table: dropped ",
           perc_str(key_empty_overlaps, num_attempted_inserts), " kmers with longs equal to KEY_EMPTY");
@@ -489,7 +489,7 @@ template <int MAX_K>
 void KmerDHT<MAX_K>::purge_kmers(int threshold) {
   BarrierTimer timer(__FILEFUNC__);
   auto num_prior_kmers = get_num_kmers();
-  int64_t num_purged = 0;
+  uint64_t num_purged = 0;
   for (auto it = kmers->begin(); it != kmers->end();) {
     auto kmer_counts = make_shared<KmerCounts>(it->second);
     if ((kmer_counts->count < threshold) || (kmer_counts->left_exts.is_zero() && kmer_counts->right_exts.is_zero())) {
@@ -513,10 +513,10 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
   ht_gpu_driver->done_all_inserts(num_dropped, num_entries, num_purged);
   if (num_dropped)
     WARN("GPU dropped ", num_dropped, " entries out of ", num_entries, " when compacting to output hash table" KNORM "\n");
-  auto all_capacity = reduce_one(ht_gpu_driver->get_capacity(kcount_gpu::READ_KMERS_PASS), op_fast_add, 0).wait();
-  int64_t all_num_purged = reduce_one((int64_t)num_purged, op_fast_add, 0).wait();
-  int64_t all_num_entries = reduce_one((int64_t)num_entries, op_fast_add, 0).wait();
-  int64_t prepurge_num_entries = all_num_entries + all_num_purged;
+  auto all_capacity = reduce_one((uint64_t)ht_gpu_driver->get_capacity(kcount_gpu::READ_KMERS_PASS), op_fast_add, 0).wait();
+  auto all_num_purged = reduce_one((uint64_t)num_purged, op_fast_add, 0).wait();
+  auto all_num_entries = reduce_one((uint64_t)num_entries, op_fast_add, 0).wait();
+  auto prepurge_num_entries = all_num_entries + all_num_purged;
   SLOG(KLMAGENTA "GPU read kmers hash table: purged ", perc_str(all_num_purged, prepurge_num_entries), " singleton kmers out of ",
        prepurge_num_entries, KNORM "\n");
   SLOG(KLMAGENTA "GPU hash table final size is ", all_num_entries, " entries and final load factor is ",
@@ -525,9 +525,9 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
 
   // add some space for the ctg kmers
   kmers->reserve(num_entries * 1.5);
-  int num_empty_key_drops = 0;
-  int sum_drop_depth = 0;
-  int invalid = 0;
+  uint64_t num_empty_key_drops = 0;
+  uint64_t sum_drop_depth = 0;
+  uint64_t invalid = 0;
   while (true) {
     assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
     auto [kmer_array, count_exts] = ht_gpu_driver->get_next_entry();
@@ -571,8 +571,8 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
     if (!drop_entry) kmers->insert({kmer, kmer_counts});
   }
   insert_timer.stop();
-  auto all_num_empty_key_drops = reduce_one(num_empty_key_drops, op_fast_add, 0).wait();
-  auto all_drop_depth = reduce_one(sum_drop_depth, op_fast_add, 0).wait();
+  auto all_num_empty_key_drops = reduce_one((uint64_t)num_empty_key_drops, op_fast_add, 0).wait();
+  auto all_drop_depth = reduce_one((uint64_t)sum_drop_depth, op_fast_add, 0).wait();
   if (!rank_me() && all_num_empty_key_drops)
     SWARN("Dropped ", all_num_empty_key_drops, " kmer inserts because of empty key overlap, average depth ",
           (double)all_drop_depth / all_num_empty_key_drops);
@@ -581,12 +581,13 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
   auto all_max_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_max, 0).wait();
   SLOG(KLMAGENTA, "Inserting kmers from GPU to cpu hash table took ", all_avg_elapsed_time, " avg, ", all_max_elapsed_time,
        " max" KNORM "\n");
-  auto all_kmers_size = reduce_one(kmers->size(), op_fast_add, 0).wait();
+  auto all_kmers_size = reduce_one((uint64_t)kmers->size(), op_fast_add, 0).wait();
   if (kmers->size() != (num_entries - invalid))
     WARN("kmers->size() is ", kmers->size(), " != ", (num_entries - invalid), " num_entries");
-  int64_t all_invalid = reduce_one(invalid, op_fast_add, 0).wait();
+  auto all_invalid = reduce_one((uint64_t)invalid, op_fast_add, 0).wait();
   if (!rank_me() && all_kmers_size != all_num_entries - all_invalid)
-    SWARN("CPU kmer counts not equal to gpu kmer counts: ", all_kmers_size, " != ", (all_num_entries - all_invalid));
+    SWARN("CPU kmer counts not equal to gpu kmer counts: ", all_kmers_size, " != ", (all_num_entries - all_invalid),
+          " all_num_entries: ", all_num_entries, " all_invalid: ", all_invalid);
   double gpu_insert_time = 0, gpu_kernel_time = 0;
   ht_gpu_driver->get_elapsed_time(gpu_insert_time, gpu_kernel_time);
   auto avg_gpu_insert_time = reduce_one(gpu_insert_time, op_fast_add, 0).wait() / rank_n();
@@ -609,11 +610,11 @@ void KmerDHT<MAX_K>::compute_kmer_exts() {
     int attempted_inserts = 0, dropped_inserts = 0, new_inserts = 0;
     ht_gpu_driver->done_ctg_kmer_inserts(attempted_inserts, dropped_inserts, new_inserts);
     barrier();
-    auto num_dropped_elems = reduce_one(dropped_inserts, op_fast_add, 0).wait();
-    auto num_attempted_inserts = reduce_one(attempted_inserts, op_fast_add, 0).wait();
-    auto num_new_inserts = reduce_one(new_inserts, op_fast_add, 0).wait();
+    auto num_dropped_elems = reduce_one((uint64_t)dropped_inserts, op_fast_add, 0).wait();
+    auto num_attempted_inserts = reduce_one((uint64_t)attempted_inserts, op_fast_add, 0).wait();
+    auto num_new_inserts = reduce_one((uint64_t)new_inserts, op_fast_add, 0).wait();
     SLOG(KLMAGENTA "GPU ctg kmers hash table: inserted ", num_new_inserts, " new elements into read kmers hash table" KNORM "\n");
-    auto all_capacity = reduce_one(ht_gpu_driver->get_capacity(kcount_gpu::READ_KMERS_PASS), op_fast_add, 0).wait();
+    auto all_capacity = reduce_one((uint64_t)ht_gpu_driver->get_capacity(kcount_gpu::READ_KMERS_PASS), op_fast_add, 0).wait();
     if (num_dropped_elems)
       SWARN("GPU read kmers hash table: failed to insert ", perc_str(num_dropped_elems, num_attempted_inserts),
             " ctg kmers; total capacity ", all_capacity);
