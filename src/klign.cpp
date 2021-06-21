@@ -192,7 +192,8 @@ class KmerCtgDHT {
 
   IntermittentTimer fetch_ctg_seqs_timer;
   int64_t ctg_bytes_fetched = 0;
-  using ctg_cache_t = FixedSizeCache<cid_t, string>;
+  // using ctg_cache_t = FixedSizeCache<cid_t, string>;
+  using ctg_cache_t = HASH_TABLE<cid_t, string>;
   ctg_cache_t ctg_cache;
   std::unordered_set<cid_t> local_ctgs;
   int64_t ctg_cache_hits = 0;
@@ -447,23 +448,23 @@ class KmerCtgDHT {
   }
 
   upcxx::future<> gpu_align_block(IntermittentTimer &aln_kernel_timer, int read_group_id) {
-    //AsyncTimer t("gpu_align_block (thread)");
+    // AsyncTimer t("gpu_align_block (thread)");
     auto &myself = *this;
     shared_ptr<AlignBlockData> sh_abd = make_shared<AlignBlockData>(myself, read_group_id);
     assert(kernel_alns.empty());
 
-    //future<> fut = upcxx_utils::execute_in_thread_pool([&myself, t, sh_abd, &aln_kernel_timer] {
+    // future<> fut = upcxx_utils::execute_in_thread_pool([&myself, t, sh_abd, &aln_kernel_timer] {
     future<> fut = upcxx_utils::execute_in_thread_pool([&myself, sh_abd, &aln_kernel_timer] {
-        //t.start();
+      // t.start();
       _gpu_align_block_kernel(*sh_abd, aln_kernel_timer);
-      //t.stop();
+      // t.stop();
     });
-    //fut = fut.then([&myself, t, sh_abd]() {
+    // fut = fut.then([&myself, t, sh_abd]() {
     fut = fut.then([&myself, sh_abd]() {
-        //SLOG_VERBOSE("Finished GPU SSW aligning block of ", sh_abd->kernel_alns.size(), " in ", t.get_elapsed(), "s (",
-        //           (t.get_elapsed() > 0 ? sh_abd->kernel_alns.size() / t.get_elapsed() : 0.0), " aln/s)\n");
-        DBG_VERBOSE("appending and returning ", sh_abd->alns->size(), "\n");
-        myself.alns->append(*(sh_abd->alns));
+      // SLOG_VERBOSE("Finished GPU SSW aligning block of ", sh_abd->kernel_alns.size(), " in ", t.get_elapsed(), "s (",
+      //           (t.get_elapsed() > 0 ? sh_abd->kernel_alns.size() / t.get_elapsed() : 0.0), " aln/s)\n");
+      DBG_VERBOSE("appending and returning ", sh_abd->alns->size(), "\n");
+      myself.alns->append(*(sh_abd->alns));
     });
 
     return fut;
@@ -538,7 +539,7 @@ class KmerCtgDHT {
 #else
     gpu_mem_avail = 32 * 1024 * 1024;  // cpu needs a block of memory
 #endif
-    ctg_cache.set_invalid_key(std::numeric_limits<cid_t>::max());
+    // ctg_cache.set_invalid_key(std::numeric_limits<cid_t>::max());
     ctg_cache.reserve(2 * all_num_ctgs / rank_n());
 
 #ifdef USE_KMER_CACHE
@@ -560,7 +561,8 @@ class KmerCtgDHT {
     aln_cpu_bypass_timer.print_out();
     for (auto &gptr : global_ctg_seqs) upcxx::deallocate(gptr);
     local_kmer_map_t().swap(*kmer_map);  // release all memory
-    ctg_cache.resize(0);
+    // ctg_cache.resize(0);
+    ctg_cache.clear();
 #ifdef USE_KMER_CACHE
     if (use_kmer_cache) kmer_cache.resize(0);
 #endif
@@ -699,7 +701,7 @@ class KmerCtgDHT {
     bool is_ready = active_kernel_fut.ready();
     active_kernel_fut.wait();
     t.stop();
-    //if (num || !is_ready) {
+    // if (num || !is_ready) {
     //  SLOG_VERBOSE("Aligned and waited for final block with ", num, " alignments in ", t.get_elapsed(), "\n");
     //}
   }
@@ -986,8 +988,8 @@ class KmerCtgDHT {
     auto all_ctg_local_hits = reduce_one(ctg_local_hits, op_fast_add, 0).wait();
     auto all_ctg_cache_hits = reduce_one(ctg_cache_hits, op_fast_add, 0).wait();
     auto all_ctg_lookups = reduce_one(ctg_lookups + ctg_local_hits, op_fast_add, 0).wait();
-    SLOG_VERBOSE("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), " cache size ", ctg_cache.size(), " of ",
-                 ctg_cache.capacity(), " clobberings ", ctg_cache.get_clobberings(), "\n");
+    SLOG_VERBOSE("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), " cache size ", ctg_cache.size(), /*" of ",
+                  ctg_cache.capacity(), " clobberings ", ctg_cache.get_clobberings(),*/ "\n");
     SLOG_VERBOSE("Local contig hits bypassing cache: ", perc_str(all_ctg_local_hits, all_ctg_lookups), "\n");
   }
 };

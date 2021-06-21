@@ -569,8 +569,8 @@ void HashTableGPUDriver<MAX_K>::purge_invalid(int &num_purged, int &num_entries)
   auto expected_num_entries = read_kmers_stats.new_inserts - num_purged;
   if (num_entries != (int)expected_num_entries)
     cout << KLRED << "[" << upcxx_rank_me << "] WARNING mismatch " << num_entries << " != " << expected_num_entries << " diff "
-         << (num_entries - expected_num_entries) << " new inserts " << read_kmers_stats.new_inserts << " num purged " << num_purged
-         << KNORM << endl;
+         << (num_entries - (int)expected_num_entries) << " new inserts " << read_kmers_stats.new_inserts << " num purged " 
+         << num_purged << KNORM << endl;
   read_kmers_dev.num = num_entries;
 }
 
