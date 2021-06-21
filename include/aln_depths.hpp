@@ -46,5 +46,4 @@
 #include "contigs.hpp"
 
 void compute_aln_depths(const string &fname, Contigs &ctgs, Alns &alns, int kmer_len, int min_ctg_len,
-                        std::vector<string> &filenames, bool double_count_merged_region);
-
+                        std::vector<string> read_groups, bool double_count_merged_region);

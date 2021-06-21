@@ -215,12 +215,12 @@ class CtgsDepths {
   }
 };
 
-void compute_aln_depths(const string &fname, Contigs &ctgs, Alns &alns, int kmer_len, int min_ctg_len, vector<string> &read_groups,
+void compute_aln_depths(const string &fname, Contigs &ctgs, Alns &alns, int kmer_len, int min_ctg_len, vector<string> read_groups,
                         bool double_count_merged_region) {
   BarrierTimer timer(__FILEFUNC__);
   int edge_base_len = (min_ctg_len >= 75 ? 75 : 0);
   CtgsDepths ctgs_depths(edge_base_len, read_groups.size());
-  int num_read_groups = read_groups.size();
+  int num_read_groups = (read_groups.empty() ? 1 : read_groups.size());
   SLOG_VERBOSE("Processing contigs, using an edge base length of ", edge_base_len, " and a min ctg len of ", min_ctg_len, "\n");
   for (auto &ctg : ctgs) {
     int clen = ctg.seq.length();
@@ -294,15 +294,17 @@ void compute_aln_depths(const string &fname, Contigs &ctgs, Alns &alns, int kmer
                perc_str(reduce_one(num_bad_alns, op_fast_add, 0).wait(), all_num_alns), " low quality alns\n");
   // get string to dump
   shared_ptr<upcxx_utils::dist_ofstream> sh_of;
-  if (fname != "") sh_of = make_shared<upcxx_utils::dist_ofstream>(fname);
-
-  if (!upcxx::rank_me() && sh_of) {
-    *sh_of << "contigName\tcontigLen\ttotalAvgDepth";
-    for (auto rg_name : read_groups) {
-      string shortname = upcxx_utils::get_basename(rg_name);
-      *sh_of << "\t" << shortname << "-avg_depth\t" << shortname << "-var_depth";
+  if (fname != "") {
+    if (read_groups.empty()) SDIE("No read groups passed in for file names - this is incorrect usage");
+    sh_of = make_shared<upcxx_utils::dist_ofstream>(fname);
+    if (!upcxx::rank_me()) {
+      *sh_of << "contigName\tcontigLen\ttotalAvgDepth";
+      for (auto rg_name : read_groups) {
+        string shortname = upcxx_utils::get_basename(rg_name);
+        *sh_of << "\t" << shortname << "-avg_depth\t" << shortname << "-var_depth";
+      }
+      *sh_of << "\n";
     }
-    *sh_of << "\n";
   }
   // FIXME: the depths need to be in the same order as the contigs in the final_assembly.fasta file. This is an inefficient
   // way of ensuring that
