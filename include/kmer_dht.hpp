@@ -51,6 +51,9 @@
 #include "upcxx_utils/flat_aggr_store.hpp"
 #include "upcxx_utils/three_tier_aggr_store.hpp"
 
+//#define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
+#define SLOG_GPU SLOG_VERBOSE
+
 #ifdef ENABLE_KCOUNT_GPUS_HT
 #include "gpu-utils/gpu_utils.hpp"
 #include "kcount-gpu/gpu_hash_table.hpp"

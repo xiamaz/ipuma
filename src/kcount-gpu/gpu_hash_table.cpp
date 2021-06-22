@@ -461,10 +461,10 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   // now check that we have sufficient memory for the required capacity
   size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * (1 + sizeof(count_t)) * 1.5;
   size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(CountsArray);
-  gpu_bytes_reqd = (max_elems * elem_size) / 0.85 + elem_buff_size;
-  // save 1/10 of avail gpu memory for possible ctg kmers and compact hash table
+  gpu_bytes_reqd = (max_elems * elem_size) / 0.8 + elem_buff_size;
+  // save 1/5 of avail gpu memory for possible ctg kmers and compact hash table
   // set capacity to max avail remaining from gpu memory - more slots means lower load
-  auto max_slots = 0.85 * (gpu_avail_mem - elem_buff_size) / elem_size;
+  auto max_slots = 0.8 * (gpu_avail_mem - elem_buff_size) / elem_size;
   // find the first prime number lower than this value
   prime.set(min((size_t)max_slots, (size_t)(max_elems * 3)), false);
   auto ht_capacity = prime.get();
@@ -569,7 +569,7 @@ void HashTableGPUDriver<MAX_K>::purge_invalid(int &num_purged, int &num_entries)
   auto expected_num_entries = read_kmers_stats.new_inserts - num_purged;
   if (num_entries != (int)expected_num_entries)
     cout << KLRED << "[" << upcxx_rank_me << "] WARNING mismatch " << num_entries << " != " << expected_num_entries << " diff "
-         << (num_entries - (int)expected_num_entries) << " new inserts " << read_kmers_stats.new_inserts << " num purged " 
+         << (num_entries - (int)expected_num_entries) << " new inserts " << read_kmers_stats.new_inserts << " num purged "
          << num_purged << KNORM << endl;
   read_kmers_dev.num = num_entries;
 }
