@@ -111,7 +111,7 @@ class Options {
   string output_dir;
   string setup_time;
   bool restart = false;
-  bool shuffle_reads = false;
+  bool shuffle_reads = true;
   bool dump_kmers = false;
 
   Options();

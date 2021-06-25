@@ -133,7 +133,7 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     traverse_debruijn_graph(kmer_len, kmer_dht, ctgs);
     end_gasnet_stats();
     stage_timers.dbjg_traversal->stop();
-    if (is_debug || options->checkpoint) {
+    if (is_debug) {
       stage_timers.dump_ctgs->start();
       ctgs.dump_contigs(uutigs_fname, 0);
       stage_timers.dump_ctgs->stop();
