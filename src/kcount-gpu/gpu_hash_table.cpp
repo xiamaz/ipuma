@@ -347,46 +347,41 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
       int j;
       const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
       for (j = 0; j < MAX_PROBE; j++) {
-        uint64_t old_key =
-            atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[0])), KEY_EMPTY, kmer.longs[0]);
-        // only insert new kmers; drop duplicates
-        if (old_key == KEY_EMPTY || old_key == kmer.longs[0]) {
-          bool found_slot = true;
-          for (int long_i = 1; long_i < N_LONGS; long_i++) {
-            uint64_t old_key =
-                atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[long_i])), KEY_EMPTY, kmer.longs[long_i]);
-            if (old_key != KEY_EMPTY && old_key != kmer.longs[long_i]) {
-              found_slot = false;
-              break;
-            }
-          }
-          if (found_slot) {
-            count_t *counts = elems.vals[slot].data;
-            if (ctg_kmers) {
-              // the count is the min of all counts. Use CAS to deal with the initial zero value
-              int prev_count = atomicCAS(&(counts[0]), 0, kmer_count);
-              if (prev_count)
-                atomicMin(&(counts[0]), kmer_count);
-              else
-                new_inserts++;
-            } else {
-              int prev_count = atomicAdd(&(counts[0]), kmer_count);
-              if (!prev_count) new_inserts++;
-            }
-            switch (left_ext) {
-              case 'A': atomicAdd(&(counts[1]), kmer_count); break;
-              case 'C': atomicAdd(&(counts[2]), kmer_count); break;
-              case 'G': atomicAdd(&(counts[3]), kmer_count); break;
-              case 'T': atomicAdd(&(counts[4]), kmer_count); break;
-            }
-            switch (right_ext) {
-              case 'A': atomicAdd(&(counts[5]), kmer_count); break;
-              case 'C': atomicAdd(&(counts[6]), kmer_count); break;
-              case 'G': atomicAdd(&(counts[7]), kmer_count); break;
-              case 'T': atomicAdd(&(counts[8]), kmer_count); break;
-            }
+        bool found_slot = true;
+        for (int long_i = 0; long_i < N_LONGS; long_i++) {
+          uint64_t old_key =
+              atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[long_i])), KEY_EMPTY, kmer.longs[long_i]);
+          if (old_key != KEY_EMPTY && old_key != kmer.longs[long_i]) {
+            found_slot = false;
             break;
           }
+        }
+        if (found_slot) {
+          count_t *counts = elems.vals[slot].data;
+          if (ctg_kmers) {
+            // the count is the min of all counts. Use CAS to deal with the initial zero value
+            int prev_count = atomicCAS(&(counts[0]), 0, kmer_count);
+            if (prev_count)
+              atomicMin(&(counts[0]), kmer_count);
+            else
+              new_inserts++;
+          } else {
+            int prev_count = atomicAdd(&(counts[0]), kmer_count);
+            if (!prev_count) new_inserts++;
+          }
+          switch (left_ext) {
+            case 'A': atomicAdd(&(counts[1]), kmer_count); break;
+            case 'C': atomicAdd(&(counts[2]), kmer_count); break;
+            case 'G': atomicAdd(&(counts[3]), kmer_count); break;
+            case 'T': atomicAdd(&(counts[4]), kmer_count); break;
+          }
+          switch (right_ext) {
+            case 'A': atomicAdd(&(counts[5]), kmer_count); break;
+            case 'C': atomicAdd(&(counts[6]), kmer_count); break;
+            case 'G': atomicAdd(&(counts[7]), kmer_count); break;
+            case 'T': atomicAdd(&(counts[8]), kmer_count); break;
+          }
+          break;
         }
         // quadratic probing - worse cache but reduced clustering
         slot = (start_slot + (j + 1) * (j + 1)) % elems.capacity;
