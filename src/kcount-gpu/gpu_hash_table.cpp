@@ -72,17 +72,17 @@ __device__ size_t kmer_hash(const KmerArray<MAX_K> &kmer) {
   return gpu_murmurhash3_64(reinterpret_cast<const void *>(kmer.longs), kmer.N_LONGS * sizeof(uint64_t));
 }
 
-__device__ int8_t get_ext(count_t *ext_counts, int pos, int8_t *ext_map) {
+__device__ int8_t get_ext(CountsArray &counts, int pos, int8_t *ext_map) {
   count_t top_count = 0, runner_up_count = 0;
   int top_ext_pos = 0;
-  count_t kmer_count = ext_counts[0];
+  count_t kmer_count = counts.kmer_count;
   for (int i = pos; i < pos + 4; i++) {
-    if (ext_counts[i] >= top_count) {
+    if (counts.ext_counts[i] >= top_count) {
       runner_up_count = top_count;
-      top_count = ext_counts[i];
+      top_count = counts.ext_counts[i];
       top_ext_pos = i;
-    } else if (ext_counts[i] > runner_up_count) {
-      runner_up_count = ext_counts[i];
+    } else if (counts.ext_counts[i] > runner_up_count) {
+      runner_up_count = counts.ext_counts[i];
     }
   }
   // set dynamic_min_depth to 1.0 for single depth data (non-metagenomes)
@@ -116,8 +116,9 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
   int dropped_inserts = 0;
   int new_inserts = 0;
   if (threadid < ctg_kmers.capacity) {
-    count_t *counts = ctg_kmers.vals[threadid].data;
-    if (counts[0] && !ext_conflict(counts, 1) && !ext_conflict(counts, 5)) {
+    uint32_t kmer_count = ctg_kmers.vals[threadid].kmer_count;
+    count_t *ext_counts = ctg_kmers.vals[threadid].ext_counts;
+    if (kmer_count && !ext_conflict(ext_counts, 0) && !ext_conflict(ext_counts, 4)) {
       KmerArray<MAX_K> kmer = ctg_kmers.keys[threadid];
       uint64_t slot = kmer_hash(kmer) % read_kmers.capacity;
       auto start_slot = slot;
@@ -139,7 +140,7 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
           }
           new_inserts++;
           // always add it when there is no existing kmer from the reads
-          memcpy(read_kmers.vals[slot].data, counts, sizeof(CountsArray));
+          memcpy(&read_kmers.vals[slot], &ctg_kmers.vals[threadid], sizeof(CountsArray));
           break;
         } else if (old_key == kmer.longs[0]) {
           // now check to see if this is the same key, i.e. same in every position as this key
@@ -154,10 +155,10 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
           }
           if (found_slot) {
             // existing kmer from reads - only replace if the kmer is non-UU
-            int8_t left_ext = get_ext(read_kmers.vals[slot].data, 1, ext_map);
-            int8_t right_ext = get_ext(read_kmers.vals[slot].data, 5, ext_map);
+            int8_t left_ext = get_ext(read_kmers.vals[slot], 0, ext_map);
+            int8_t right_ext = get_ext(read_kmers.vals[slot], 4, ext_map);
             if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F')
-              memcpy(read_kmers.vals[slot].data, counts, sizeof(CountsArray));
+              memcpy(&read_kmers.vals[slot], &ctg_kmers.vals[threadid], sizeof(CountsArray));
             break;
           }
         }
@@ -181,9 +182,8 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
   int unique_inserts = 0;
   int8_t ext_map[4] = {'A', 'C', 'G', 'T'};
   if (threadid < elems.capacity) {
-    if (elems.vals[threadid].data[0]) {
+    if (elems.vals[threadid].kmer_count) {
       KmerArray<MAX_K> kmer = elems.keys[threadid];
-      count_t *counts = elems.vals[threadid].data;
       uint64_t slot = kmer_hash(kmer) % compact_elems.capacity;
       auto start_slot = slot;
       // we set a constraint on the max probe to track whether we are getting excessive collisions and need a bigger default
@@ -198,17 +198,12 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
           // found empty slot - there will be no duplicate keys since we're copying across from another hash table
           unique_inserts++;
           for (int long_i = 1; long_i < N_LONGS; long_i++) {
-#ifdef DEBUG
-            // Use these for debugging
-            // old_key = atomicCAS(&(compact_elems.keys[slot].longs[long_i]), KEY_EMPTY, kmer.longs[long_i]);
-            // if (old_key != KEY_EMPTY) printf("ERROR: key is not empty when setting in compact ht!\n");
-#endif
             compact_elems.keys[slot].longs[long_i] = kmer.longs[long_i];
           }
           // compute exts
-          int8_t left_ext = get_ext(counts, 1, ext_map);
-          int8_t right_ext = get_ext(counts, 5, ext_map);
-          compact_elems.vals[slot].count = counts[0];
+          int8_t left_ext = get_ext(elems.vals[threadid], 0, ext_map);
+          int8_t right_ext = get_ext(elems.vals[threadid], 4, ext_map);
+          compact_elems.vals[slot].count = elems.vals[threadid].kmer_count;
           compact_elems.vals[slot].left = left_ext;
           compact_elems.vals[slot].right = right_ext;
           break;
@@ -230,11 +225,11 @@ __global__ void gpu_purge_invalid(KmerCountsMap<MAX_K> elems, unsigned int *elem
   int num_purged = 0;
   int num_elems = 0;
   if (threadid < elems.capacity) {
-    if (elems.vals[threadid].data[0]) {
+    if (elems.vals[threadid].kmer_count) {
       int ext_sum = 0;
-      for (int j = 1; j < 9; j++) ext_sum += elems.vals[threadid].data[j];
-      if (elems.vals[threadid].data[0] < 2 || !ext_sum) {
-        memset(elems.vals[threadid].data, 0, sizeof(CountsArray));
+      for (int j = 0; j < 8; j++) ext_sum += elems.vals[threadid].ext_counts[j];
+      if (elems.vals[threadid].kmer_count < 2 || !ext_sum) {
+        memset(&elems.vals[threadid], 0, sizeof(CountsArray));
         memset(elems.keys[threadid].longs, KEY_EMPTY_BYTE, N_LONGS * sizeof(uint64_t));
         num_purged++;
       } else {
@@ -278,7 +273,7 @@ inline __device__ bool bad_qual(char base) { return (base == 'a' || base == 'c' 
 
 template <int MAX_K>
 __device__ bool get_kmer_from_supermer(SupermerBuff supermer_buff, uint32_t buff_len, int kmer_len, uint64_t *kmer, char &left_ext,
-                                       char &right_ext, count_t &count) {
+                                       char &right_ext, uint32_t &count) {
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
   int num_kmers = buff_len - kmer_len + 1;
   if (threadid >= num_kmers) return false;
@@ -331,7 +326,7 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
     attempted_inserts++;
     KmerArray<MAX_K> kmer;
     char left_ext, right_ext;
-    count_t kmer_count;
+    uint32_t kmer_count;
     if (!get_kmer_from_supermer<MAX_K>(supermer_buff, buff_len, kmer_len, kmer.longs, left_ext, right_ext, kmer_count)) break;
     bool skip_key_empty_overlap = false;
     for (int long_i = 0; long_i < N_LONGS; long_i++) {
@@ -357,29 +352,32 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
           }
         }
         if (found_slot) {
-          count_t *counts = elems.vals[slot].data;
+          count_t *ext_counts = elems.vals[slot].ext_counts;
           if (ctg_kmers) {
             // the count is the min of all counts. Use CAS to deal with the initial zero value
-            int prev_count = atomicCAS(&(counts[0]), 0, kmer_count);
+            int prev_count = atomicCAS(&elems.vals[slot].kmer_count, 0, kmer_count);
             if (prev_count)
-              atomicMin(&(counts[0]), kmer_count);
+              atomicMin(&elems.vals[slot].kmer_count, kmer_count);
             else
               new_inserts++;
           } else {
-            int prev_count = atomicAdd(&(counts[0]), kmer_count);
+            int prev_count = atomicAdd(&elems.vals[slot].kmer_count, kmer_count);
             if (!prev_count) new_inserts++;
           }
+
+          // FIXME: first check for overflow
+
           switch (left_ext) {
-            case 'A': atomicAdd(&(counts[1]), kmer_count); break;
-            case 'C': atomicAdd(&(counts[2]), kmer_count); break;
-            case 'G': atomicAdd(&(counts[3]), kmer_count); break;
-            case 'T': atomicAdd(&(counts[4]), kmer_count); break;
+            case 'A': atomicAddUint16(&(ext_counts[0]), kmer_count); break;
+            case 'C': atomicAddUint16(&(ext_counts[1]), kmer_count); break;
+            case 'G': atomicAddUint16(&(ext_counts[2]), kmer_count); break;
+            case 'T': atomicAddUint16(&(ext_counts[3]), kmer_count); break;
           }
           switch (right_ext) {
-            case 'A': atomicAdd(&(counts[5]), kmer_count); break;
-            case 'C': atomicAdd(&(counts[6]), kmer_count); break;
-            case 'G': atomicAdd(&(counts[7]), kmer_count); break;
-            case 'T': atomicAdd(&(counts[8]), kmer_count); break;
+            case 'A': atomicAddUint16(&(ext_counts[4]), kmer_count); break;
+            case 'C': atomicAddUint16(&(ext_counts[5]), kmer_count); break;
+            case 'G': atomicAddUint16(&(ext_counts[6]), kmer_count); break;
+            case 'T': atomicAddUint16(&(ext_counts[7]), kmer_count); break;
           }
           break;
         }

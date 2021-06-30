@@ -56,10 +56,11 @@ enum PASS_TYPE { READ_KMERS_PASS, CTG_KMERS_PASS };
 
 #define KEY_EMPTY UINT64_C(-1)
 #define KEY_EMPTY_BYTE 0xFF
-using count_t = uint32_t;
+using count_t = uint16_t;
 
 struct CountsArray {
-  count_t data[9];
+  uint32_t kmer_count;
+  count_t ext_counts[8];
 };
 
 struct CountExts {

@@ -213,4 +213,11 @@ inline __device__ bool pack_seq_to_kmer(char *seqs, int kmer_len, int num_longs,
   return true;
 }
 
+inline __device__ uint16_t atomicAddUint16(uint16_t *address, uint16_t val) {
+  unsigned int *base_address = (unsigned int *)((size_t)address & ~2);
+  unsigned int long_val = ((size_t)address & 2) ? ((unsigned int)val << 16) : val;
+  unsigned int long_old = atomicAdd(base_address, long_val);
+  return ((size_t)address & 2) ? (unsigned short)(long_old >> 16) : (uint16_t)(long_old & 0xffff);
+}
+
 }  // namespace gpu_common
