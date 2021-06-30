@@ -365,19 +365,17 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
             if (!prev_count) new_inserts++;
           }
 
-          // FIXME: first check for overflow
-
           switch (left_ext) {
-            case 'A': atomicAddUint16(&(ext_counts[0]), kmer_count); break;
-            case 'C': atomicAddUint16(&(ext_counts[1]), kmer_count); break;
-            case 'G': atomicAddUint16(&(ext_counts[2]), kmer_count); break;
-            case 'T': atomicAddUint16(&(ext_counts[3]), kmer_count); break;
+            case 'A': atomicAddUint16_thres(&(ext_counts[0]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+            case 'C': atomicAddUint16_thres(&(ext_counts[1]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+            case 'G': atomicAddUint16_thres(&(ext_counts[2]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+            case 'T': atomicAddUint16_thres(&(ext_counts[3]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
           }
           switch (right_ext) {
-            case 'A': atomicAddUint16(&(ext_counts[4]), kmer_count); break;
-            case 'C': atomicAddUint16(&(ext_counts[5]), kmer_count); break;
-            case 'G': atomicAddUint16(&(ext_counts[6]), kmer_count); break;
-            case 'T': atomicAddUint16(&(ext_counts[7]), kmer_count); break;
+            case 'A': atomicAddUint16_thres(&(ext_counts[4]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+            case 'C': atomicAddUint16_thres(&(ext_counts[5]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+            case 'G': atomicAddUint16_thres(&(ext_counts[6]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+            case 'T': atomicAddUint16_thres(&(ext_counts[7]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
           }
           break;
         }

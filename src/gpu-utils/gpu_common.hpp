@@ -220,4 +220,8 @@ inline __device__ uint16_t atomicAddUint16(uint16_t *address, uint16_t val) {
   return ((size_t)address & 2) ? (unsigned short)(long_old >> 16) : (uint16_t)(long_old & 0xffff);
 }
 
+inline __device__ void atomicAddUint16_thres(uint16_t *address, uint16_t val, uint16_t thres) {
+  if (atomicAddUint16(address, 0) < thres) atomicAddUint16(address, val);
+}
+
 }  // namespace gpu_common
