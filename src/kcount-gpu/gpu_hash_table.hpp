@@ -54,8 +54,6 @@ namespace kcount_gpu {
 
 enum PASS_TYPE { READ_KMERS_PASS, CTG_KMERS_PASS };
 
-#define KEY_EMPTY UINT64_C(-1)
-#define KEY_EMPTY_BYTE 0xFF
 using count_t = uint16_t;
 
 struct CountsArray {

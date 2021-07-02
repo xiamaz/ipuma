@@ -568,6 +568,7 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
 
     // drop all kmers that have values corresponding to the empty key as these are likely to be errors
     // we expect these to be very unlikely, requiring a full run of Ts for a full long, i.e. 32 Ts
+    /*
     bool drop_entry = false;
     auto kmer_longs = kmer.get_longs();
     for (int j = 0; j < kmer.get_N_LONGS(); j++) {
@@ -578,7 +579,8 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
         break;
       }
     }
-    if (!drop_entry) kmers->insert({kmer, kmer_counts});
+    if (!drop_entry)*/
+    kmers->insert({kmer, kmer_counts});
   }
   insert_timer.stop();
   auto all_num_empty_key_drops = reduce_one((uint64_t)num_empty_key_drops, op_fast_add, 0).wait();

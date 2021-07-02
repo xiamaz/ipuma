@@ -58,6 +58,12 @@ using namespace std;
 using namespace gpu_common;
 using namespace kcount_gpu;
 
+//#define KEY_EMPTY UINT64_C(-1)
+//#define KEY_EMPTY_BYTE 0xFF
+const uint64_t KEY_EMPTY = 0xffffffffffffffff;
+const uint64_t KEY_TRANSITION = 0xfffffffffffffffe;
+const uint8_t KEY_EMPTY_BYTE = 0xff;
+
 template <int MAX_K>
 __device__ bool kmers_equal(const KmerArray<MAX_K> &kmer1, const KmerArray<MAX_K> &kmer2) {
   int n_longs = kmer1.N_LONGS;
@@ -126,35 +132,33 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
       const int MAX_PROBE = (read_kmers.capacity < 200 ? read_kmers.capacity : 200);
       int j;
       for (j = 0; j < MAX_PROBE; j++) {
-        uint64_t old_key =
-            atomicCAS(reinterpret_cast<unsigned long long *>(&(read_kmers.keys[slot].longs[0])), KEY_EMPTY, kmer.longs[0]);
+        uint64_t old_key;
+        do {
+          old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(read_kmers.keys[slot].longs[N_LONGS - 1])), KEY_EMPTY,
+                              KEY_TRANSITION);
+        } while (old_key == KEY_TRANSITION);
         if (old_key == KEY_EMPTY) {
-          // now all others should be empty
-          for (int long_i = 1; long_i < N_LONGS; long_i++) {
-            old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(read_kmers.keys[slot].longs[long_i])), KEY_EMPTY,
-                                kmer.longs[long_i]);
-            if (old_key != KEY_EMPTY) {
-              printf("ERROR: old key is not KEY_EMPTY!! Why?\n");
-              break;
-            }
-          }
           new_inserts++;
-          // always add it when there is no existing kmer from the reads
+          memcpy(read_kmers.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
           memcpy(&read_kmers.vals[slot], &ctg_kmers.vals[threadid], sizeof(CountsArray));
+          old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(read_kmers.keys[slot].longs[N_LONGS - 1])), KEY_TRANSITION,
+                              kmer.longs[N_LONGS - 1]);
+          if (old_key != KEY_TRANSITION) {
+            printf("ERROR: old_key should be KEY_TRANSITION\n");
+            return;
+          }
           break;
-        } else if (old_key == kmer.longs[0]) {
-          // now check to see if this is the same key, i.e. same in every position as this key
+        } else {
           bool found_slot = true;
-          for (int long_i = 1; long_i < N_LONGS; long_i++) {
-            // check the value atomically by adding nothing
-            old_key = atomicAdd(reinterpret_cast<unsigned long long *>(&(read_kmers.keys[slot].longs[long_i])), 0);
-            if (old_key != kmer.longs[long_i]) {
+          for (int long_i = 0; long_i < N_LONGS; long_i++) {
+            if (read_kmers.keys[slot].longs[long_i] != kmer.longs[long_i]) {
               found_slot = false;
               break;
             }
           }
           if (found_slot) {
             // existing kmer from reads - only replace if the kmer is non-UU
+            // there is no need for atomics here because all ctg kmers are unique; hence only one thread will ever match this kmer
             int8_t left_ext = get_ext(read_kmers.vals[slot], 0, ext_map);
             int8_t right_ext = get_ext(read_kmers.vals[slot], 4, ext_map);
             if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F')
@@ -192,14 +196,12 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
       // look for empty slot in compact hash table
       int j;
       for (j = 0; j < MAX_PROBE; j++) {
-        uint64_t old_key =
-            atomicCAS(reinterpret_cast<unsigned long long *>(&(compact_elems.keys[slot].longs[0])), KEY_EMPTY, kmer.longs[0]);
+        uint64_t old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(compact_elems.keys[slot].longs[N_LONGS - 1])),
+                                     KEY_EMPTY, kmer.longs[N_LONGS - 1]);
         if (old_key == KEY_EMPTY) {
           // found empty slot - there will be no duplicate keys since we're copying across from another hash table
           unique_inserts++;
-          for (int long_i = 1; long_i < N_LONGS; long_i++) {
-            compact_elems.keys[slot].longs[long_i] = kmer.longs[long_i];
-          }
+          memcpy(compact_elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
           // compute exts
           int8_t left_ext = get_ext(elems.vals[threadid], 0, ext_map);
           int8_t right_ext = get_ext(elems.vals[threadid], 4, ext_map);
@@ -329,6 +331,7 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
     uint32_t kmer_count;
     if (!get_kmer_from_supermer<MAX_K>(supermer_buff, buff_len, kmer_len, kmer.longs, left_ext, right_ext, kmer_count)) break;
     bool skip_key_empty_overlap = false;
+    /*
     for (int long_i = 0; long_i < N_LONGS; long_i++) {
       if (kmer.longs[long_i] == KEY_EMPTY) {
         skip_key_empty_overlap = true;
@@ -336,6 +339,7 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
         break;
       }
     }
+    */
     if (!skip_key_empty_overlap) {
       uint64_t slot = kmer_hash(kmer) % elems.capacity;
       auto start_slot = slot;
@@ -343,6 +347,25 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
       const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
       for (j = 0; j < MAX_PROBE; j++) {
         bool found_slot = true;
+        uint64_t old_key;
+        do {
+          old_key =
+              atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_EMPTY, KEY_TRANSITION);
+        } while (old_key == KEY_TRANSITION);
+        if (old_key == KEY_EMPTY) {
+          memcpy(elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
+          old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_TRANSITION,
+                              kmer.longs[N_LONGS - 1]);
+          if (old_key != KEY_TRANSITION) printf("ERROR: old_key should be KEY_TRANSITION\n");
+        } else {
+          for (int long_i = 0; long_i < N_LONGS; long_i++) {
+            if (elems.keys[slot].longs[long_i] != kmer.longs[long_i]) {
+              found_slot = false;
+              break;
+            }
+          }
+        }
+        /*
         for (int long_i = 0; long_i < N_LONGS; long_i++) {
           uint64_t old_key =
               atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[long_i])), KEY_EMPTY, kmer.longs[long_i]);
@@ -351,6 +374,7 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
             break;
           }
         }
+        */
         if (found_slot) {
           count_t *ext_counts = elems.vals[slot].ext_counts;
           if (ctg_kmers) {
