@@ -114,7 +114,6 @@ class HashTableGPUDriver {
   struct HashTableDriverState;
   // stores CUDA specific variables
   HashTableDriverState *dstate = nullptr;
-  primes::Prime prime;
 
   int upcxx_rank_me;
   int upcxx_rank_n;

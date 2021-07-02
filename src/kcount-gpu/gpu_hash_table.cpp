@@ -91,9 +91,7 @@ __device__ int8_t get_ext(CountsArray &counts, int pos, int8_t *ext_map) {
       runner_up_count = counts.ext_counts[i];
     }
   }
-  // set dynamic_min_depth to 1.0 for single depth data (non-metagenomes)
   int dmin_dyn = (1.0 - DYN_MIN_DEPTH) * kmer_count;
-  // if (dmin_dyn < _dmin_thres) dmin_dyn = _dmin_thres;
   if (dmin_dyn < 2.0) dmin_dyn = 2.0;
   if (top_count < dmin_dyn) return 'X';
   if (runner_up_count >= dmin_dyn) return 'F';
@@ -330,85 +328,63 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
     char left_ext, right_ext;
     uint32_t kmer_count;
     if (!get_kmer_from_supermer<MAX_K>(supermer_buff, buff_len, kmer_len, kmer.longs, left_ext, right_ext, kmer_count)) break;
-    bool skip_key_empty_overlap = false;
-    /*
-    for (int long_i = 0; long_i < N_LONGS; long_i++) {
-      if (kmer.longs[long_i] == KEY_EMPTY) {
-        skip_key_empty_overlap = true;
-        key_empty_overlaps++;
-        break;
-      }
-    }
-    */
-    if (!skip_key_empty_overlap) {
-      uint64_t slot = kmer_hash(kmer) % elems.capacity;
-      auto start_slot = slot;
-      int j;
-      const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
-      for (j = 0; j < MAX_PROBE; j++) {
-        bool found_slot = true;
-        uint64_t old_key;
-        do {
-          old_key =
-              atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_EMPTY, KEY_TRANSITION);
-        } while (old_key == KEY_TRANSITION);
-        if (old_key == KEY_EMPTY) {
-          memcpy(elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
-          old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_TRANSITION,
-                              kmer.longs[N_LONGS - 1]);
-          if (old_key != KEY_TRANSITION) printf("ERROR: old_key should be KEY_TRANSITION\n");
-        } else {
-          for (int long_i = 0; long_i < N_LONGS; long_i++) {
-            if (elems.keys[slot].longs[long_i] != kmer.longs[long_i]) {
-              found_slot = false;
-              break;
-            }
-          }
-        }
-        /*
+    uint64_t slot = kmer_hash(kmer) % elems.capacity;
+    auto start_slot = slot;
+    int j;
+    const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
+    for (j = 0; j < MAX_PROBE; j++) {
+      bool found_slot = true;
+      uint64_t old_key;
+      do {
+        old_key =
+            atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_EMPTY, KEY_TRANSITION);
+      } while (old_key == KEY_TRANSITION);
+      if (old_key == KEY_EMPTY) {
+        memcpy(elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
+        old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_TRANSITION,
+                            kmer.longs[N_LONGS - 1]);
+        if (old_key != KEY_TRANSITION) printf("ERROR: old_key should be KEY_TRANSITION\n");
+      } else {
         for (int long_i = 0; long_i < N_LONGS; long_i++) {
-          uint64_t old_key =
-              atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[long_i])), KEY_EMPTY, kmer.longs[long_i]);
-          if (old_key != KEY_EMPTY && old_key != kmer.longs[long_i]) {
+          if (elems.keys[slot].longs[long_i] != kmer.longs[long_i]) {
             found_slot = false;
             break;
           }
         }
-        */
-        if (found_slot) {
-          count_t *ext_counts = elems.vals[slot].ext_counts;
-          if (ctg_kmers) {
-            // the count is the min of all counts. Use CAS to deal with the initial zero value
-            int prev_count = atomicCAS(&elems.vals[slot].kmer_count, 0, kmer_count);
-            if (prev_count)
-              atomicMin(&elems.vals[slot].kmer_count, kmer_count);
-            else
-              new_inserts++;
-          } else {
-            int prev_count = atomicAdd(&elems.vals[slot].kmer_count, kmer_count);
-            if (!prev_count) new_inserts++;
-          }
-
-          switch (left_ext) {
-            case 'A': atomicAddUint16_thres(&(ext_counts[0]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-            case 'C': atomicAddUint16_thres(&(ext_counts[1]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-            case 'G': atomicAddUint16_thres(&(ext_counts[2]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-            case 'T': atomicAddUint16_thres(&(ext_counts[3]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          }
-          switch (right_ext) {
-            case 'A': atomicAddUint16_thres(&(ext_counts[4]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-            case 'C': atomicAddUint16_thres(&(ext_counts[5]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-            case 'G': atomicAddUint16_thres(&(ext_counts[6]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-            case 'T': atomicAddUint16_thres(&(ext_counts[7]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          }
-          break;
-        }
-        // quadratic probing - worse cache but reduced clustering
-        slot = (start_slot + (j + 1) * (j + 1)) % elems.capacity;
       }
-      // this entry didn't get inserted because we ran out of probing time (and probably space)
-      if (j == MAX_PROBE) dropped_inserts++;
+      if (found_slot) {
+        count_t *ext_counts = elems.vals[slot].ext_counts;
+        if (ctg_kmers) {
+          // the count is the min of all counts. Use CAS to deal with the initial zero value
+          int prev_count = atomicCAS(&elems.vals[slot].kmer_count, 0, kmer_count);
+          if (prev_count)
+            atomicMin(&elems.vals[slot].kmer_count, kmer_count);
+          else
+            new_inserts++;
+        } else {
+          int prev_count = atomicAdd(&elems.vals[slot].kmer_count, kmer_count);
+          if (!prev_count) new_inserts++;
+        }
+
+        switch (left_ext) {
+          case 'A': atomicAddUint16_thres(&(ext_counts[0]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'C': atomicAddUint16_thres(&(ext_counts[1]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'G': atomicAddUint16_thres(&(ext_counts[2]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'T': atomicAddUint16_thres(&(ext_counts[3]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+        }
+        switch (right_ext) {
+          case 'A': atomicAddUint16_thres(&(ext_counts[4]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'C': atomicAddUint16_thres(&(ext_counts[5]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'G': atomicAddUint16_thres(&(ext_counts[6]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'T': atomicAddUint16_thres(&(ext_counts[7]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+        }
+        break;
+      }
+      // quadratic probing - worse cache but reduced clustering
+      slot = (start_slot + (j + 1) * (j + 1)) % elems.capacity;
     }
+    // this entry didn't get inserted because we ran out of probing time (and probably space)
+    if (j == MAX_PROBE) dropped_inserts++;
     break;
   }
   reduce(attempted_inserts, buff_len, &insert_stats->attempted);
@@ -481,6 +457,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   // set capacity to max avail remaining from gpu memory - more slots means lower load
   auto max_slots = 0.8 * (gpu_avail_mem - elem_buff_size) / elem_size;
   // find the first prime number lower than this value
+  primes::Prime prime;
   prime.set(min((size_t)max_slots, (size_t)(max_elems * 3)), false);
   auto ht_capacity = prime.get();
   read_kmers_dev.init(ht_capacity);
@@ -507,6 +484,7 @@ void HashTableGPUDriver<MAX_K>::init_ctg_kmers(int max_elems, size_t gpu_avail_m
   size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * (1 + sizeof(count_t)) * 1.5;
   size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(CountsArray);
   size_t max_slots = 0.9 * (gpu_avail_mem - elem_buff_size) / elem_size;
+  primes::Prime prime;
   prime.set(min(max_slots, (size_t)(max_elems * 3)), false);
   auto ht_capacity = prime.get();
   ctg_kmers_dev.init(ht_capacity);

@@ -535,8 +535,6 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
 
   // add some space for the ctg kmers
   kmers->reserve(num_entries * 1.5);
-  uint64_t num_empty_key_drops = 0;
-  uint64_t sum_drop_depth = 0;
   uint64_t invalid = 0;
   while (true) {
     assert(HashTableGPUDriver<MAX_K>::get_N_LONGS() == Kmer<MAX_K>::get_N_LONGS());
@@ -565,29 +563,9 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
     if (it != kmers->end())
       DIE("Found a duplicate kmer ", kmer.to_string(), " - shouldn't happen: existing count ", it->second.count, " new count ",
           kmer_counts.count);
-
-    // drop all kmers that have values corresponding to the empty key as these are likely to be errors
-    // we expect these to be very unlikely, requiring a full run of Ts for a full long, i.e. 32 Ts
-    /*
-    bool drop_entry = false;
-    auto kmer_longs = kmer.get_longs();
-    for (int j = 0; j < kmer.get_N_LONGS(); j++) {
-      if (kmer_longs[j] == KEY_EMPTY) {
-        num_empty_key_drops++;
-        sum_drop_depth += kmer_counts.count;
-        drop_entry = true;
-        break;
-      }
-    }
-    if (!drop_entry)*/
     kmers->insert({kmer, kmer_counts});
   }
   insert_timer.stop();
-  auto all_num_empty_key_drops = reduce_one((uint64_t)num_empty_key_drops, op_fast_add, 0).wait();
-  auto all_drop_depth = reduce_one((uint64_t)sum_drop_depth, op_fast_add, 0).wait();
-  if (all_num_empty_key_drops)
-    SWARN("Dropped ", all_num_empty_key_drops, " kmer inserts because of empty key overlap, average depth ",
-          (double)all_drop_depth / all_num_empty_key_drops);
 
   auto all_avg_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_add, 0).wait() / rank_n();
   auto all_max_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_max, 0).wait();

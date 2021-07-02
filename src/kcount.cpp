@@ -66,7 +66,6 @@ static void process_block_gpu(unsigned kmer_len, string &seq_block, const vector
                               dist_object<KmerDHT<MAX_K>> &kmer_dht, int64_t &num_Ns, int64_t &num_kmers, int64_t &num_gpu_waits,
                               int64_t &bytes_kmers_sent, int64_t &bytes_supermers_sent) {
   bool from_ctgs = !depth_block.empty();
-  SLOG_VERBOSE("process_gpu_block with sequence length ", seq_block.length(), "\n");
   unsigned int num_valid_kmers = 0;
   if (!pnp_gpu_driver->process_seq_block(seq_block, num_valid_kmers))
     DIE("seq length is too high, ", seq_block.length(), " >= ", KCOUNT_GPU_SEQ_BLOCK_SIZE);
