@@ -42,6 +42,7 @@
 
 #include <iostream>
 #include <sstream>
+#include <fstream>
 #include <chrono>
 #include <tuple>
 #include <assert.h>
@@ -128,8 +129,7 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
       auto start_slot = slot;
       attempted_inserts++;
       const int MAX_PROBE = (read_kmers.capacity < 200 ? read_kmers.capacity : 200);
-      int j;
-      for (j = 0; j < MAX_PROBE; j++) {
+      for (int j = 0; j < MAX_PROBE; j++) {
         uint64_t old_key;
         do {
           old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(read_kmers.keys[slot].longs[N_LONGS - 1])), KEY_EMPTY,
@@ -166,9 +166,8 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
         }
         // quadratic probing - worse cache but reduced clustering
         slot = (start_slot + (j + 1) * (j + 1)) % read_kmers.capacity;
+        if (j == MAX_PROBE - 1) dropped_inserts++;
       }
-      // this entry didn't get inserted because we ran out of probing time (and probably space)
-      if (j == MAX_PROBE) dropped_inserts++;
     }
   }
   reduce(attempted_inserts, ctg_kmers.capacity, &(insert_counts[0]));
@@ -192,8 +191,7 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
       // compact table
       const int MAX_PROBE = (compact_elems.capacity < 200 ? compact_elems.capacity : 200);
       // look for empty slot in compact hash table
-      int j;
-      for (j = 0; j < MAX_PROBE; j++) {
+      for (int j = 0; j < MAX_PROBE; j++) {
         uint64_t old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(compact_elems.keys[slot].longs[N_LONGS - 1])),
                                      KEY_EMPTY, kmer.longs[N_LONGS - 1]);
         if (old_key == KEY_EMPTY) {
@@ -210,8 +208,8 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
         }
         // quadratic probing - worse cache but reduced clustering
         slot = (start_slot + (j + 1) * (j + 1)) % compact_elems.capacity;
+        if (j == MAX_PROBE - 1) dropped_inserts++;
       }
-      if (j == MAX_PROBE) dropped_inserts++;
     }
   }
   reduce(dropped_inserts, compact_elems.capacity, &(elem_counts[0]));
@@ -328,13 +326,14 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
     char left_ext, right_ext;
     uint32_t kmer_count;
     if (!get_kmer_from_supermer<MAX_K>(supermer_buff, buff_len, kmer_len, kmer.longs, left_ext, right_ext, kmer_count)) break;
+    if (kmer.longs[N_LONGS - 1] == KEY_EMPTY) printf("key empty overlap!!\n");
+    if (kmer.longs[N_LONGS - 1] == KEY_TRANSITION) printf("key transition overlap!!\n");
     uint64_t slot = kmer_hash(kmer) % elems.capacity;
     auto start_slot = slot;
-    int j;
     const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
-    for (j = 0; j < MAX_PROBE; j++) {
+    for (int j = 0; j < MAX_PROBE; j++) {
       bool found_slot = true;
-      uint64_t old_key;
+      uint64_t old_key = KEY_TRANSITION;
       do {
         old_key =
             atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_EMPTY, KEY_TRANSITION);
@@ -382,9 +381,9 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
       }
       // quadratic probing - worse cache but reduced clustering
       slot = (start_slot + (j + 1) * (j + 1)) % elems.capacity;
+      // this entry didn't get inserted because we ran out of probing time (and probably space)
+      if (j == MAX_PROBE - 1) dropped_inserts++;
     }
-    // this entry didn't get inserted because we ran out of probing time (and probably space)
-    if (j == MAX_PROBE) dropped_inserts++;
     break;
   }
   reduce(attempted_inserts, buff_len, &insert_stats->attempted);
@@ -579,6 +578,19 @@ void HashTableGPUDriver<MAX_K>::flush_inserts() {
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_unique, int &num_purged) {
+  if (kmer_len == 65) {
+    vector<KmerArray<MAX_K>> read_keys;
+    read_keys.resize(read_kmers_dev.capacity);
+    cudaMemcpy(read_keys.data(), read_kmers_dev.keys, read_kmers_dev.capacity * sizeof(KmerArray<MAX_K>), cudaMemcpyDeviceToHost);
+    ofstream f("kmers-" + to_string(kmer_len) + "." + to_string(upcxx_rank_me));
+    for (auto key : read_keys) {
+      if (key.longs[N_LONGS - 1] == KEY_EMPTY) continue;
+      for (int j = 0; j < N_LONGS; j++) f << std::hex << key.longs[j] << " ";
+      f << endl;
+    }
+    f.close();
+  }
+
   int num_entries = 0;
   purge_invalid(num_purged, num_entries);
   read_kmers_dev.num = num_entries;
@@ -589,6 +601,7 @@ void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_uniq
   if (packed_elem_buff_dev.counts) cudaFree(packed_elem_buff_dev.counts);
   if (unpacked_elem_buff_dev.counts) cudaFree(unpacked_elem_buff_dev.counts);
   cudaFree(gpu_insert_stats);
+
   // overallocate to reduce collisions
   num_entries *= 1.3;
   // now compact the hash table entries
@@ -616,14 +629,12 @@ void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_uniq
   if (num_unique != read_kmers_dev.num)
     cerr << KLRED << "[" << upcxx_rank_me << "] <gpu_hash_table.cpp:" << __LINE__ << "> WARNING: " << KNORM
          << "mismatch in expected entries " << num_unique << " != " << read_kmers_dev.num << "\n";
-
   // now copy the gpu hash table values across to the host
   // We only do this once, which requires enough memory on the host to store the full GPU hash table, but since the GPU memory
   // is generally a lot less than the host memory, it should be fine.
   output_keys.resize(num_entries);
   output_vals.resize(num_entries);
   output_index = 0;
-  // FIXME: can do this async - also
   cudaErrchk(cudaMemcpy(output_keys.data(), compact_read_kmers_dev.keys, compact_read_kmers_dev.capacity * sizeof(KmerArray<MAX_K>),
                         cudaMemcpyDeviceToHost));
   cudaErrchk(cudaMemcpy(output_vals.data(), compact_read_kmers_dev.vals, compact_read_kmers_dev.capacity * sizeof(CountExts),
@@ -633,6 +644,7 @@ void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_uniq
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::done_ctg_kmer_inserts(int &attempted_inserts, int &dropped_inserts, int &new_inserts) {
+  /*
   unsigned int *counts_gpu;
   int NUM_COUNTS = 3;
   cudaErrchk(cudaMalloc(&counts_gpu, NUM_COUNTS * sizeof(unsigned int)));
@@ -653,6 +665,7 @@ void HashTableGPUDriver<MAX_K>::done_ctg_kmer_inserts(int &attempted_inserts, in
   new_inserts = counts_host[2];
   read_kmers_dev.num += new_inserts;
   read_kmers_stats.new_inserts += new_inserts;
+  */
 }
 
 template <int MAX_K>

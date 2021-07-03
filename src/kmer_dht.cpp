@@ -561,8 +561,8 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
     // FIXME: should only be done in debug mode
     const auto it = kmers->find(kmer);
     if (it != kmers->end())
-      DIE("Found a duplicate kmer ", kmer.to_string(), " - shouldn't happen: existing count ", it->second.count, " new count ",
-          kmer_counts.count);
+      WARN("Found a duplicate kmer ", kmer.to_string(), " - shouldn't happen: existing count ", it->second.count, " new count ",
+           kmer_counts.count);
     kmers->insert({kmer, kmer_counts});
   }
   insert_timer.stop();
