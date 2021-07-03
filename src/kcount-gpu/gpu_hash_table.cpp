@@ -320,71 +320,71 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
   const int N_LONGS = KmerArray<MAX_K>::N_LONGS;
   int attempted_inserts = 0, dropped_inserts = 0, new_inserts = 0, key_empty_overlaps = 0;
-  while (threadid > 0 && threadid < buff_len) {
+  if (threadid > 0 && threadid < buff_len) {
     attempted_inserts++;
     KmerArray<MAX_K> kmer;
     char left_ext, right_ext;
     uint32_t kmer_count;
-    if (!get_kmer_from_supermer<MAX_K>(supermer_buff, buff_len, kmer_len, kmer.longs, left_ext, right_ext, kmer_count)) break;
-    if (kmer.longs[N_LONGS - 1] == KEY_EMPTY) printf("key empty overlap!!\n");
-    if (kmer.longs[N_LONGS - 1] == KEY_TRANSITION) printf("key transition overlap!!\n");
-    uint64_t slot = kmer_hash(kmer) % elems.capacity;
-    auto start_slot = slot;
-    const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
-    for (int j = 0; j < MAX_PROBE; j++) {
-      bool found_slot = true;
-      uint64_t old_key = KEY_TRANSITION;
-      do {
-        old_key =
-            atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_EMPTY, KEY_TRANSITION);
-      } while (old_key == KEY_TRANSITION);
-      if (old_key == KEY_EMPTY) {
-        memcpy(elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
-        old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_TRANSITION,
-                            kmer.longs[N_LONGS - 1]);
-        if (old_key != KEY_TRANSITION) printf("ERROR: old_key should be KEY_TRANSITION\n");
-      } else {
-        for (int long_i = 0; long_i < N_LONGS; long_i++) {
-          if (elems.keys[slot].longs[long_i] != kmer.longs[long_i]) {
-            found_slot = false;
-            break;
+    if (get_kmer_from_supermer<MAX_K>(supermer_buff, buff_len, kmer_len, kmer.longs, left_ext, right_ext, kmer_count)) {
+      if (kmer.longs[N_LONGS - 1] == KEY_EMPTY) printf("key empty overlap!!\n");
+      if (kmer.longs[N_LONGS - 1] == KEY_TRANSITION) printf("key transition overlap!!\n");
+      uint64_t slot = kmer_hash(kmer) % elems.capacity;
+      auto start_slot = slot;
+      const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
+      for (int j = 0; j < MAX_PROBE; j++) {
+        bool found_slot = true;
+        uint64_t old_key = KEY_TRANSITION;
+        do {
+          old_key =
+              atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_EMPTY, KEY_TRANSITION);
+        } while (old_key == KEY_TRANSITION);
+        if (old_key == KEY_EMPTY) {
+          memcpy(elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
+          old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_TRANSITION,
+                              kmer.longs[N_LONGS - 1]);
+          if (old_key != KEY_TRANSITION) printf("ERROR: old_key should be KEY_TRANSITION\n");
+        } else {
+          for (int long_i = 0; long_i < N_LONGS; long_i++) {
+            if (elems.keys[slot].longs[long_i] != kmer.longs[long_i]) {
+              found_slot = false;
+              break;
+            }
           }
         }
-      }
-      if (found_slot) {
-        count_t *ext_counts = elems.vals[slot].ext_counts;
-        if (ctg_kmers) {
-          // the count is the min of all counts. Use CAS to deal with the initial zero value
-          int prev_count = atomicCAS(&elems.vals[slot].kmer_count, 0, kmer_count);
-          if (prev_count)
-            atomicMin(&elems.vals[slot].kmer_count, kmer_count);
-          else
-            new_inserts++;
-        } else {
-          int prev_count = atomicAdd(&elems.vals[slot].kmer_count, kmer_count);
-          if (!prev_count) new_inserts++;
-        }
+        if (found_slot) {
+          count_t *ext_counts = elems.vals[slot].ext_counts;
+          if (ctg_kmers) {
+            // the count is the min of all counts. Use CAS to deal with the initial zero value
+            int prev_count = atomicCAS(&elems.vals[slot].kmer_count, 0, kmer_count);
+            if (prev_count)
+              atomicMin(&elems.vals[slot].kmer_count, kmer_count);
+            else
+              new_inserts++;
+          } else {
+            int prev_count = atomicAdd(&elems.vals[slot].kmer_count, kmer_count);
+            if (!prev_count) new_inserts++;
+          }
 
-        switch (left_ext) {
-          case 'A': atomicAddUint16_thres(&(ext_counts[0]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          case 'C': atomicAddUint16_thres(&(ext_counts[1]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          case 'G': atomicAddUint16_thres(&(ext_counts[2]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          case 'T': atomicAddUint16_thres(&(ext_counts[3]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          switch (left_ext) {
+            case 'A': atomicAddUint16_thres(&(ext_counts[0]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+            case 'C': atomicAddUint16_thres(&(ext_counts[1]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+            case 'G': atomicAddUint16_thres(&(ext_counts[2]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+            case 'T': atomicAddUint16_thres(&(ext_counts[3]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          }
+          switch (right_ext) {
+            case 'A': atomicAddUint16_thres(&(ext_counts[4]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+            case 'C': atomicAddUint16_thres(&(ext_counts[5]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+            case 'G': atomicAddUint16_thres(&(ext_counts[6]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+            case 'T': atomicAddUint16_thres(&(ext_counts[7]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          }
+          break;
         }
-        switch (right_ext) {
-          case 'A': atomicAddUint16_thres(&(ext_counts[4]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          case 'C': atomicAddUint16_thres(&(ext_counts[5]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          case 'G': atomicAddUint16_thres(&(ext_counts[6]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          case 'T': atomicAddUint16_thres(&(ext_counts[7]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-        }
-        break;
+        // quadratic probing - worse cache but reduced clustering
+        slot = (start_slot + (j + 1) * (j + 1)) % elems.capacity;
+        // this entry didn't get inserted because we ran out of probing time (and probably space)
+        if (j == MAX_PROBE - 1) dropped_inserts++;
       }
-      // quadratic probing - worse cache but reduced clustering
-      slot = (start_slot + (j + 1) * (j + 1)) % elems.capacity;
-      // this entry didn't get inserted because we ran out of probing time (and probably space)
-      if (j == MAX_PROBE - 1) dropped_inserts++;
     }
-    break;
   }
   reduce(attempted_inserts, buff_len, &insert_stats->attempted);
   reduce(dropped_inserts, buff_len, &insert_stats->dropped);
