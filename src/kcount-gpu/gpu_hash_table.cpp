@@ -132,29 +132,21 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
       for (int j = 0; j < MAX_PROBE; j++) {
         uint64_t old_key;
         do {
-          old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(read_kmers.keys[slot].longs[N_LONGS - 1])), KEY_EMPTY,
-                              KEY_TRANSITION);
+          old_key = atomicCAS((unsigned long long *)&(read_kmers.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
         } while (old_key == KEY_TRANSITION);
         if (old_key == KEY_EMPTY) {
           new_inserts++;
           memcpy(read_kmers.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
           memcpy(&read_kmers.vals[slot], &ctg_kmers.vals[threadid], sizeof(CountsArray));
-          old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(read_kmers.keys[slot].longs[N_LONGS - 1])), KEY_TRANSITION,
-                              kmer.longs[N_LONGS - 1]);
+          old_key =
+              atomicCAS((unsigned long long *)&(read_kmers.keys[slot].longs[N_LONGS - 1]), KEY_TRANSITION, kmer.longs[N_LONGS - 1]);
           if (old_key != KEY_TRANSITION) {
             printf("ERROR: old_key should be KEY_TRANSITION\n");
             return;
           }
           break;
         } else {
-          bool found_slot = true;
-          for (int long_i = 0; long_i < N_LONGS; long_i++) {
-            if (read_kmers.keys[slot].longs[long_i] != kmer.longs[long_i]) {
-              found_slot = false;
-              break;
-            }
-          }
-          if (found_slot) {
+          if (kmers_equal(read_kmers.keys[slot], kmer)) {
             // existing kmer from reads - only replace if the kmer is non-UU
             // there is no need for atomics here because all ctg kmers are unique; hence only one thread will ever match this kmer
             int8_t left_ext = get_ext(read_kmers.vals[slot], 0, ext_map);
@@ -192,8 +184,8 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
       const int MAX_PROBE = (compact_elems.capacity < 200 ? compact_elems.capacity : 200);
       // look for empty slot in compact hash table
       for (int j = 0; j < MAX_PROBE; j++) {
-        uint64_t old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(compact_elems.keys[slot].longs[N_LONGS - 1])),
-                                     KEY_EMPTY, kmer.longs[N_LONGS - 1]);
+        uint64_t old_key =
+            atomicCAS((unsigned long long *)&(compact_elems.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, kmer.longs[N_LONGS - 1]);
         if (old_key == KEY_EMPTY) {
           // found empty slot - there will be no duplicate keys since we're copying across from another hash table
           unique_inserts++;
@@ -326,63 +318,60 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
     char left_ext, right_ext;
     uint32_t kmer_count;
     if (get_kmer_from_supermer<MAX_K>(supermer_buff, buff_len, kmer_len, kmer.longs, left_ext, right_ext, kmer_count)) {
-      if (kmer.longs[N_LONGS - 1] == KEY_EMPTY) printf("key empty overlap!!\n");
-      if (kmer.longs[N_LONGS - 1] == KEY_TRANSITION) printf("key transition overlap!!\n");
+      if (kmer.longs[N_LONGS - 1] == KEY_EMPTY) printf("ERROR: block equal to KEY_EMPTY\n");
+      if (kmer.longs[N_LONGS - 1] == KEY_TRANSITION) printf("ERROR: block equal to KEY_TRANSITION\n");
       uint64_t slot = kmer_hash(kmer) % elems.capacity;
       auto start_slot = slot;
       const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
+      bool found_slot = false;
+      uint64_t old_key = KEY_TRANSITION;
       for (int j = 0; j < MAX_PROBE; j++) {
-        bool found_slot = true;
-        uint64_t old_key = KEY_TRANSITION;
         do {
-          old_key =
-              atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_EMPTY, KEY_TRANSITION);
+          old_key = atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
         } while (old_key == KEY_TRANSITION);
         if (old_key == KEY_EMPTY) {
           memcpy(elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
-          old_key = atomicCAS(reinterpret_cast<unsigned long long *>(&(elems.keys[slot].longs[N_LONGS - 1])), KEY_TRANSITION,
-                              kmer.longs[N_LONGS - 1]);
-          if (old_key != KEY_TRANSITION) printf("ERROR: old_key should be KEY_TRANSITION\n");
-        } else {
-          for (int long_i = 0; long_i < N_LONGS; long_i++) {
-            if (elems.keys[slot].longs[long_i] != kmer.longs[long_i]) {
-              found_slot = false;
-              break;
-            }
-          }
-        }
-        if (found_slot) {
-          count_t *ext_counts = elems.vals[slot].ext_counts;
-          if (ctg_kmers) {
-            // the count is the min of all counts. Use CAS to deal with the initial zero value
-            int prev_count = atomicCAS(&elems.vals[slot].kmer_count, 0, kmer_count);
-            if (prev_count)
-              atomicMin(&elems.vals[slot].kmer_count, kmer_count);
-            else
-              new_inserts++;
-          } else {
-            int prev_count = atomicAdd(&elems.vals[slot].kmer_count, kmer_count);
-            if (!prev_count) new_inserts++;
-          }
-
-          switch (left_ext) {
-            case 'A': atomicAddUint16_thres(&(ext_counts[0]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-            case 'C': atomicAddUint16_thres(&(ext_counts[1]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-            case 'G': atomicAddUint16_thres(&(ext_counts[2]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-            case 'T': atomicAddUint16_thres(&(ext_counts[3]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          }
-          switch (right_ext) {
-            case 'A': atomicAddUint16_thres(&(ext_counts[4]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-            case 'C': atomicAddUint16_thres(&(ext_counts[5]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-            case 'G': atomicAddUint16_thres(&(ext_counts[6]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-            case 'T': atomicAddUint16_thres(&(ext_counts[7]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          }
+          old_key =
+              atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_TRANSITION, kmer.longs[N_LONGS - 1]);
+          assert(old_key == KEY_TRANSITION);
+          found_slot = true;
           break;
+        } else {
+          if (kmers_equal(elems.keys[slot], kmer)) {
+            found_slot = true;
+            break;
+          }
         }
         // quadratic probing - worse cache but reduced clustering
-        slot = (start_slot + (j + 1) * (j + 1)) % elems.capacity;
+        slot = (start_slot + j * j) % elems.capacity;
         // this entry didn't get inserted because we ran out of probing time (and probably space)
         if (j == MAX_PROBE - 1) dropped_inserts++;
+      }
+      if (found_slot) {
+        count_t *ext_counts = elems.vals[slot].ext_counts;
+        if (ctg_kmers) {
+          // the count is the min of all counts. Use CAS to deal with the initial zero value
+          int prev_count = atomicCAS(&elems.vals[slot].kmer_count, 0, kmer_count);
+          if (prev_count)
+            atomicMin(&elems.vals[slot].kmer_count, kmer_count);
+          else
+            new_inserts++;
+        } else {
+          int prev_count = atomicAdd(&elems.vals[slot].kmer_count, kmer_count);
+          if (!prev_count) new_inserts++;
+        }
+        switch (left_ext) {
+          case 'A': atomicAddUint16_thres(&(ext_counts[0]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'C': atomicAddUint16_thres(&(ext_counts[1]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'G': atomicAddUint16_thres(&(ext_counts[2]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'T': atomicAddUint16_thres(&(ext_counts[3]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+        }
+        switch (right_ext) {
+          case 'A': atomicAddUint16_thres(&(ext_counts[4]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'C': atomicAddUint16_thres(&(ext_counts[5]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'G': atomicAddUint16_thres(&(ext_counts[6]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'T': atomicAddUint16_thres(&(ext_counts[7]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+        }
       }
     }
   }
@@ -578,19 +567,6 @@ void HashTableGPUDriver<MAX_K>::flush_inserts() {
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_unique, int &num_purged) {
-  if (kmer_len == 65) {
-    vector<KmerArray<MAX_K>> read_keys;
-    read_keys.resize(read_kmers_dev.capacity);
-    cudaMemcpy(read_keys.data(), read_kmers_dev.keys, read_kmers_dev.capacity * sizeof(KmerArray<MAX_K>), cudaMemcpyDeviceToHost);
-    ofstream f("kmers-" + to_string(kmer_len) + "." + to_string(upcxx_rank_me));
-    for (auto key : read_keys) {
-      if (key.longs[N_LONGS - 1] == KEY_EMPTY) continue;
-      for (int j = 0; j < N_LONGS; j++) f << std::hex << key.longs[j] << " ";
-      f << endl;
-    }
-    f.close();
-  }
-
   int num_entries = 0;
   purge_invalid(num_purged, num_entries);
   read_kmers_dev.num = num_entries;
@@ -601,7 +577,6 @@ void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_uniq
   if (packed_elem_buff_dev.counts) cudaFree(packed_elem_buff_dev.counts);
   if (unpacked_elem_buff_dev.counts) cudaFree(unpacked_elem_buff_dev.counts);
   cudaFree(gpu_insert_stats);
-
   // overallocate to reduce collisions
   num_entries *= 1.3;
   // now compact the hash table entries
@@ -618,9 +593,7 @@ void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_uniq
   gpu_compact_ht<<<gridsize, threadblocksize>>>(read_kmers_dev, compact_read_kmers_dev, counts_gpu);
   t.stop();
   dstate->kernel_timer.inc(t.get_elapsed());
-
   read_kmers_dev.clear();
-
   unsigned int counts_host[NUM_COUNTS];
   cudaErrchk(cudaMemcpy(&counts_host, counts_gpu, NUM_COUNTS * sizeof(unsigned int), cudaMemcpyDeviceToHost));
   cudaFree(counts_gpu);
@@ -644,7 +617,6 @@ void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_uniq
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::done_ctg_kmer_inserts(int &attempted_inserts, int &dropped_inserts, int &new_inserts) {
-  /*
   unsigned int *counts_gpu;
   int NUM_COUNTS = 3;
   cudaErrchk(cudaMalloc(&counts_gpu, NUM_COUNTS * sizeof(unsigned int)));
@@ -665,7 +637,6 @@ void HashTableGPUDriver<MAX_K>::done_ctg_kmer_inserts(int &attempted_inserts, in
   new_inserts = counts_host[2];
   read_kmers_dev.num += new_inserts;
   read_kmers_stats.new_inserts += new_inserts;
-  */
 }
 
 template <int MAX_K>
