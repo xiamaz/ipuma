@@ -145,7 +145,7 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
             return;
           }
           break;
-        } else {
+        } else if (old_key == kmer.longs[N_LONGS - 1]) {
           if (kmers_equal(read_kmers.keys[slot], kmer)) {
             // existing kmer from reads - only replace if the kmer is non-UU
             // there is no need for atomics here because all ctg kmers are unique; hence only one thread will ever match this kmer
