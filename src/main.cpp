@@ -62,7 +62,7 @@ using std::setprecision;
 using namespace upcxx_utils;
 
 void merge_reads(vector<string> reads_fname_list, int qual_offset, double &elapsed_write_io_t,
-                 vector<PackedReads *> &packed_reads_list, bool checkpoint);
+                 vector<PackedReads *> &packed_reads_list, bool checkpoint, const string &adapter_fname, int min_kmer_len);
 
 int main(int argc, char **argv) {
   BaseTimer init_timer("upcxx::init");
@@ -199,7 +199,8 @@ int main(int argc, char **argv) {
       // merge the reads and insert into the packed reads memory cache
       begin_gasnet_stats("merge_reads");
       stage_timers.merge_reads->start();
-      merge_reads(options->reads_fnames, options->qual_offset, elapsed_write_io_t, packed_reads_list, options->checkpoint_merged);
+      merge_reads(options->reads_fnames, options->qual_offset, elapsed_write_io_t, packed_reads_list, options->checkpoint_merged,
+                  options->adapter_fname, options->kmer_lens[0]);
       stage_timers.merge_reads->stop();
       end_gasnet_stats();
     } else {

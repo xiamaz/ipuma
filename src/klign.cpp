@@ -307,7 +307,7 @@ class KmerCtgDHT {
   static void ssw_align_read(StripedSmithWaterman::Aligner &ssw_aligner, StripedSmithWaterman::Filter &ssw_filter, Alns *alns,
                              AlnScoring &aln_scoring, IntermittentTimer &aln_kernel_timer, Aln &aln, const string_view &cseq,
                              const string_view &rseq, int read_group_id) {
-    assert(aln.clen >= cseq.length() && "contig seq is containd within the greater contig");
+    assert(aln.clen >= cseq.length() && "contig seq is contained within the greater contig");
     assert(aln.rlen >= rseq.length() && "read seq is contained with the greater read");
 
     StripedSmithWaterman::Alignment ssw_aln;
