@@ -136,6 +136,7 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
           new_inserts++;
           memcpy(read_kmers.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
           memcpy(&read_kmers.vals[slot], &ctg_kmers.vals[threadid], sizeof(CountsArray));
+          __threadfence();
           old_key =
               atomicCAS((unsigned long long *)&(read_kmers.keys[slot].longs[N_LONGS - 1]), KEY_TRANSITION, kmer.longs[N_LONGS - 1]);
           if (old_key != KEY_TRANSITION) {
@@ -328,31 +329,14 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
           old_key = atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
         } while (old_key == KEY_TRANSITION);
         if (old_key == KEY_EMPTY) {
-          /*
-          for (int long_i = 0; long_i < N_LONGS - 1; long_i++) {
-            atomicCAS((unsigned long long *)&(elems.keys[slot].longs[long_i]), KEY_EMPTY, kmer.longs[long_i]);
-          }
-          */
           memcpy(elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
+          __threadfence();
           old_key =
               atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_TRANSITION, kmer.longs[N_LONGS - 1]);
           if (old_key != KEY_TRANSITION) printf("ERROR: old key should be KEY_TRANSITION\n");
           found_slot = true;
-        }
-        __threadfence();
-        if (found_slot) break;
-        if (old_key == kmer.longs[N_LONGS - 1]) {
-          /*
-          bool keq = true;
-          for (int long_i = 0; long_i < N_LONGS - 1; long_i++) {
-            old_key = atomicCAS((unsigned long long *)&(elems.keys[slot].longs[long_i]), kmer.longs[long_i], kmer.longs[long_i]);
-            if (old_key != kmer.longs[long_i]) {
-              keq = false;
-              break;
-            }
-          }
-          if (keq) {
-          */
+          break;
+        } else if (old_key == kmer.longs[N_LONGS - 1]) {
           if (kmers_equal(elems.keys[slot], kmer)) {
             found_slot = true;
             break;
