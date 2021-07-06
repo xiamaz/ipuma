@@ -571,7 +571,7 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
     bool drop_entry = false;
     auto kmer_longs = kmer.get_longs();
     for (int j = 0; j < kmer.get_N_LONGS(); j++) {
-      if (kmer_longs[j] == KEY_EMPTY) {
+      if (kmer_longs[j] == kcount_gpu::KEY_EMPTY) {
         num_empty_key_drops++;
         sum_drop_depth += kmer_counts.count;
         drop_entry = true;

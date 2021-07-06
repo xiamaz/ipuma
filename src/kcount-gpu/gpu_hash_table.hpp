@@ -48,15 +48,15 @@
 #include <thread>
 
 #include "hash_funcs.h"
-#include "prime.hpp"
 
 namespace kcount_gpu {
 
 enum PASS_TYPE { READ_KMERS_PASS, CTG_KMERS_PASS };
 
-#define KEY_EMPTY UINT64_C(-1)
-#define KEY_EMPTY_BYTE 0xFF
 using count_t = uint16_t;
+
+const uint64_t KEY_EMPTY = 0xffffffffffffffff;
+const uint8_t KEY_EMPTY_BYTE = 0xff;
 
 struct CountsArray {
   uint32_t kmer_count;
@@ -116,7 +116,6 @@ class HashTableGPUDriver {
   struct HashTableDriverState;
   // stores CUDA specific variables
   HashTableDriverState *dstate = nullptr;
-  primes::Prime prime;
 
   int upcxx_rank_me;
   int upcxx_rank_n;
