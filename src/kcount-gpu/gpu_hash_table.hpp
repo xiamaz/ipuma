@@ -156,7 +156,7 @@ class HashTableGPUDriver {
   void insert_supermer(const std::string &supermer_seq, count_t supermer_count);
   void flush_inserts();
   void done_ctg_kmer_inserts(int &attempted_inserts, int &dropped_inserts, int &new_inserts);
-  void done_all_inserts(int &num_dropped, int &num_unique, int &num_purged, std::vector<KmerArray<MAX_K>> &keys);
+  void done_all_inserts(int &num_dropped, int &num_unique, int &num_purged);
 
   // FIXME: return a pair of kmerarr and a struct of int, char, char whiich is the count and left and right exts
   std::pair<KmerArray<MAX_K> *, CountExts *> get_next_entry();

@@ -563,16 +563,9 @@ void HashTableGPUDriver<MAX_K>::flush_inserts() {
 }
 
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_unique, int &num_purged,
-                                                 vector<KmerArray<MAX_K>> &keys) {
+void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_unique, int &num_purged) {
   int num_entries = 0;
-  /*
-  keys.resize(read_kmers_dev.capacity);
-  cudaErrchk(
-      cudaMemcpy(keys.data(), read_kmers_dev.keys, read_kmers_dev.capacity * sizeof(KmerArray<MAX_K>), cudaMemcpyDeviceToHost));
-  */
   purge_invalid(num_purged, num_entries);
-
   read_kmers_dev.num = num_entries;
   if (elem_buff_host.seqs) delete[] elem_buff_host.seqs;
   if (elem_buff_host.counts) delete[] elem_buff_host.counts;
