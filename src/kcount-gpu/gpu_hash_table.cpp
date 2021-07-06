@@ -59,8 +59,6 @@ using namespace std;
 using namespace gpu_common;
 using namespace kcount_gpu;
 
-//#define KEY_EMPTY UINT64_C(-1)
-//#define KEY_EMPTY_BYTE 0xFF
 const uint64_t KEY_EMPTY = 0xffffffffffffffff;
 const uint64_t KEY_TRANSITION = 0xfffffffffffffffe;
 const uint8_t KEY_EMPTY_BYTE = 0xff;
@@ -340,8 +338,10 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
               atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_TRANSITION, kmer.longs[N_LONGS - 1]);
           if (old_key != KEY_TRANSITION) printf("ERROR: old key should be KEY_TRANSITION\n");
           found_slot = true;
-          break;
-        } else if (old_key == kmer.longs[N_LONGS - 1]) {
+        }
+        __threadfence();
+        if (found_slot) break;
+        if (old_key == kmer.longs[N_LONGS - 1]) {
           /*
           bool keq = true;
           for (int long_i = 0; long_i < N_LONGS - 1; long_i++) {
