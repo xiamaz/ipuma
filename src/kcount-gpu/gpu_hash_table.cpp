@@ -128,10 +128,7 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
       attempted_inserts++;
       const int MAX_PROBE = (read_kmers.capacity < 200 ? read_kmers.capacity : 200);
       for (int j = 0; j < MAX_PROBE; j++) {
-        uint64_t old_key;
-        do {
-          old_key = atomicCAS((unsigned long long *)&(read_kmers.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
-        } while (old_key == KEY_TRANSITION);
+        uint64_t old_key = atomicCAS((unsigned long long *)&(read_kmers.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
         if (old_key == KEY_EMPTY) {
           new_inserts++;
           memcpy(read_kmers.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
