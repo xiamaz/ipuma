@@ -201,6 +201,8 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
           // compute exts
           int8_t left_ext = get_ext(elems.vals[threadid], 0, ext_map);
           int8_t right_ext = get_ext(elems.vals[threadid], 4, ext_map);
+          if (elems.vals[threadid].kmer_count < 2)
+            printf("WARNING: elem should have been purged, count %d\n", elems.vals[threadid].kmer_count);
           compact_elems.vals[slot].count = elems.vals[threadid].kmer_count;
           compact_elems.vals[slot].left = left_ext;
           compact_elems.vals[slot].right = right_ext;

@@ -324,8 +324,6 @@ void merge_reads(vector<string> reads_fname_list, int qual_offset, double &elaps
   BarrierTimer timer(__FILEFUNC__);
   Timer merge_time(__FILEFUNC__ + " merging all");
 
-  ofstream tmpf("dump-reads-" + to_string(rank_me()) + ".fastq");
-
   adapter_hash_table_t adapters;
   StripedSmithWaterman::Aligner ssw_aligner(ALN_MATCH_SCORE, ALN_MISMATCH_COST, ALN_GAP_OPENING_COST, ALN_GAP_EXTENDING_COST,
                                             ALN_AMBIGUITY_COST);
@@ -439,8 +437,6 @@ void merge_reads(vector<string> reads_fname_list, int qual_offset, double &elaps
         // it's possible that really short reads could be merged, but unlikely and they'd still be short, so drop all below min
         // kmer length
         if (seq1.length() < min_kmer_len) continue;
-        tmpf << setw(45) << id1 << " " << seq1 << "\n";
-        tmpf << setw(45) << id2 << " " << seq2 << "\n";
       }
 
       bool is_merged = 0;

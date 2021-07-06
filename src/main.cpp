@@ -195,7 +195,7 @@ int main(int argc, char **argv) {
       packed_reads_list.push_back(new PackedReads(options->qual_offset, get_merged_reads_fname(reads_fname)));
     }
     double elapsed_write_io_t = 0;
-    if (!options->restart | !options->checkpoint_merged) {
+    if (!options->restart || !options->checkpoint_merged) {
       // merge the reads and insert into the packed reads memory cache
       begin_gasnet_stats("merge_reads");
       stage_timers.merge_reads->start();
