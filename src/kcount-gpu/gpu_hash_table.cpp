@@ -330,16 +330,19 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
           old_key = atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
         } while (old_key == KEY_TRANSITION);
         if (old_key == KEY_EMPTY) {
+          /*
           for (int long_i = 0; long_i < N_LONGS - 1; long_i++) {
             atomicCAS((unsigned long long *)&(elems.keys[slot].longs[long_i]), KEY_EMPTY, kmer.longs[long_i]);
           }
-          //memcpy(elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
+          */
+          memcpy(elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
           old_key =
               atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_TRANSITION, kmer.longs[N_LONGS - 1]);
           if (old_key != KEY_TRANSITION) printf("ERROR: old key should be KEY_TRANSITION\n");
           found_slot = true;
           break;
         } else if (old_key == kmer.longs[N_LONGS - 1]) {
+          /*
           bool keq = true;
           for (int long_i = 0; long_i < N_LONGS - 1; long_i++) {
             old_key = atomicCAS((unsigned long long *)&(elems.keys[slot].longs[long_i]), kmer.longs[long_i], kmer.longs[long_i]);
@@ -349,7 +352,8 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
             }
           }
           if (keq) {
-            //if (kmers_equal(elems.keys[slot], kmer)) {
+          */
+          if (kmers_equal(elems.keys[slot], kmer)) {
             found_slot = true;
             break;
           }
@@ -581,11 +585,11 @@ template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_unique, int &num_purged,
                                                  vector<KmerArray<MAX_K>> &keys) {
   int num_entries = 0;
-
+  /*
   keys.resize(read_kmers_dev.capacity);
   cudaErrchk(
       cudaMemcpy(keys.data(), read_kmers_dev.keys, read_kmers_dev.capacity * sizeof(KmerArray<MAX_K>), cudaMemcpyDeviceToHost));
-
+  */
   purge_invalid(num_purged, num_entries);
 
   read_kmers_dev.num = num_entries;

@@ -522,7 +522,7 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
   int num_dropped = 0, num_entries = 0, num_purged = 0;
   vector<kcount_gpu::KmerArray<MAX_K>> read_keys;
   ht_gpu_driver->done_all_inserts(num_dropped, num_entries, num_purged, read_keys);
-
+  /*
   const uint64_t KEY_EMPTY = 0xffffffffffffffff;
   HASH_TABLE<Kmer<MAX_K>, int> keys_found;
   for (auto key : read_keys) {
@@ -541,7 +541,7 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
       keys_found.insert({kmer, 1});
     }
   }
-
+  */
   if (num_dropped)
     WARN("GPU dropped ", num_dropped, " entries out of ", num_entries, " when compacting to output hash table" KNORM "\n");
   auto all_capacity = reduce_one((uint64_t)ht_gpu_driver->get_capacity(kcount_gpu::READ_KMERS_PASS), op_fast_add, 0).wait();
