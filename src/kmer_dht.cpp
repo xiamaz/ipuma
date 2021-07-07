@@ -405,15 +405,17 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
     KmerCounts kmer_counts = {.left_exts = {0},
                               .right_exts = {0},
                               .uutig_frag = nullptr,
-                              .count = static_cast<kmer_count_t>(min(
-                                  static_cast<kcount_gpu::count_t>(std::numeric_limits<kmer_count_t>::max()), count_exts->count)),
+                              .count = count_exts->count,
                               .left = (char)count_exts->left,
                               .right = (char)count_exts->right,
                               .from_ctg = false};
-    if ((kmer_counts.count < 2)) WARN("Found a kmer that should have been purged, count is ", kmer_counts.count);
+    if ((kmer_counts.count < 2)) {
+      WARN("Found a kmer that should have been purged, count is ", kmer_counts.count);
+      invalid++;
+      continue;
+    }
     Kmer<MAX_K> kmer(reinterpret_cast<const uint64_t *>(kmer_array->longs));
 
-    // FIXME: should only be done in debug mode
     const auto it = kmers->find(kmer);
     if (it != kmers->end())
       WARN("Found a duplicate kmer ", kmer.to_string(), " - shouldn't happen: existing count ", it->second.count, " new count ",

@@ -52,6 +52,7 @@
 #include "upcxx_utils/colors.h"
 #include "gpu_common.hpp"
 #include "gpu_hash_table.hpp"
+#include "prime.hpp"
 
 #include "gpu_hash_funcs.cpp"
 
@@ -195,6 +196,8 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
           // compute exts
           int8_t left_ext = get_ext(elems.vals[threadid], 0, ext_map);
           int8_t right_ext = get_ext(elems.vals[threadid], 4, ext_map);
+          if (elems.vals[threadid].kmer_count < 2)
+            printf("WARNING: elem should have been purged, count %d\n", elems.vals[threadid].kmer_count);
           compact_elems.vals[slot].count = elems.vals[threadid].kmer_count;
           compact_elems.vals[slot].left = left_ext;
           compact_elems.vals[slot].right = right_ext;
@@ -607,8 +610,8 @@ void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_uniq
   output_keys.resize(num_entries);
   output_vals.resize(num_entries);
   output_index = 0;
-  cudaErrchk(cudaMemcpy(output_keys.data(), (void *)compact_read_kmers_dev.keys, compact_read_kmers_dev.capacity * sizeof(KmerArray<MAX_K>),
-                        cudaMemcpyDeviceToHost));
+  cudaErrchk(cudaMemcpy(output_keys.data(), (void *)compact_read_kmers_dev.keys,
+                        compact_read_kmers_dev.capacity * sizeof(KmerArray<MAX_K>), cudaMemcpyDeviceToHost));
   cudaErrchk(cudaMemcpy(output_vals.data(), compact_read_kmers_dev.vals, compact_read_kmers_dev.capacity * sizeof(CountExts),
                         cudaMemcpyDeviceToHost));
   compact_read_kmers_dev.clear();

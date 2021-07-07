@@ -48,13 +48,15 @@
 #include <thread>
 
 #include "hash_funcs.h"
-#include "prime.hpp"
 
 namespace kcount_gpu {
 
 enum PASS_TYPE { READ_KMERS_PASS, CTG_KMERS_PASS };
 
 using count_t = uint16_t;
+
+const uint64_t KEY_EMPTY = 0xffffffffffffffff;
+const uint8_t KEY_EMPTY_BYTE = 0xff;
 
 struct CountsArray {
   uint32_t kmer_count;
