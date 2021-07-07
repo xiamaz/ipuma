@@ -103,118 +103,8 @@ void KmerDHT<MAX_K>::get_kmers_and_exts(Supermer &supermer, vector<KmerAndExt<MA
 template <int MAX_K>
 void KmerDHT<MAX_K>::update_count(Supermer supermer, dist_object<KmerMap> &kmers,
                                   dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver) {
-#ifdef ENABLE_KCOUNT_GPUS_HT
   num_inserts++;
   ht_gpu_driver->insert_supermer(supermer.seq, supermer.count);
-#else
-  for (int i = 0; i < supermer.seq.length(); i++) {
-    char base = toupper(supermer.seq[i]);
-    if (base != 'A' && base != 'C' && base != 'G' && base != 'T' && base != 'N')
-      DIE("bad char '", supermer.seq[i], "' in supermer seq int val ", (int)supermer.seq[i], " length ", supermer.seq.length(),
-          " supermer ", supermer.seq);
-  }
-  auto kmer_len = Kmer<MAX_K>::get_k();
-  vector<KmerAndExt<MAX_K>> kmers_and_exts;
-  kmers_and_exts.reserve(supermer.seq.length() - kmer_len);
-  KmerDHT<MAX_K>::get_kmers_and_exts(supermer, kmers_and_exts);
-  for (auto &kmer_and_ext : kmers_and_exts) {
-    // find it - if it isn't found then insert it, otherwise increment the counts
-    const auto it = kmers->find(kmer_and_ext.kmer);
-    if (it == kmers->end()) {
-      KmerCounts kmer_counts = {.left_exts = {0},
-                                .right_exts = {0},
-                                .uutig_frag = nullptr,
-                                .count = kmer_and_ext.count,
-                                .left = 'X',
-                                .right = 'X',
-                                .from_ctg = false};
-      kmer_counts.left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
-      kmer_counts.right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
-      auto prev_bucket_count = kmers->bucket_count();
-      kmers->insert({kmer_and_ext.kmer, kmer_counts});
-      // since sizes are an estimate this could happen, but it will impact performance
-      if (prev_bucket_count < kmers->bucket_count())
-        SWARN("Hash table on rank 0 was resized from ", prev_bucket_count, " to ", kmers->bucket_count());
-      DBG_INSERT_KMER("inserted kmer ", kmer_and_ext.kmer.to_string(), " with count ", kmer_counts.count, "\n");
-    } else {
-      auto kmer_count = &it->second;
-      int count = kmer_count->count + kmer_and_ext.count;
-      if (count > numeric_limits<kmer_count_t>::max()) count = numeric_limits<kmer_count_t>::max();
-      kmer_count->count = count;
-      kmer_count->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
-      kmer_count->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
-    }
-  }
-#endif
-}
-
-template <int MAX_K>
-void KmerDHT<MAX_K>::update_ctg_kmers_count(Supermer supermer, dist_object<KmerMap> &kmers,
-                                            dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver) {
-#ifdef ENABLE_KCOUNT_GPUS_HT
-  num_inserts++;
-  ht_gpu_driver->insert_supermer(supermer.seq, supermer.count);
-#else
-  auto kmer_len = Kmer<MAX_K>::get_k();
-  vector<KmerAndExt<MAX_K>> kmers_and_exts;
-  kmers_and_exts.reserve(supermer.seq.length() - kmer_len);
-  get_kmers_and_exts(supermer, kmers_and_exts);
-  for (auto &kmer_and_ext : kmers_and_exts) {
-    // insert a new kmer derived from the previous round's contigs
-    const auto it = kmers->find(kmer_and_ext.kmer);
-    bool insert = false;
-    if (it == kmers->end()) {
-      // if it isn't found then insert it
-      insert = true;
-    } else {
-      auto kmer_counts = &it->second;
-      if (!kmer_counts->from_ctg) {
-        // existing kmer is from a read, only replace with new contig kmer if the existing kmer is not UU
-        char left_ext = kmer_counts->get_left_ext();
-        char right_ext = kmer_counts->get_right_ext();
-        if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F') {
-          // non-UU, replace
-          insert = true;
-          DBG_INS_CTG_KMER("replace non-UU read kmer\n");
-        }
-      } else {
-        // existing kmer from previous round's contigs
-        // update kmer counts
-        if (!kmer_counts->count) {
-          // previously must have been a conflict and set to zero, so don't do anything
-          DBG_INS_CTG_KMER("skip conflicted kmer, depth 0\n");
-        } else {
-          // will always insert, although it may get purged later for a conflict
-          insert = true;
-          char left_ext = kmer_counts->get_left_ext();
-          char right_ext = kmer_counts->get_right_ext();
-          if (left_ext != kmer_and_ext.left || right_ext != kmer_and_ext.right) {
-            // if the two contig kmers disagree on extensions, set up to purge by setting the count to 0
-            kmer_and_ext.count = 0;
-            DBG_INS_CTG_KMER("set to purge conflict: prev ", left_ext, ", ", right_ext, " new ", kmer_and_ext.left, ", ",
-                             kmer_and_ext.right, "\n");
-          } else {
-            // multiple occurrences of the same kmer derived from different contigs or parts of contigs
-            // The only way this kmer could have been already found in the contigs only is if it came from a localassm
-            // extension. In which case, all such kmers should not be counted again for each contig, because each
-            // contig can use the same reads independently, and the depth will be oversampled.
-            kmer_and_ext.count = min(kmer_and_ext.count, kmer_counts->count);
-            // kmer_and_ext.count += kmer_counts->count;
-            DBG_INS_CTG_KMER("increase count of existing ctg kmer from ", kmer_counts->count, " to ", kmer_and_ext.count, "\n");
-          }
-        }
-      }
-    }
-    if (insert) {
-      kmer_count_t count = kmer_and_ext.count;
-      KmerCounts kmer_counts = {
-          .left_exts = {0}, .right_exts = {0}, .uutig_frag = nullptr, .count = count, .left = 'X', .right = 'X', .from_ctg = true};
-      kmer_counts.left_exts.inc(kmer_and_ext.left, count);
-      kmer_counts.right_exts.inc(kmer_and_ext.right, count);
-      (*kmers)[kmer_and_ext.kmer] = kmer_counts;
-    }
-  }
-#endif
 }
 
 template <int MAX_K>
@@ -262,7 +152,6 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
                node0_cores * my_adjusted_num_kmers, " entries on node 0\n");
   double init_free_mem = get_free_mem();
   if (my_adjusted_num_kmers <= 0) DIE("no kmers to reserve space for");
-#ifdef ENABLE_KCOUNT_GPUS_HT
   if (gpu_utils::get_num_node_gpus() <= 0) {
     DIE("GPUs are enabled but no GPU could be configured for kmer counting");
   } else {
@@ -291,9 +180,6 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
              get_size_str(bytes_for_pnp), " reserved for PnP and ", get_size_str(gpu_bytes_reqd),
              " reserved for the kmer hash table\n");
   }
-#else
-  kmers->reserve(my_adjusted_num_kmers);
-#endif
   barrier();
 }
 
@@ -323,7 +209,6 @@ pair<int64_t, int64_t> KmerDHT<MAX_K>::get_bytes_sent() {
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::init_ctg_kmers(int64_t max_elems) {
-#ifdef ENABLE_KCOUNT_GPUS_HT
   using_ctg_kmers = true;
   int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
   // we don't need to reserve space for either pnp or the read kmers because those have already reduced the gpu_avail_mem
@@ -334,31 +219,16 @@ void KmerDHT<MAX_K>::init_ctg_kmers(int64_t max_elems) {
   ht_gpu_driver->init_ctg_kmers(max_elems, gpu_avail_mem);
   SLOG_GPU("GPU ctg kmers hash table has capacity per rank of ", ht_gpu_driver->get_capacity(kcount_gpu::CTG_KMERS_PASS), " for ",
            fixed, max_elems, " elements\n");
-#endif
 }
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::set_pass(PASS_TYPE pass_type) {
   _num_kmers_counted = 0;
   this->pass_type = pass_type;
-  switch (pass_type) {
-    case READ_KMERS_PASS:
-#ifdef ENABLE_KCOUNT_GPUS_HT
-      ht_gpu_driver->set_pass(kcount_gpu::READ_KMERS_PASS);
-#endif
-      kmer_store.set_update_func([&kmers = this->kmers, &ht_gpu_driver = this->ht_gpu_driver](Supermer supermer) {
-        update_count(supermer, kmers, ht_gpu_driver);
-      });
-      break;
-    case CTG_KMERS_PASS:
-#ifdef ENABLE_KCOUNT_GPUS_HT
-      ht_gpu_driver->set_pass(kcount_gpu::CTG_KMERS_PASS);
-#endif
-      kmer_store.set_update_func([&kmers = this->kmers, &ht_gpu_driver = this->ht_gpu_driver](Supermer supermer) {
-        update_ctg_kmers_count(supermer, kmers, ht_gpu_driver);
-      });
-      break;
-  };
+  ht_gpu_driver->set_pass(READ_KMERS_PASS ? kcount_gpu::READ_KMERS_PASS : kcount_gpu::CTG_KMERS_PASS);
+  kmer_store.set_update_func([&kmers = this->kmers, &ht_gpu_driver = this->ht_gpu_driver](Supermer supermer) {
+    update_count(supermer, kmers, ht_gpu_driver);
+  });
 }
 
 template <int MAX_K>
@@ -439,7 +309,6 @@ void KmerDHT<MAX_K>::flush_updates() {
   BarrierTimer timer(__FILEFUNC__);
   kmer_store.flush_updates();
 
-#ifdef ENABLE_KCOUNT_GPUS_HT
   barrier();
   ht_gpu_driver->flush_inserts();
   // a bunch of stats about the hash table on the GPU
@@ -476,19 +345,6 @@ void KmerDHT<MAX_K>::flush_updates() {
            avg_load_factor, " avg, ", max_load_factor, " max\n");
   SLOG_GPU("GPU ", (pass_type == READ_KMERS_PASS ? "reads" : "ctgs"), " kmers hash table final size per rank is ",
            insert_stats.new_inserts, " entries\n");
-#else
-  if (pass_type == READ_KMERS_PASS) {
-    barrier();
-    print_load_factor();
-    barrier();
-    purge_kmers(2);
-    int64_t new_count = get_num_kmers();
-    SLOG_VERBOSE("After purge of kmers < 2, there are ", new_count, " unique kmers\n");
-  } else {
-    purge_kmers(1);
-  }
-  barrier();
-#endif
   auto avg_kmers_processed = reduce_one(_num_kmers_counted, op_fast_add, 0).wait() / rank_n();
   auto max_kmers_processed = reduce_one(_num_kmers_counted, op_fast_max, 0).wait();
   SLOG_VERBOSE("Avg kmers processed per rank ", avg_kmers_processed, " (balance ",
@@ -515,7 +371,6 @@ void KmerDHT<MAX_K>::purge_kmers(int threshold) {
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
-#ifdef ENABLE_KCOUNT_GPUS_HT
   barrier();
   Timer insert_timer("gpu insert to cpu timer");
   insert_timer.start();
@@ -588,12 +443,10 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
   SLOG_GPU("  insert: ", fixed, setprecision(3), avg_gpu_insert_time, " avg, ", max_gpu_insert_time, " max\n");
   SLOG_GPU("  kernel: ", fixed, setprecision(3), avg_gpu_kernel_time, " avg, ", max_gpu_kernel_time, " max\n");
   barrier();
-#endif
 }
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::compute_kmer_exts() {
-#ifdef ENABLE_KCOUNT_GPUS_HT
   if (using_ctg_kmers) {
     barrier();
     int attempted_inserts = 0, dropped_inserts = 0, new_inserts = 0;
@@ -615,14 +468,6 @@ void KmerDHT<MAX_K>::compute_kmer_exts() {
     barrier();
   }
   insert_from_gpu_hashtable();
-#else
-  BarrierTimer timer(__FILEFUNC__);
-  for (auto &elem : *kmers) {
-    auto kmer_counts = &elem.second;
-    kmer_counts->left = kmer_counts->get_left_ext();
-    kmer_counts->right = kmer_counts->get_right_ext();
-  }
-#endif
 }
 
 // one line per kmer, format:

@@ -54,16 +54,8 @@
 #define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
 //#define SLOG_GPU SLOG_VERBOSE
 
-#ifdef ENABLE_KCOUNT_GPUS_HT
 #include "gpu-utils/gpu_utils.hpp"
 #include "kcount-gpu/gpu_hash_table.hpp"
-#else
-// fake it out
-namespace kcount_gpu {
-template <int MAX_K>
-struct HashTableGPUDriver {};
-}  // namespace kcount_gpu
-#endif
 
 enum PASS_TYPE { READ_KMERS_PASS, CTG_KMERS_PASS };
 

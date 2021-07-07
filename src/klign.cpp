@@ -62,10 +62,8 @@
 #include "upcxx_utils/three_tier_aggr_store.hpp"
 #include "utils.hpp"
 #include "zstr.hpp"
-#ifdef ENABLE_GPUS
 #include "gpu-utils/gpu_utils.hpp"
 #include "adept-sw/driver.hpp"
-#endif
 
 #ifdef __PPC64__  // FIXME remove after solving Issues #60 #35 #49
 #define NO_KLIGN_CPU_WORK_STEAL
@@ -157,9 +155,7 @@ class KmerCtgDHT {
   StripedSmithWaterman::Filter ssw_filter;
   AlnScoring aln_scoring;
 
-#ifdef ENABLE_GPUS
   adept_sw::GPUDriver gpu_driver;
-#endif
 
   vector<Aln> kernel_alns;
   vector<string> ctg_seqs;
@@ -348,9 +344,8 @@ class KmerCtgDHT {
     int64_t max_clen;
     int64_t max_rlen;
     int read_group_id;
-#ifdef ENABLE_GPUS
+
     adept_sw::GPUDriver &gpu_driver;
-#endif
 
     AlignBlockData(KmerCtgDHT &kmer_ctg_dht, int read_group_id)
         : aln_scoring(kmer_ctg_dht.aln_scoring)
@@ -359,11 +354,7 @@ class KmerCtgDHT {
         , max_clen(kmer_ctg_dht.max_clen)
         , max_rlen(kmer_ctg_dht.max_rlen)
         , read_group_id(read_group_id)
-#ifdef ENABLE_GPUS
-        , gpu_driver(kmer_ctg_dht.gpu_driver)
-#endif
-
-    {
+        , gpu_driver(kmer_ctg_dht.gpu_driver) {
       DBG_VERBOSE("Created AlignBlockData for kernel ", kmer_ctg_dht.kernel_alns.size(), "\n");
       // copy/swap/reserve necessary data and configs
       kernel_alns.swap(kmer_ctg_dht.kernel_alns);
@@ -410,8 +401,6 @@ class KmerCtgDHT {
 
     return fut;
   }
-
-#ifdef ENABLE_GPUS
 
   static void _gpu_align_block_kernel(AlignBlockData &abd, IntermittentTimer &aln_kernel_timer) {
     DBG_VERBOSE("Starting _gpu_align_block_kernel of ", abd.kernel_alns.size(), "\n");
@@ -469,7 +458,6 @@ class KmerCtgDHT {
 
     return fut;
   }
-#endif
 
  public:
   unsigned kmer_len;
@@ -509,8 +497,6 @@ class KmerCtgDHT {
         _num_dropped_seed_to_ctgs++;
       }
     });
-    gpu_devices = 0;
-#ifdef ENABLE_GPUS
     gpu_devices = gpu_utils::get_num_node_gpus();
     if (gpu_devices <= 0) {
       // CPU only
@@ -536,9 +522,6 @@ class KmerCtgDHT {
       SWARN("No GPU will be used for alignments");
       gpu_mem_avail = 32 * 1024 * 1024;  // cpu needs a block of memory
     }
-#else
-    gpu_mem_avail = 32 * 1024 * 1024;  // cpu needs a block of memory
-#endif
     // ctg_cache.set_invalid_key(std::numeric_limits<cid_t>::max());
     ctg_cache.reserve(2 * all_num_ctgs / rank_n());
 
@@ -671,7 +654,6 @@ class KmerCtgDHT {
     if (!kernel_alns.empty()) {
       assert(active_kernel_fut.ready() && "active_kernel_fut should already be ready");
       active_kernel_fut.wait();  // should be ready already
-#ifdef ENABLE_GPUS
       // for now, the GPU alignment doesn't support cigars
       if (!ssw_filter.report_cigar && gpu_devices > 0) {
         active_kernel_fut = gpu_align_block(aln_kernel_timer, read_group_id);
@@ -683,9 +665,6 @@ class KmerCtgDHT {
         active_kernel_fut = ssw_align_block(aln_kernel_timer, read_group_id);
 #endif
       }
-#else
-      active_kernel_fut = ssw_align_block(aln_kernel_timer, read_group_id);
-#endif
     }
 
     clear_aln_bufs();
@@ -989,7 +968,8 @@ class KmerCtgDHT {
     auto all_ctg_cache_hits = reduce_one(ctg_cache_hits, op_fast_add, 0).wait();
     auto all_ctg_lookups = reduce_one(ctg_lookups + ctg_local_hits, op_fast_add, 0).wait();
     SLOG_VERBOSE("Hits on ctg cache: ", perc_str(all_ctg_cache_hits, all_ctg_lookups), " cache size ", ctg_cache.size(), /*" of ",
-                  ctg_cache.capacity(), " clobberings ", ctg_cache.get_clobberings(),*/ "\n");
+                  ctg_cache.capacity(), " clobberings ", ctg_cache.get_clobberings(),*/
+                 "\n");
     SLOG_VERBOSE("Local contig hits bypassing cache: ", perc_str(all_ctg_local_hits, all_ctg_lookups), "\n");
   }
 };
@@ -1159,12 +1139,8 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
   int64_t num_reads_aligned = 0, num_excess_alns_reads = 0;
   IntermittentTimer compute_alns_timer(__FILENAME__ + string(":") + "Compute alns");
   IntermittentTimer get_ctgs_timer(__FILENAME__ + string(":") + "Get ctgs with kmer");
-#ifdef ENABLE_GPUS
   IntermittentTimer aln_kernel_timer(__FILENAME__ + string(":") +
                                      ((compute_cigar && kmer_ctg_dht.get_gpu_mem_avail()) ? "SSW" : "GPU_BSW"));
-#else
-  IntermittentTimer aln_kernel_timer(__FILENAME__ + string(":") + "SSW");
-#endif
   kmer_ctg_dht.clear_aln_bufs();
   barrier();
   int64_t kmer_bytes_received = 0;

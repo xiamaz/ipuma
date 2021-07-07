@@ -164,7 +164,6 @@ int main(int argc, char **argv) {
             " nodes for this amount of data.\n\tTotal free memory is approx ", get_size_str(total_free_mem),
             " and should be at least 3x the data size of ", get_size_str(tot_file_size), "\n");
   }
-#ifdef ENABLE_GPUS
   // initialize the GPU and first-touch memory and functions in a new thread as this can take many seconds to complete
   double gpu_startup_duration = 0;
   int num_gpus = -1;
@@ -178,10 +177,9 @@ int main(int argc, char **argv) {
                    get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
       SLOG_VERBOSE(gpu_utils::get_gpu_device_description());
     } else {
-      SWARN("Compiled for GPUs but no GPUs available...");
+      SDIE("No GPUs available - this build requires GPUs");
     }
   });
-#endif
 
   Contigs ctgs;
   int max_kmer_len = 0;
@@ -232,7 +230,6 @@ int main(int argc, char **argv) {
     int ins_avg = 0;
     int ins_stddev = 0;
 
-#ifdef ENABLE_GPUS
     if (init_gpu_thread) {
       Timer t("Waiting for GPU to be initialized (should be noop)");
       init_gpu_thread = false;
@@ -240,7 +237,6 @@ int main(int argc, char **argv) {
     }
     int max_dev_id = reduce_one(num_gpus > 0 ? gpu_utils::get_gpu_device_pci_id() : 0, op_fast_max, 0).wait();
     SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
-#endif
 
     // contigging loops
     if (options->kmer_lens.size()) {

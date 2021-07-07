@@ -44,13 +44,8 @@
 #include "utils.hpp"
 #include "kcount.hpp"
 
-#ifdef ENABLE_KCOUNT_GPUS_PNP
 #include "gpu-utils/gpu_utils.hpp"
 #include "kcount-gpu/parse_and_pack.hpp"
-
-static kcount_gpu::ParseAndPackGPUDriver *pnp_gpu_driver;
-
-#endif
 
 //#define DBG_ADD_KMER DBG
 #define DBG_ADD_KMER(...)
@@ -59,7 +54,7 @@ using namespace std;
 using namespace upcxx_utils;
 using namespace upcxx;
 
-#ifdef ENABLE_KCOUNT_GPUS_PNP
+static kcount_gpu::ParseAndPackGPUDriver *pnp_gpu_driver;
 
 template <int MAX_K>
 static void process_block_gpu(unsigned kmer_len, string &seq_block, const vector<kmer_count_t> &depth_block,
@@ -80,70 +75,18 @@ static void process_block_gpu(unsigned kmer_len, string &seq_block, const vector
     auto target = pnp_gpu_driver->supermers[i].target;
     auto offset = pnp_gpu_driver->supermers[i].offset;
     auto len = pnp_gpu_driver->supermers[i].len;
-    auto seq = seq_block.substr(offset, len);
     Supermer supermer;
-    // supermer.pack(seq_block.substr(offset, len));
     int packed_len = len / 2;
     if (offset % 2 || len % 2) packed_len++;
     supermer.seq = pnp_gpu_driver->packed_seqs.substr(offset / 2, packed_len);
     if (offset % 2) supermer.seq[0] &= 15;
     if ((offset + len) % 2) supermer.seq[supermer.seq.length() - 1] &= 240;
-    /*
-    if (supermer.seq != gpu_packed_seq) {
-      ostringstream os;
-      os << "GPU pack != CPU pack, offset " << offset << " len " << len << "\n";
-      string s = seq_block.substr(offset, len);
-      for (int j = 0; j < s.length(); j += 2) os << setw(4) << s.substr(j, 2);
-      os << "\n";
-      for (auto ch : gpu_packed_seq) os << setw(4) << ((int)(ch) < 0 ? 256 + (int)ch : int(ch));
-      os << "\n";
-      for (auto ch : supermer.seq) os << setw(4) << ((int)(ch) < 0 ? 256 + (int)ch : int(ch));
-      os << "\n";
-      DIE(os.str());
-    }
-    */
-    // supermer.seq = seq_block.substr(offset, len);
     supermer.count = (from_ctgs ? depth_block[offset + 1] : (kmer_count_t)1);
     bytes_supermers_sent += supermer.get_bytes();
     kmer_dht->add_supermer(supermer, target);
     progress();
   }
 }
-
-#else
-
-template <int MAX_K>
-static void process_seq(unsigned kmer_len, string &seq, int depth, dist_object<KmerDHT<MAX_K>> &kmer_dht, int64_t &num_Ns,
-                        int64_t &num_kmers, vector<Kmer<MAX_K>> &kmers, int64_t &bytes_kmers_sent, int64_t &bytes_supermers_sent) {
-  if (!depth) depth = 1;
-  Kmer<MAX_K>::get_kmers(kmer_len, seq, kmers);
-  for (int i = 0; i < kmers.size(); i++) {
-    bytes_kmers_sent += sizeof(KmerAndExt<MAX_K>);
-    Kmer<MAX_K> kmer_rc = kmers[i].revcomp();
-    if (kmer_rc < kmers[i]) kmers[i] = kmer_rc;
-  }
-
-  Supermer supermer{.seq = seq.substr(0, kmer_len + 1), .count = (kmer_count_t)depth};
-  auto prev_target_rank = kmer_dht->get_kmer_target_rank(kmers[1]);
-  for (int i = 1; i < (int)(seq.length() - kmer_len); i++) {
-    auto target_rank = kmer_dht->get_kmer_target_rank(kmers[i]);
-    if (target_rank == prev_target_rank) {
-      supermer.seq += seq[i + kmer_len];
-    } else {
-      bytes_supermers_sent += supermer.get_bytes();
-      kmer_dht->add_supermer(supermer, prev_target_rank);
-      supermer.seq = seq.substr(i - 1, kmer_len + 2);
-      prev_target_rank = target_rank;
-    }
-  }
-  if (supermer.seq.length() >= kmer_len + 2) {
-    bytes_supermers_sent += supermer.get_bytes();
-    kmer_dht->add_supermer(supermer, prev_target_rank);
-  }
-  num_kmers += seq.length() - 2 - kmer_len;
-}
-
-#endif
 
 template <int MAX_K>
 static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *> &packed_reads_list,
@@ -161,7 +104,6 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   IntermittentTimer t_pp(__FILENAME__ + string(":kmer parse and pack"));
   kmer_dht->set_pass(READ_KMERS_PASS);
   barrier();
-#ifdef ENABLE_KCOUNT_GPUS_PNP
   int64_t num_gpu_waits = 0;
   int num_read_blocks = 0;
   string seq_block;
@@ -174,9 +116,6 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
                                                            kmer_dht->get_minimizer_len(), init_time);
     SLOG_GPU("Initialized PnP GPU driver in ", fixed, setprecision(3), init_time, " s\n");
   }
-#else
-  vector<Kmer<MAX_K>> kmers;
-#endif
 
   int64_t tot_num_local_reads = 0;
   for (auto packed_reads : packed_reads_list) {
@@ -198,7 +137,6 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
           num_bad_quals++;
         }
       }
-#ifdef ENABLE_KCOUNT_GPUS_PNP
       if (seq_block.length() + 1 + seq.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) {
         process_block_gpu(kmer_len, seq_block, {}, kmer_dht, num_Ns, num_kmers, num_gpu_waits, bytes_kmers_sent,
                           bytes_supermers_sent);
@@ -207,13 +145,9 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       }
       seq_block += seq;
       seq_block += "_";
-#else
-      process_seq(kmer_len, seq, 1, kmer_dht, num_Ns, num_kmers, kmers, bytes_kmers_sent, bytes_supermers_sent);
-#endif
       progress();
     }
   }
-#ifdef ENABLE_KCOUNT_GPUS_PNP
   if (!seq_block.empty()) {
     process_block_gpu(kmer_len, seq_block, {}, kmer_dht, num_Ns, num_kmers, num_gpu_waits, bytes_kmers_sent, bytes_supermers_sent);
     num_read_blocks++;
@@ -225,9 +159,6 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   SLOG_GPU("Elapsed times for PnP GPU: ", fixed, setprecision(3), " total ", gpu_time_tot, ", kernel ", gpu_time_kernel, "\n");
   delete pnp_gpu_driver;
   pnp_gpu_driver = nullptr;
-#else
-  progbar.done();
-#endif
 
   kmer_dht->flush_updates();
   auto all_num_kmers = reduce_one(num_kmers, op_fast_add, 0).wait();
@@ -242,18 +173,6 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   SLOG_VERBOSE("Total bytes sent in compressed supermers ", get_size_str(tot_supermers_bytes_sent),
                " and what would have been sent in kmers ", get_size_str(tot_kmers_bytes_sent), " compression is ", fixed,
                setprecision(3), (double)tot_kmers_bytes_sent / tot_supermers_bytes_sent, "\n");
-#if !defined(ENABLE_KCOUNT_GPUS_PNP)
-  auto all_distinct_kmers = kmer_dht->get_num_kmers();
-  SLOG_VERBOSE("Processed a total of ", all_num_reads, " reads\n");
-  SLOG_VERBOSE("Found ", perc_str(all_distinct_kmers, all_num_kmers), " unique kmers\n");
-  auto tot_kmers_stored = reduce_one(kmer_dht->get_local_num_kmers(), op_fast_add, 0).wait();
-  auto max_kmers_stored = reduce_one(kmer_dht->get_local_num_kmers(), op_fast_max, 0).wait();
-  if (!rank_me()) {
-    auto avg_kmers_stored = tot_kmers_stored / rank_n();
-    SLOG_VERBOSE("Avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
-                 (double)avg_kmers_stored / max_kmers_stored, "\n");
-  }
-#endif
 };
 
 template <int MAX_K>
@@ -269,7 +188,6 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   kmer_dht->set_pass(CTG_KMERS_PASS);
   auto start_local_num_kmers = kmer_dht->get_local_num_kmers();
 
-#ifdef ENABLE_KCOUNT_GPUS_PNP
   int64_t num_gpu_waits = 0;
   int num_ctg_blocks = 0;
   string seq_block = "";
@@ -292,15 +210,10 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   int64_t all_max_kmers = reduce_all(max_kmers, op_fast_add).wait();
   kmer_dht->init_ctg_kmers(all_max_kmers / rank_n());
 
-#else
-  vector<Kmer<MAX_K>> kmers;
-#endif
-
   for (auto it = ctgs.begin(); it != ctgs.end(); ++it) {
     auto ctg = it;
     progbar.update();
     if (ctg->seq.length() < kmer_len + 2) continue;
-#ifdef ENABLE_KCOUNT_GPUS_PNP
     if (seq_block.length() + 1 + ctg->seq.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) {
       process_block_gpu(kmer_len, seq_block, depth_block, kmer_dht, num_Ns, num_kmers, num_gpu_waits, bytes_kmers_sent,
                         bytes_supermers_sent);
@@ -314,14 +227,8 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     seq_block += ctg->seq;
     seq_block += "_";
     depth_block.insert(depth_block.end(), ctg->seq.length() + 1, ctg->get_uint16_t_depth());
-#else
-    process_seq(kmer_len, ctg->seq, ctg->get_uint16_t_depth(), kmer_dht, num_Ns, num_kmers, kmers, bytes_kmers_sent,
-                bytes_supermers_sent);
-    progress();
-#endif
   }
   progbar.done();
-#ifdef ENABLE_KCOUNT_GPUS_PNP
   if (!seq_block.empty()) {
     process_block_gpu(kmer_len, seq_block, depth_block, kmer_dht, num_Ns, num_kmers, num_gpu_waits, bytes_kmers_sent,
                       bytes_supermers_sent);
@@ -333,7 +240,6 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   SLOG_GPU("PnP GPU times: ", fixed, setprecision(3), " total ", gpu_time_tot, ", kernel ", gpu_time_kernel, "\n");
   delete pnp_gpu_driver;
   pnp_gpu_driver = nullptr;
-#endif
   kmer_dht->flush_updates();
   DBG("This rank processed ", ctgs.size(), " contigs and ", num_kmers, " kmers\n");
   auto all_num_ctgs = reduce_one(ctgs.size(), op_fast_add, 0).wait();
@@ -344,17 +250,6 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   SLOG_VERBOSE("Total bytes sent in compressed supermers ", get_size_str(tot_supermers_bytes_sent),
                " and what would have been sent in kmers ", get_size_str(tot_kmers_bytes_sent), " compression is ", fixed,
                setprecision(3), (double)tot_kmers_bytes_sent / tot_supermers_bytes_sent, "\n");
-#if !defined(ENABLE_KCOUNT_GPUS_PNP)
-  SLOG_VERBOSE("Found ", perc_str(kmer_dht->get_num_kmers() - num_prev_kmers, all_num_kmers), " additional unique kmers\n");
-  auto local_kmers = kmer_dht->get_local_num_kmers() - start_local_num_kmers;
-  auto tot_kmers_stored = reduce_one(local_kmers, op_fast_add, 0).wait();
-  auto max_kmers_stored = reduce_one(local_kmers, op_fast_max, 0).wait();
-  if (!rank_me()) {
-    auto avg_kmers_stored = tot_kmers_stored / rank_n();
-    SLOG_VERBOSE("add ctgs: avg kmers in hash table per rank ", avg_kmers_stored, " max ", max_kmers_stored, " load balance ",
-                 (double)avg_kmers_stored / max_kmers_stored, "\n");
-  }
-#endif
 };
 
 template <int MAX_K>

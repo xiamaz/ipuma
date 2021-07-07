@@ -65,10 +65,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 
 
 if(ENABLE_CUDA)
-    add_definitions(-DENABLE_GPUS)
-    add_definitions(-DENABLE_KCOUNT_GPUS_PNP)
-    add_definitions(-DENABLE_KCOUNT_GPUS_HT)
-    add_definitions(-DENABLE_LASSM_GPUS)
     message(STATUS "Building for GPUs with CUDA")
 else()
     message(FATAL_ERROR "This build uses GPUS and requires CUDA")

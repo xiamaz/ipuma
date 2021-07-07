@@ -53,9 +53,7 @@
 #include "upcxx_utils.hpp"
 #include "utils.hpp"
 #include "gpu-loc-assem/locassem_struct.hpp"
-#ifdef ENABLE_LASSM_GPUS
 #include "gpu-loc-assem/driver.hpp"
-#endif
 
 using namespace std;
 using namespace upcxx;
@@ -134,42 +132,43 @@ class ReadsToCtgsDHT {
   int64_t get_num_mappings() { return reduce_one(reads_to_ctgs_map->size(), op_fast_add, 0).wait(); }
 
   vector<CtgInfo> get_ctgs(string &read_id) {
-    return upcxx::rpc(get_target_rank(read_id),
-                      [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, string read_id) -> vector<CtgInfo> {
-                        const auto it = reads_to_ctgs_map->find(read_id);
-                        if (it == reads_to_ctgs_map->end()) return {};
-                        return it->second;
-                      },
-                      reads_to_ctgs_map, read_id)
+    return upcxx::rpc(
+               get_target_rank(read_id),
+               [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, string read_id) -> vector<CtgInfo> {
+                 const auto it = reads_to_ctgs_map->find(read_id);
+                 if (it == reads_to_ctgs_map->end()) return {};
+                 return it->second;
+               },
+               reads_to_ctgs_map, read_id)
         .wait();
   }
 
   future<vector<vector<CtgInfo>>> get_ctgs(intrank_t target_rank, vector<string> &read_ids) {
     DBG_VERBOSE("Sending get_ctgs ", read_ids.size(), " to ", target_rank, "\n");
-    return upcxx::rpc(target_rank,
-                      [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, intrank_t source_rank,
-                         view<string> read_ids) -> vector<vector<CtgInfo>> {
-                        DBG_VERBOSE("Received request for ", read_ids.size(), " reads from ", source_rank, "\n");
-                        size_t bytes = 0, nonempty = 0;
-                        vector<vector<CtgInfo>> results(read_ids.size());
-                        size_t i = 0;
-                        for (const auto &read_id : read_ids) {
-                          assert(get_target_rank(read_id) == rank_me());
-                          const auto it = reads_to_ctgs_map->find(read_id);
-                          assert(i < results.size());
-                          assert(results[i].empty());
-                          if (it != reads_to_ctgs_map->end()) {
-                            nonempty++;
-                            bytes += it->second.size() * sizeof(CtgInfo);
-                            results[i] = it->second;
-                          }
-                          i++;
-                        }
-                        DBG_VERBOSE("Returning ", results.size(), " results nonempty=", nonempty, " bytes=", bytes, " to ",
-                                    source_rank, "\n");
-                        return results;
-                      },
-                      reads_to_ctgs_map, rank_me(), make_view(read_ids.begin(), read_ids.end()));
+    return upcxx::rpc(
+        target_rank,
+        [](upcxx::dist_object<reads_to_ctgs_map_t> &reads_to_ctgs_map, intrank_t source_rank,
+           view<string> read_ids) -> vector<vector<CtgInfo>> {
+          DBG_VERBOSE("Received request for ", read_ids.size(), " reads from ", source_rank, "\n");
+          size_t bytes = 0, nonempty = 0;
+          vector<vector<CtgInfo>> results(read_ids.size());
+          size_t i = 0;
+          for (const auto &read_id : read_ids) {
+            assert(get_target_rank(read_id) == rank_me());
+            const auto it = reads_to_ctgs_map->find(read_id);
+            assert(i < results.size());
+            assert(results[i].empty());
+            if (it != reads_to_ctgs_map->end()) {
+              nonempty++;
+              bytes += it->second.size() * sizeof(CtgInfo);
+              results[i] = it->second;
+            }
+            i++;
+          }
+          DBG_VERBOSE("Returning ", results.size(), " results nonempty=", nonempty, " bytes=", bytes, " to ", source_rank, "\n");
+          return results;
+        },
+        reads_to_ctgs_map, rank_me(), make_view(read_ids.begin(), read_ids.end()));
   }
 };
 
@@ -310,7 +309,6 @@ class CtgsWithReadsDHT {
   }
 };
 
-#ifdef ENABLE_LASSM_GPUS
 vector<ReadSeq> reads_to_reads(vector<ReadSeq> read_in) {
   vector<ReadSeq> reads_out;
   for (int i = 0; i < min((int)read_in.size(), (int)LASSM_MAX_COUNT_MERS_READS); i++) {
@@ -370,10 +368,8 @@ void bucket_ctgs(locassm_driver::ctg_bucket &zero_slice, locassm_driver::ctg_buc
       if (outlier_slice.max_contig_sz < temp_in.seq.size()) outlier_slice.max_contig_sz = temp_in.seq.size();
     }
   }
-
   ctg_buckets_timer.stop();
 }
-#endif
 
 struct MerFreqs {
   // how many times this kmer has occurred: don't need to count beyond 65536
@@ -861,7 +857,6 @@ static void extend_ctgs(CtgsWithReadsDHT &ctgs_dht, Contigs &ctgs, int insert_av
 
   ProgressBar progbar(ctgs_dht.get_local_num_ctgs(), "Extending contigs");
 
-#ifdef ENABLE_LASSM_GPUS
   locassm_driver::ctg_bucket zero_slice, mid_slice, outlier_slice;
   bucket_ctgs(zero_slice, mid_slice, outlier_slice, ctgs_dht, ctg_buckets_timer);
   ctg_buckets_timer.done_all();
@@ -915,42 +910,6 @@ static void extend_ctgs(CtgsWithReadsDHT &ctgs_dht, Contigs &ctgs, int insert_av
   walk_mers_timer.done_all();
   loc_assem_kernel_timer.done_all();
   barrier();
-#endif
-
-#ifndef ENABLE_LASSM_GPUS
-  for (auto ctg = ctgs_dht.get_first_local_ctg(); ctg != nullptr; ctg = ctgs_dht.get_next_local_ctg()) {
-    progbar.update();
-    Contig ext_contig;
-    extend_ctg(ctg, wm, insert_avg, insert_stddev, max_kmer_len, kmer_len, qual_offset, walk_len_limit, count_mers_timer,
-               walk_mers_timer);
-    ctgs.add_contig({.id = ctg->cid, .seq = ctg->seq, .depth = ctg->depth});
-  }
-  progbar.done();
-  count_mers_timer.done_all();
-  walk_mers_timer.done_all();
-  barrier();
-  SLOG_VERBOSE("Walk terminations: ", reduce_one(wm.term_counts[0], op_fast_add, 0).wait(), " X, ",
-               reduce_one(wm.term_counts[1], op_fast_add, 0).wait(), " F, ", reduce_one(wm.term_counts[2], op_fast_add, 0).wait(),
-               " R\n");
-  auto tot_num_reads = reduce_one(wm.num_reads, op_fast_add, 0).wait();
-  auto tot_num_walks = reduce_one(wm.num_walks, op_fast_add, 0).wait();
-  auto tot_sum_ext = reduce_one(wm.sum_ext, op_fast_add, 0).wait();
-  auto tot_sum_clen = reduce_one(wm.sum_clen, op_fast_add, 0).wait();
-  auto tot_max_walk_len = reduce_one(wm.max_walk_len, op_fast_max, 0).wait();
-  auto tot_excess_reads = reduce_one(wm.excess_reads, op_fast_add, 0).wait();
-  auto num_ctgs = ctgs_dht.get_num_ctgs();
-  auto tot_num_sides = reduce_one(wm.num_sides, op_fast_add, 0).wait();
-  SLOG_VERBOSE("Used a total of ", tot_num_reads, " reads, max per ctg ", wm.max_num_reads, " avg per ctg ",
-               (num_ctgs > 0 ? (tot_num_reads / num_ctgs) : 0), ", dropped ", perc_str(tot_excess_reads, tot_num_reads),
-               " excess reads\n");
-  SLOG_VERBOSE("Could walk ", perc_str(tot_num_sides, num_ctgs * 2), " contig sides\n");
-  if (tot_sum_clen)
-    SLOG_VERBOSE("Found ", tot_num_walks, " walks, total extension length ", tot_sum_ext, " extended ",
-                 (double)(tot_sum_ext + tot_sum_clen) / tot_sum_clen, "\n");
-  if (tot_num_walks)
-    SLOG_VERBOSE("Average walk length ", tot_sum_ext / tot_num_walks, ", max walk length ", tot_max_walk_len, "\n");
-
-#endif
 }
 
 void localassm(int max_kmer_len, int kmer_len, vector<PackedReads *> &packed_reads_list, int insert_avg, int insert_stddev,

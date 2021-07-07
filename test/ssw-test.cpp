@@ -6,10 +6,8 @@
 #include <string>
 #include <vector>
 
-#ifdef ENABLE_GPUS
 #include "adept-sw/driver.hpp"
 #include "gpu-utils/gpu_utils.hpp"
-#endif
 
 using std::max;
 using std::min;
@@ -18,7 +16,6 @@ using std::vector;
 
 using namespace StripedSmithWaterman;
 
-#ifdef ENABLE_GPUS
 void translate_adept_to_ssw(Alignment &aln, const adept_sw::AlignmentResults &aln_results, int idx) {
   aln.sw_score = aln_results.top_scores[idx];
   aln.sw_score_next_best = 0;
@@ -38,9 +35,7 @@ void translate_adept_to_ssw(Alignment &aln, const adept_sw::AlignmentResults &al
   aln.cigar_string.clear();
   aln.cigar.clear();
 }
-#endif
 
-#ifdef ENABLE_GPUS
 void test_aligns_gpu(vector<Alignment> &alns, vector<string> query, vector<string> ref, adept_sw::GPUDriver &gpu_driver) {
   alns.reserve(query.size());
   unsigned max_q_len = 0, max_ref_len = 0;
@@ -61,9 +56,7 @@ void test_aligns_gpu(vector<Alignment> &alns, vector<string> query, vector<strin
     translate_adept_to_ssw(alignment, aln_results, i);
   }
 }
-#endif
 
-#ifdef ENABLE_GPUS
 void check_alns_gpu(vector<Alignment> &alns, vector<int> qstart, vector<int> qend, vector<int> rstart, vector<int> rend) {
   int i = 0;
   for (Alignment &aln : alns) {
@@ -83,7 +76,6 @@ void check_alns_gpu(vector<Alignment> &alns, vector<int> qstart, vector<int> qen
     i++;
   }
 }
-#endif
 
 string aln2string(Alignment &aln) {
   std::stringstream ss;
@@ -232,7 +224,6 @@ TEST(MHMTest, ssw) {
   check_alns(alns, 0, 15, 0, 15, 0, q, r, "16=3S");
 }
 
-#ifdef ENABLE_GPUS
 TEST(MHMTest, AdeptSW) {
   // arrange
   // act
@@ -424,4 +415,3 @@ TEST(MHMTest, AdeptSW) {
   check_alns_gpu(alns, qstarts, qends, rstarts, rends);
   // cuda tear down happens in driver destructor
 }
-#endif
