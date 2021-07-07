@@ -64,18 +64,23 @@ const uint64_t KEY_TRANSITION = 0xfffffffffffffffe;
 const uint8_t KEY_EMPTY_BYTE = 0xff;
 
 template <int MAX_K>
-__device__ void set_kmer(KmerArray<MAX_K> &kmer1, volatile const KmerArray<MAX_K> &kmer2) {
-  int n_longs = kmer2.N_LONGS;
-  for (int i = 0; i < n_longs; i++) {
-    kmer1.longs[i] = kmer2.longs[i];
+__device__ void kmer_set(KmerArray<MAX_K> &kmer1, const KmerArray<MAX_K> &kmer2) {
+  int N_LONGS = kmer1.N_LONGS;
+  uint64_t old_key;
+  for (int i = 0; i < N_LONGS - 1; i++) {
+    old_key = atomicExch((unsigned long long *)&(kmer1.longs[i]), kmer2.longs[i]);
+    if (old_key != KEY_EMPTY) printf("ERROR: old key should be KEY_EMPTY\n");
   }
+  old_key = atomicExch((unsigned long long *)&(kmer1.longs[N_LONGS - 1]), kmer2.longs[N_LONGS - 1]);
+  if (old_key != KEY_TRANSITION) printf("ERROR: old key should be KEY_TRANSITION\n");
 }
 
 template <int MAX_K>
-__device__ bool kmers_equal(volatile const KmerArray<MAX_K> &kmer1, const KmerArray<MAX_K> &kmer2) {
+__device__ bool kmers_equal(const KmerArray<MAX_K> &kmer1, const KmerArray<MAX_K> &kmer2) {
   int n_longs = kmer1.N_LONGS;
   for (int i = 0; i < n_longs; i++) {
-    if (kmer1.longs[i] != kmer2.longs[i]) return false;
+    uint64_t old_key = atomicAdd((unsigned long long *)&(kmer1.longs[i]), 0ULL);
+    if (old_key != kmer2.longs[i]) return false;
   }
   return true;
 }
@@ -130,8 +135,7 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
     uint32_t kmer_count = ctg_kmers.vals[threadid].kmer_count;
     count_t *ext_counts = ctg_kmers.vals[threadid].ext_counts;
     if (kmer_count && !ext_conflict(ext_counts, 0) && !ext_conflict(ext_counts, 4)) {
-      KmerArray<MAX_K> kmer;
-      set_kmer(kmer, ctg_kmers.keys[threadid]);
+      KmerArray<MAX_K> kmer = ctg_kmers.keys[threadid];
       uint64_t slot = kmer_hash(kmer) % read_kmers.capacity;
       auto start_slot = slot;
       attempted_inserts++;
@@ -140,15 +144,8 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
         uint64_t old_key = atomicCAS((unsigned long long *)&(read_kmers.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
         if (old_key == KEY_EMPTY) {
           new_inserts++;
-          memcpy((void *)read_kmers.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
           memcpy(&read_kmers.vals[slot], &ctg_kmers.vals[threadid], sizeof(CountsArray));
-          __threadfence();
-          old_key =
-              atomicCAS((unsigned long long *)&(read_kmers.keys[slot].longs[N_LONGS - 1]), KEY_TRANSITION, kmer.longs[N_LONGS - 1]);
-          if (old_key != KEY_TRANSITION) {
-            printf("ERROR: old_key should be KEY_TRANSITION\n");
-            return;
-          }
+          kmer_set(read_kmers.keys[slot], kmer);
           break;
         } else if (old_key == kmer.longs[N_LONGS - 1]) {
           if (kmers_equal(read_kmers.keys[slot], kmer)) {
@@ -181,8 +178,7 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
   int8_t ext_map[4] = {'A', 'C', 'G', 'T'};
   if (threadid < elems.capacity) {
     if (elems.vals[threadid].kmer_count) {
-      KmerArray<MAX_K> kmer;
-      set_kmer(kmer, elems.keys[threadid]);
+      KmerArray<MAX_K> kmer = elems.keys[threadid];
       uint64_t slot = kmer_hash(kmer) % compact_elems.capacity;
       auto start_slot = slot;
       // we set a constraint on the max probe to track whether we are getting excessive collisions and need a bigger default
@@ -336,11 +332,7 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
           old_key = atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
         } while (old_key == KEY_TRANSITION);
         if (old_key == KEY_EMPTY) {
-          memcpy((void *)elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
-          __threadfence();
-          old_key =
-              atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_TRANSITION, kmer.longs[N_LONGS - 1]);
-          if (old_key != KEY_TRANSITION) printf("ERROR: old key should be KEY_TRANSITION\n");
+          kmer_set(elems.keys[slot], kmer);
           found_slot = true;
           break;
         } else if (old_key == kmer.longs[N_LONGS - 1]) {
