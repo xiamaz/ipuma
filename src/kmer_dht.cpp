@@ -225,7 +225,7 @@ template <int MAX_K>
 void KmerDHT<MAX_K>::set_pass(PASS_TYPE pass_type) {
   _num_kmers_counted = 0;
   this->pass_type = pass_type;
-  ht_gpu_driver->set_pass(READ_KMERS_PASS ? kcount_gpu::READ_KMERS_PASS : kcount_gpu::CTG_KMERS_PASS);
+  ht_gpu_driver->set_pass(pass_type == READ_KMERS_PASS ? kcount_gpu::READ_KMERS_PASS : kcount_gpu::CTG_KMERS_PASS);
   kmer_store.set_update_func([&kmers = this->kmers, &ht_gpu_driver = this->ht_gpu_driver](Supermer supermer) {
     update_count(supermer, kmers, ht_gpu_driver);
   });
