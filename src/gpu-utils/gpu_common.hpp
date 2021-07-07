@@ -221,7 +221,7 @@ inline __device__ uint16_t atomicAddUint16(uint16_t *address, uint16_t val) {
 }
 
 inline __device__ void atomicAddUint16_thres(uint16_t *address, uint16_t val, uint16_t thres) {
-  if (atomicAddUint16(address, 0) < thres) atomicAddUint16(address, val);
+  if (atomicAddUint16(address, 0) < thres - val) atomicAddUint16(address, val);
 }
 
 }  // namespace gpu_common

@@ -82,7 +82,7 @@ struct SupermerBuff {
 template <int MAX_K>
 struct KmerCountsMap {
   // Arrays for keys and values. They are separate because the keys get initialized with max number and the vals with zero
-  KmerArray<MAX_K> *keys = nullptr;
+  volatile KmerArray<MAX_K> *keys = nullptr;
   CountsArray *vals = nullptr;
   int64_t capacity = 0;
   int num = 0;
@@ -93,7 +93,7 @@ struct KmerCountsMap {
 
 template <int MAX_K>
 struct KmerExtsMap {
-  KmerArray<MAX_K> *keys = nullptr;
+  volatile KmerArray<MAX_K> *keys = nullptr;
   CountExts *vals = nullptr;
   int64_t capacity = 0;
 

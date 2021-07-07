@@ -64,7 +64,15 @@ const uint64_t KEY_TRANSITION = 0xfffffffffffffffe;
 const uint8_t KEY_EMPTY_BYTE = 0xff;
 
 template <int MAX_K>
-__device__ bool kmers_equal(const KmerArray<MAX_K> &kmer1, const KmerArray<MAX_K> &kmer2) {
+__device__ void set_kmer(KmerArray<MAX_K> &kmer1, volatile const KmerArray<MAX_K> &kmer2) {
+  int n_longs = kmer2.N_LONGS;
+  for (int i = 0; i < n_longs; i++) {
+    kmer1.longs[i] = kmer2.longs[i];
+  }
+}
+
+template <int MAX_K>
+__device__ bool kmers_equal(volatile const KmerArray<MAX_K> &kmer1, const KmerArray<MAX_K> &kmer2) {
   int n_longs = kmer1.N_LONGS;
   for (int i = 0; i < n_longs; i++) {
     if (kmer1.longs[i] != kmer2.longs[i]) return false;
@@ -122,7 +130,8 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
     uint32_t kmer_count = ctg_kmers.vals[threadid].kmer_count;
     count_t *ext_counts = ctg_kmers.vals[threadid].ext_counts;
     if (kmer_count && !ext_conflict(ext_counts, 0) && !ext_conflict(ext_counts, 4)) {
-      KmerArray<MAX_K> kmer = ctg_kmers.keys[threadid];
+      KmerArray<MAX_K> kmer;
+      set_kmer(kmer, ctg_kmers.keys[threadid]);
       uint64_t slot = kmer_hash(kmer) % read_kmers.capacity;
       auto start_slot = slot;
       attempted_inserts++;
@@ -131,7 +140,7 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
         uint64_t old_key = atomicCAS((unsigned long long *)&(read_kmers.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
         if (old_key == KEY_EMPTY) {
           new_inserts++;
-          memcpy(read_kmers.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
+          memcpy((void *)read_kmers.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
           memcpy(&read_kmers.vals[slot], &ctg_kmers.vals[threadid], sizeof(CountsArray));
           __threadfence();
           old_key =
@@ -172,7 +181,8 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
   int8_t ext_map[4] = {'A', 'C', 'G', 'T'};
   if (threadid < elems.capacity) {
     if (elems.vals[threadid].kmer_count) {
-      KmerArray<MAX_K> kmer = elems.keys[threadid];
+      KmerArray<MAX_K> kmer;
+      set_kmer(kmer, elems.keys[threadid]);
       uint64_t slot = kmer_hash(kmer) % compact_elems.capacity;
       auto start_slot = slot;
       // we set a constraint on the max probe to track whether we are getting excessive collisions and need a bigger default
@@ -185,7 +195,7 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
         if (old_key == KEY_EMPTY) {
           // found empty slot - there will be no duplicate keys since we're copying across from another hash table
           unique_inserts++;
-          memcpy(compact_elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
+          memcpy((void *)compact_elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
           // compute exts
           int8_t left_ext = get_ext(elems.vals[threadid], 0, ext_map);
           int8_t right_ext = get_ext(elems.vals[threadid], 4, ext_map);
@@ -216,7 +226,7 @@ __global__ void gpu_purge_invalid(KmerCountsMap<MAX_K> elems, unsigned int *elem
       for (int j = 0; j < 8; j++) ext_sum += elems.vals[threadid].ext_counts[j];
       if (elems.vals[threadid].kmer_count < 2 || !ext_sum) {
         memset(&elems.vals[threadid], 0, sizeof(CountsArray));
-        memset(elems.keys[threadid].longs, KEY_EMPTY_BYTE, N_LONGS * sizeof(uint64_t));
+        memset((void *)elems.keys[threadid].longs, KEY_EMPTY_BYTE, N_LONGS * sizeof(uint64_t));
         num_purged++;
       } else {
         num_elems++;
@@ -326,7 +336,7 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
           old_key = atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
         } while (old_key == KEY_TRANSITION);
         if (old_key == KEY_EMPTY) {
-          memcpy(elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
+          memcpy((void *)elems.keys[slot].longs, kmer.longs, sizeof(uint64_t) * (N_LONGS - 1));
           __threadfence();
           old_key =
               atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_TRANSITION, kmer.longs[N_LONGS - 1]);
@@ -393,14 +403,14 @@ template <int MAX_K>
 void KmerCountsMap<MAX_K>::init(int64_t ht_capacity) {
   capacity = ht_capacity;
   cudaErrchk(cudaMalloc(&keys, capacity * sizeof(KmerArray<MAX_K>)));
-  cudaErrchk(cudaMemset(keys, KEY_EMPTY_BYTE, capacity * sizeof(KmerArray<MAX_K>)));
+  cudaErrchk(cudaMemset((void *)keys, KEY_EMPTY_BYTE, capacity * sizeof(KmerArray<MAX_K>)));
   cudaErrchk(cudaMalloc(&vals, capacity * sizeof(CountsArray)));
   cudaErrchk(cudaMemset(vals, 0, capacity * sizeof(CountsArray)));
 }
 
 template <int MAX_K>
 void KmerCountsMap<MAX_K>::clear() {
-  cudaFree(keys);
+  cudaFree((void *)keys);
   cudaFree(vals);
 }
 
@@ -408,14 +418,14 @@ template <int MAX_K>
 void KmerExtsMap<MAX_K>::init(int64_t ht_capacity) {
   capacity = ht_capacity;
   cudaErrchk(cudaMalloc(&keys, capacity * sizeof(KmerArray<MAX_K>)));
-  cudaErrchk(cudaMemset(keys, KEY_EMPTY_BYTE, capacity * sizeof(KmerArray<MAX_K>)));
+  cudaErrchk(cudaMemset((void *)keys, KEY_EMPTY_BYTE, capacity * sizeof(KmerArray<MAX_K>)));
   cudaErrchk(cudaMalloc(&vals, capacity * sizeof(CountExts)));
   cudaErrchk(cudaMemset(vals, 0, capacity * sizeof(CountExts)));
 }
 
 template <int MAX_K>
 void KmerExtsMap<MAX_K>::clear() {
-  cudaFree(keys);
+  cudaFree((void *)keys);
   cudaFree(vals);
 }
 
@@ -605,7 +615,7 @@ void HashTableGPUDriver<MAX_K>::done_all_inserts(int &num_dropped, int &num_uniq
   output_keys.resize(num_entries);
   output_vals.resize(num_entries);
   output_index = 0;
-  cudaErrchk(cudaMemcpy(output_keys.data(), compact_read_kmers_dev.keys, compact_read_kmers_dev.capacity * sizeof(KmerArray<MAX_K>),
+  cudaErrchk(cudaMemcpy(output_keys.data(), (void *)compact_read_kmers_dev.keys, compact_read_kmers_dev.capacity * sizeof(KmerArray<MAX_K>),
                         cudaMemcpyDeviceToHost));
   cudaErrchk(cudaMemcpy(output_vals.data(), compact_read_kmers_dev.vals, compact_read_kmers_dev.capacity * sizeof(CountExts),
                         cudaMemcpyDeviceToHost));
