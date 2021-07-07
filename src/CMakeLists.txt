@@ -70,6 +70,8 @@ if(ENABLE_CUDA)
     add_definitions(-DENABLE_KCOUNT_GPUS_HT)
     add_definitions(-DENABLE_LASSM_GPUS)
     message(STATUS "Building for GPUs with CUDA")
+else()
+    message(FATAL_ERROR "This build uses GPUS and requires CUDA")
 endif()
 
 # a bit of jiggery-pokery to get a list of all compile time definitions in the code
@@ -122,9 +124,7 @@ add_executable(mhm2 main.cpp ${MHM2_TARGET_OBJECTS})
 set(MHM2_LINK_LIBRARIES Threads::Threads SSW_LIBRARY ${ZLIB_LIBRARIES} MHM2_VERSION_LIB)
 
 if(ENABLE_CUDA)
-
     include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-
     # include the gpu directories
     set_property(TARGET mhm2 PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF) # just to be sure. It should be off in parent dir
     include_directories("gpu-utils")
@@ -143,11 +143,8 @@ if(ENABLE_CUDA)
     target_link_libraries(mhm2
         ${MHM2_LINK_LIBRARIES}
         ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
-
 else()
-    target_link_libraries(mhm2
-        ${MHM2_LINK_LIBRARIES}
-        ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+    message(FATAL_ERROR "This build uses GPUs and requires CUDA")
 endif()
 
 set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} PARENT_SCOPE)
