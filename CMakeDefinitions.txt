@@ -64,6 +64,9 @@ add_definitions(-DCONFIG_USE_COLORS)
 # use the bytell hash table implementation
 add_definitions(-DUSE_BYTELL)
 
+# for read shuffling
+add_definitions(-DSHUFFLE_KMER_LEN=21)
+
 # max allowed alignments per read (to reduce overhead & imbalance) - set to 0 to have no limit
 add_definitions(-DKLIGN_MAX_ALNS_PER_READ=20)
 # limit on how many contigs to fetch for a read at a time - this is across all target ranks, so a form of buffering

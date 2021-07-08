@@ -233,6 +233,8 @@ unsigned PackedReads::get_max_read_len() { return max_read_len; }
 
 int64_t PackedReads::get_local_num_reads() { return packed_reads.size(); }
 
+int PackedReads::get_qual_offset() { return qual_offset; }
+
 void PackedReads::add_read(const string &read_id, const string &seq, const string &quals) {
   packed_reads.emplace_back(read_id, seq, quals, qual_offset);
   if (str_ids) {

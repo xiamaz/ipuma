@@ -161,4 +161,6 @@ class PackedReads {
   void report_size();
 
   int64_t get_bases();
+
+  int get_qual_offset();
 };
