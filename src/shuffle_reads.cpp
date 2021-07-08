@@ -140,7 +140,7 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
         vector<kmer_t> kmers;
         packed_read.unpack(read_id_str, read_seq, read_quals, packed_reads->get_qual_offset());
         kmer_t::get_kmers(SHUFFLE_KMER_LEN, read_seq, kmers);
-        for (int j = 0; j < kmers.size(); j++) {
+        for (int j = 0; j < kmers.size(); j += 4) {
           cid = rpc(
                     get_kmer_target_rank(kmers[i]),
                     [](dist_object<kmer_to_cid_map_t> &kmer_to_cid_map, uint64_t kmer) -> int64_t {
@@ -155,7 +155,6 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
         if (cid != -1) break;
       }
       if (cid != -1) cid_reads_store.update(get_read_id_target_rank(read_id), {cid, read_id});
-
     }
   }
   cid_reads_store.flush_updates();
