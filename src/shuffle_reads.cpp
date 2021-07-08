@@ -135,13 +135,12 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
       auto &packed_read1 = (*packed_reads)[i];
       auto &packed_read2 = (*packed_reads)[i + 1];
       auto read_id = abs(packed_read1.get_id());
-      HASH_TABLE<int64_t, int> cid_counts;
+      int64_t cid = -1;
       for (auto &packed_read : {packed_read1, packed_read2}) {
         vector<kmer_t> kmers;
         packed_read.unpack(read_id_str, read_seq, read_quals, packed_reads->get_qual_offset());
         kmer_t::get_kmers(SHUFFLE_KMER_LEN, read_seq, kmers);
-        int64_t cid = -1;
-        for (int j = 0; j < kmers.size(); j += 8) {
+        for (int j = 0; j < kmers.size(); j++) {
           cid = rpc(
                     get_kmer_target_rank(kmers[i]),
                     [](dist_object<kmer_to_cid_map_t> &kmer_to_cid_map, uint64_t kmer) -> int64_t {
@@ -151,20 +150,12 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
                     },
                     kmer_to_cid_map, kmers[i].get_longs()[0])
                     .wait();
-          if (cid == -1) continue;
-          auto it = cid_counts.find(cid);
-          if (it == cid_counts.end())
-            cid_counts.insert({cid, 1});
-          else
-            it->second++;
+          if (cid != -1) break;
         }
+        if (cid != -1) break;
       }
-      if (!cid_counts.empty()) {
-        auto best_cid_pair =
-            max_element(cid_counts.begin(), cid_counts.end(),
-                        [](const pair<int64_t, int> &p1, const pair<int64_t, int> &p2) { return p1.second < p2.second; });
-        cid_reads_store.update(get_read_id_target_rank(read_id), {best_cid_pair->first, read_id});
-      }
+      if (cid != -1) cid_reads_store.update(get_read_id_target_rank(read_id), {cid, read_id});
+
     }
   }
   cid_reads_store.flush_updates();
