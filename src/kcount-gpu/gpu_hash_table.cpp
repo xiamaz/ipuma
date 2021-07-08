@@ -111,7 +111,7 @@ __device__ int8_t get_ext(CountsArray &counts, int pos, int8_t *ext_map) {
   return ext_map[top_ext_pos - pos];
 }
 
-__device__ bool ext_conflict(count_t *ext_counts, int start_idx) {
+__device__ bool ext_conflict(ext_count_t *ext_counts, int start_idx) {
   int idx = -1;
   for (int i = start_idx; i < start_idx + 4; i++) {
     if (ext_counts[i]) {
@@ -133,8 +133,8 @@ __global__ void gpu_merge_ctg_kmers(KmerCountsMap<MAX_K> read_kmers, const KmerC
   int dropped_inserts = 0;
   int new_inserts = 0;
   if (threadid < ctg_kmers.capacity) {
-    uint32_t kmer_count = ctg_kmers.vals[threadid].kmer_count;
-    count_t *ext_counts = ctg_kmers.vals[threadid].ext_counts;
+    count_t kmer_count = ctg_kmers.vals[threadid].kmer_count;
+    ext_count_t *ext_counts = ctg_kmers.vals[threadid].ext_counts;
     if (kmer_count && !ext_conflict(ext_counts, 0) && !ext_conflict(ext_counts, 4)) {
       KmerArray<MAX_K> kmer = ctg_kmers.keys[threadid];
       uint64_t slot = kmer_hash(kmer) % read_kmers.capacity;
@@ -268,7 +268,7 @@ inline __device__ bool bad_qual(char base) { return (base == 'a' || base == 'c' 
 
 template <int MAX_K>
 __device__ bool get_kmer_from_supermer(SupermerBuff supermer_buff, uint32_t buff_len, int kmer_len, uint64_t *kmer, char &left_ext,
-                                       char &right_ext, uint32_t &count) {
+                                       char &right_ext, count_t &count) {
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
   int num_kmers = buff_len - kmer_len + 1;
   if (threadid >= num_kmers) return false;
@@ -321,7 +321,7 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
     attempted_inserts++;
     KmerArray<MAX_K> kmer;
     char left_ext, right_ext;
-    uint32_t kmer_count;
+    count_t kmer_count;
     if (get_kmer_from_supermer<MAX_K>(supermer_buff, buff_len, kmer_len, kmer.longs, left_ext, right_ext, kmer_count)) {
       if (kmer.longs[N_LONGS - 1] == KEY_EMPTY) printf("ERROR: block equal to KEY_EMPTY\n");
       if (kmer.longs[N_LONGS - 1] == KEY_TRANSITION) printf("ERROR: block equal to KEY_TRANSITION\n");
@@ -350,7 +350,7 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
         if (j == MAX_PROBE - 1) dropped_inserts++;
       }
       if (found_slot) {
-        count_t *ext_counts = elems.vals[slot].ext_counts;
+        ext_count_t *ext_counts = elems.vals[slot].ext_counts;
         if (ctg_kmers) {
           // the count is the min of all counts. Use CAS to deal with the initial zero value
           int prev_count = atomicCAS(&elems.vals[slot].kmer_count, 0, kmer_count);
@@ -362,17 +362,18 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
           int prev_count = atomicAdd(&elems.vals[slot].kmer_count, kmer_count);
           if (!prev_count) new_inserts++;
         }
+        ext_count_t kmer_count_uint16 = min(kmer_count, UINT16_MAX);
         switch (left_ext) {
-          case 'A': atomicAddUint16_thres(&(ext_counts[0]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          case 'C': atomicAddUint16_thres(&(ext_counts[1]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          case 'G': atomicAddUint16_thres(&(ext_counts[2]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          case 'T': atomicAddUint16_thres(&(ext_counts[3]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'A': atomicAddUint16_thres(&(ext_counts[0]), kmer_count_uint16, KCOUNT_MAX_KMER_COUNT); break;
+          case 'C': atomicAddUint16_thres(&(ext_counts[1]), kmer_count_uint16, KCOUNT_MAX_KMER_COUNT); break;
+          case 'G': atomicAddUint16_thres(&(ext_counts[2]), kmer_count_uint16, KCOUNT_MAX_KMER_COUNT); break;
+          case 'T': atomicAddUint16_thres(&(ext_counts[3]), kmer_count_uint16, KCOUNT_MAX_KMER_COUNT); break;
         }
         switch (right_ext) {
-          case 'A': atomicAddUint16_thres(&(ext_counts[4]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          case 'C': atomicAddUint16_thres(&(ext_counts[5]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          case 'G': atomicAddUint16_thres(&(ext_counts[6]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
-          case 'T': atomicAddUint16_thres(&(ext_counts[7]), kmer_count, KCOUNT_MAX_KMER_COUNT); break;
+          case 'A': atomicAddUint16_thres(&(ext_counts[4]), kmer_count_uint16, KCOUNT_MAX_KMER_COUNT); break;
+          case 'C': atomicAddUint16_thres(&(ext_counts[5]), kmer_count_uint16, KCOUNT_MAX_KMER_COUNT); break;
+          case 'G': atomicAddUint16_thres(&(ext_counts[6]), kmer_count_uint16, KCOUNT_MAX_KMER_COUNT); break;
+          case 'T': atomicAddUint16_thres(&(ext_counts[7]), kmer_count_uint16, KCOUNT_MAX_KMER_COUNT); break;
         }
       }
     }

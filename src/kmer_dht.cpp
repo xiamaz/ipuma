@@ -402,13 +402,14 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
       invalid++;
       continue;
     }
-    KmerCounts kmer_counts = {.left_exts = {0},
-                              .right_exts = {0},
-                              .uutig_frag = nullptr,
-                              .count = count_exts->count,
-                              .left = (char)count_exts->left,
-                              .right = (char)count_exts->right,
-                              .from_ctg = false};
+    KmerCounts kmer_counts = {
+        .left_exts = {0},
+        .right_exts = {0},
+        .uutig_frag = nullptr,
+        .count = static_cast<kmer_count_t>(min(count_exts->count, static_cast<kcount_gpu::count_t>(UINT16_MAX))),
+        .left = (char)count_exts->left,
+        .right = (char)count_exts->right,
+        .from_ctg = false};
     if ((kmer_counts.count < 2)) {
       WARN("Found a kmer that should have been purged, count is ", kmer_counts.count);
       invalid++;

@@ -53,11 +53,12 @@ namespace kcount_gpu {
 
 enum PASS_TYPE { READ_KMERS_PASS, CTG_KMERS_PASS };
 
-using count_t = uint16_t;
+using count_t = uint32_t;
+using ext_count_t = uint16_t;
 
 struct CountsArray {
-  uint32_t kmer_count;
-  count_t ext_counts[8];
+  count_t kmer_count;
+  ext_count_t ext_counts[8];
 };
 
 struct CountExts {

@@ -217,7 +217,7 @@ inline __device__ uint16_t atomicAddUint16(uint16_t *address, uint16_t val) {
   unsigned int *base_address = (unsigned int *)((size_t)address & ~2);
   unsigned int long_val = ((size_t)address & 2) ? ((unsigned int)val << 16) : val;
   unsigned int long_old = atomicAdd(base_address, long_val);
-  return ((size_t)address & 2) ? (unsigned short)(long_old >> 16) : (uint16_t)(long_old & 0xffff);
+  return ((size_t)address & 2) ? (uint16_t)(long_old >> 16) : (uint16_t)(long_old & 0xffff);
 }
 
 inline __device__ void atomicAddUint16_thres(uint16_t *address, uint16_t val, uint16_t thres) {
