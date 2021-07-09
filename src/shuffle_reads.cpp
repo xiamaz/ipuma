@@ -333,7 +333,8 @@ static dist_object<vector<PackedRead>> move_reads_to_targets(vector<PackedReads 
   return new_packed_reads;
 }
 
-void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Alns &alns, Contigs &ctgs) {
+// void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Alns &alns, Contigs &ctgs) {
+void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Contigs &ctgs) {
   BarrierTimer timer(__FILEFUNC__);
 
   int64_t num_reads = 0;
