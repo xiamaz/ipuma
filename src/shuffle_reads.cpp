@@ -71,8 +71,8 @@ static intrank_t get_target_rank(int64_t val) {
   return MurmurHash3_x64_64(reinterpret_cast<const void *>(&val), sizeof(int64_t)) % rank_n();
 }
 
-//static intrank_t get_kmer_target_rank(kmer_t &kmer) { return kmer.hash() % rank_n(); }
-static intrank_t get_kmer_target_rank(kmer_t &kmer) { return kmer.minimizer_hash_fast(15) % rank_n(); }
+static intrank_t get_kmer_target_rank(kmer_t &kmer) { return kmer.hash() % rank_n(); }
+// static intrank_t get_kmer_target_rank(kmer_t &kmer) { return kmer.minimizer_hash_fast(15) % rank_n(); }
 
 using cid_to_reads_map_t = HASH_TABLE<int64_t, vector<int64_t>>;
 using read_to_target_map_t = HASH_TABLE<int64_t, int>;
@@ -139,12 +139,12 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
       auto &packed_read2 = (*packed_reads)[i + 1];
       auto read_id = abs(packed_read1.get_id());
       int64_t cid = -1;
-      // HASH_TABLE<int64_t, int> cid_counts;
       for (auto &packed_read : {packed_read1, packed_read2}) {
         vector<kmer_t> kmers;
         packed_read.unpack(read_id_str, read_seq, read_quals, packed_reads->get_qual_offset());
+        if (read_seq.length() < SHUFFLE_KMER_LEN) continue;
         kmer_t::get_kmers(SHUFFLE_KMER_LEN, read_seq, kmers);
-        for (int j = 0; j < kmers.size(); j += 8) {
+        for (int j = 0; j < kmers.size(); j += 32) {
           kmer_t kmer = kmers[j];
           auto kmer_rc = kmer.revcomp();
           if (kmer < kmer_rc) kmer = kmer_rc;
@@ -158,26 +158,10 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
                     kmer_to_cid_map, kmer.get_longs()[0])
                     .wait();
           if (cid != -1) break;
-          /*
-          if (cid == -1) continue;
-          auto it = cid_counts.find(cid);
-          if (it == cid_counts.end())
-            cid_counts.insert({cid, 1});
-          else
-            it->second++;
-          */
         }
         if (cid != -1) break;
       }
       if (cid != -1) cid_reads_store.update(get_target_rank(cid), {cid, read_id});
-      /*
-      if (!cid_counts.empty()) {
-        auto best_cid_pair =
-            max_element(cid_counts.begin(), cid_counts.end(),
-                        [](const pair<int64_t, int> &p1, const pair<int64_t, int> &p2) { return p1.second < p2.second; });
-        cid_reads_store.update(get_target_rank(cid), {best_cid_pair->first, read_id});
-      }
-      */
     }
   }
   cid_reads_store.flush_updates();
@@ -238,8 +222,8 @@ static dist_object<cid_to_reads_map_t> process_alns(vector<PackedReads *> &packe
   return cid_to_reads_map;
 }
 
-static dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_to_reads_map_t> &cid_to_reads_map,
-                                                                string tmp_fname) {
+static dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_to_reads_map_t> &cid_to_reads_map, string tmp_fname,
+                                                                int64_t tot_num_reads) {
   BarrierTimer timer(__FILEFUNC__);
   int64_t num_mapped_reads = 0;
   for (auto &[cid, read_ids] : *cid_to_reads_map) num_mapped_reads += read_ids.size();
@@ -259,12 +243,14 @@ static dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_
   dist_object<read_to_target_map_t> read_to_target_map({});
   read_to_target_map->reserve(avg_num_mapped_reads);
   int block = ceil((double)all_num_mapped_reads / rank_n());
+  int64_t num_reads_found = 0;
   // ofstream tmpf(tmp_fname + "_" + to_string(rank_me()) + ".txt");
   for (auto &[cid, read_ids] : *cid_to_reads_map) {
     progress();
     if (read_ids.empty()) continue;
     for (auto read_id : read_ids) {
       // tmpf << read_id << " " << cid << endl;
+      num_reads_found++;
       rpc(
           get_target_rank(read_id),
           [](dist_object<read_to_target_map_t> &read_to_target_map, int64_t read_id, int target) {
@@ -278,6 +264,8 @@ static dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_
   }
   // tmpf.close();
   barrier();
+  auto tot_num_reads_found = reduce_one(num_reads_found, op_fast_add, 0).wait();
+  SLOG(KLGREEN, "Number of read pairs mapping to contigs is ", perc_str(tot_num_reads_found, tot_num_reads / 2), KNORM, "\n");
   fetch_add_domain.destroy();
   return read_to_target_map;
 }
@@ -348,7 +336,7 @@ void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Co
   // auto cid_to_reads_map = process_alns(packed_reads_list, alns, ctgs.size());
   auto kmer_to_cid_map = compute_kmer_to_cid_map(ctgs);
   auto cid_to_reads_map = compute_cid_to_reads_map(packed_reads_list, kmer_to_cid_map, ctgs.size());
-  auto read_to_target_map = compute_read_locations(cid_to_reads_map, "cid_to_reads_kmers");
+  auto read_to_target_map = compute_read_locations(cid_to_reads_map, "cid_to_reads_kmers", all_num_reads);
   auto new_packed_reads = move_reads_to_targets(packed_reads_list, read_to_target_map, all_num_reads);
 
   // now copy the new packed reads to the old
