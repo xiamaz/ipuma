@@ -197,9 +197,9 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
       }
     }
   }
-  for (int i = 0; i < rank_n(); i++) {
-    if (!kmer_req_bufs[i].kmers.empty())
-      fut_chain = when_all(fut_chain, update_cid_reads(i, kmer_req_bufs[i], kmer_to_cid_map, cid_reads_store));
+  for (auto target : upcxx_utils::foreach_rank_by_node()) {  // stagger by rank_me, round robin by node
+    if (!kmer_req_bufs[target].kmers.empty())
+      fut_chain = when_all(fut_chain, update_cid_reads(target, kmer_req_bufs[target], kmer_to_cid_map, cid_reads_store));
   }
   fut_chain.wait();
   cid_reads_store.flush_updates();
