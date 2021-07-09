@@ -71,7 +71,9 @@ static intrank_t get_target_rank(int64_t val) {
   return MurmurHash3_x64_64(reinterpret_cast<const void *>(&val), sizeof(int64_t)) % rank_n();
 }
 
-static intrank_t get_kmer_target_rank(kmer_t &kmer) { return kmer.hash() % rank_n(); }
+static intrank_t get_kmer_target_rank(const kmer_t &kmer, const kmer_t *kmer_rc) {
+  return kmer.minimizer_hash_fast(15, kmer_rc) % rank_n();
+}
 
 using cid_to_reads_map_t = HASH_TABLE<int64_t, vector<int64_t>>;
 using read_to_target_map_t = HASH_TABLE<int64_t, int>;
@@ -100,10 +102,10 @@ static dist_object<kmer_to_cid_map_t> compute_kmer_to_cid_map(Contigs &ctgs) {
     kmer_t::get_kmers(SHUFFLE_KMER_LEN, ctg.seq, kmers);
     // can skip kmers to make it more efficient
     for (int i = 0; i < kmers.size(); i += 1) {
-      kmer_t kmer = kmers[i];
-      auto kmer_rc = kmer.revcomp();
-      if (kmer < kmer_rc) kmer = kmer_rc;
-      kmer_cid_store.update(get_kmer_target_rank(kmer), {kmer.get_longs()[0], ctg.id});
+      const kmer_t kmer_fw = kmers[i];
+      const kmer_t kmer_rc = kmer_fw.revcomp();
+      const kmer_t *kmer = (kmer_rc < kmer_fw) ? &kmer_rc : &kmer_fw;
+      kmer_cid_store.update(get_kmer_target_rank(kmer_fw, &kmer_rc), {kmer->get_longs()[0], ctg.id});
     }
   }
   kmer_cid_store.flush_updates();
@@ -138,45 +140,30 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
       auto &packed_read2 = (*packed_reads)[i + 1];
       auto read_id = abs(packed_read1.get_id());
       int64_t cid = -1;
-      // HASH_TABLE<int64_t, int> cid_counts;
       for (auto &packed_read : {packed_read1, packed_read2}) {
         vector<kmer_t> kmers;
         packed_read.unpack(read_id_str, read_seq, read_quals, packed_reads->get_qual_offset());
         kmer_t::get_kmers(SHUFFLE_KMER_LEN, read_seq, kmers);
         for (int j = 0; j < kmers.size(); j += 8) {
-          kmer_t kmer = kmers[j];
-          auto kmer_rc = kmer.revcomp();
-          if (kmer < kmer_rc) kmer = kmer_rc;
+          const kmer_t kmer_fw = kmers[j];
+          const kmer_t kmer_rc = kmer_fw.revcomp();
+          const kmer_t *kmer = (kmer_rc < kmer_fw) ? &kmer_rc : &kmer_fw;
           cid = rpc(
-                    get_kmer_target_rank(kmer),
-                    [](dist_object<kmer_to_cid_map_t> &kmer_to_cid_map, uint64_t kmer) -> int64_t {
+                    get_kmer_target_rank(kmer_fw, &kmer_rc),
+                    [&kmer_to_cid_map](uint64_t kmer) -> int64_t {
                       const auto it = kmer_to_cid_map->find(kmer);
                       if (it == kmer_to_cid_map->end()) return -1;
                       return it->second;
                     },
-                    kmer_to_cid_map, kmer.get_longs()[0])
+                    kmer->get_longs()[0])
                     .wait();
-          if (cid != -1) break;
-          /*
-          if (cid == -1) continue;
-          auto it = cid_counts.find(cid);
-          if (it == cid_counts.end())
-            cid_counts.insert({cid, 1});
-          else
-            it->second++;
-          */
+          if (cid != -1) {
+            cid_reads_store.update(get_target_rank(cid), {cid, read_id});
+            break;
+          }
         }
         if (cid != -1) break;
       }
-      if (cid != -1) cid_reads_store.update(get_target_rank(cid), {cid, read_id});
-      /*
-      if (!cid_counts.empty()) {
-        auto best_cid_pair =
-            max_element(cid_counts.begin(), cid_counts.end(),
-                        [](const pair<int64_t, int> &p1, const pair<int64_t, int> &p2) { return p1.second < p2.second; });
-        cid_reads_store.update(get_target_rank(cid), {best_cid_pair->first, read_id});
-      }
-      */
     }
   }
   cid_reads_store.flush_updates();
