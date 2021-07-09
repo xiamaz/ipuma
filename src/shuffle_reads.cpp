@@ -112,6 +112,41 @@ static dist_object<kmer_to_cid_map_t> compute_kmer_to_cid_map(Contigs &ctgs) {
   return kmer_to_cid_map;
 }
 
+struct KmerReqBuf {
+  vector<uint64_t> kmers;
+  vector<int64_t> read_ids;
+  void add(uint64_t kmer, int64_t read_id) {
+    kmers.push_back(kmer);
+    read_ids.push_back(read_id);
+  }
+  void clear() {
+    kmers.clear();
+    read_ids.clear();
+  }
+};
+
+static void update_cid_reads(intrank_t target, KmerReqBuf &kmer_req_buf, dist_object<kmer_to_cid_map_t> &kmer_to_cid_map,
+                             ThreeTierAggrStore<pair<int64_t, int64_t>> &cid_reads_store) {
+  auto cids = rpc(
+                  target,
+                  [](dist_object<kmer_to_cid_map_t> &kmer_to_cid_map, vector<uint64_t> kmers) -> vector<int64_t> {
+                    vector<int64_t> cids;
+                    cids.resize(kmers.size());
+                    for (int i = 0; i < kmers.size(); i++) {
+                      const auto it = kmer_to_cid_map->find(kmers[i]);
+                      cids[i] = (it == kmer_to_cid_map->end() ? -1 : it->second);
+                    }
+                    return cids;
+                  },
+                  kmer_to_cid_map, kmer_req_buf.kmers)
+                  .wait();
+  if (cids.size() != kmer_req_buf.kmers.size()) WARN("buff size is wrong, ", cids.size(), " != ", kmer_req_buf.kmers.size());
+  for (int i = 0; i < cids.size(); i++) {
+    if (cids[i] != -1) cid_reads_store.update(get_target_rank(cids[i]), {cids[i], kmer_req_buf.read_ids[i]});
+  }
+  kmer_req_buf.clear();
+}
+
 static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedReads *> &packed_reads_list,
                                                                 dist_object<kmer_to_cid_map_t> &kmer_to_cid_map, int64_t num_ctgs) {
   BarrierTimer timer(__FILEFUNC__);
@@ -131,6 +166,9 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
   auto max_store_bytes = max(mem_to_use, (int64_t)est_update_size * 100);
   cid_reads_store.set_size("Read cid store", max_store_bytes);
   string read_id_str, read_seq, read_quals;
+  const int MAX_REQ_BUFF = 1000;
+  vector<KmerReqBuf> kmer_req_bufs;
+  kmer_req_bufs.resize(rank_n());
   for (auto packed_reads : packed_reads_list) {
     packed_reads->reset();
     for (int i = 0; i < packed_reads->get_local_num_reads(); i += 2) {
@@ -138,7 +176,6 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
       auto &packed_read1 = (*packed_reads)[i];
       auto &packed_read2 = (*packed_reads)[i + 1];
       auto read_id = abs(packed_read1.get_id());
-      int64_t cid = -1;
       for (auto &packed_read : {packed_read1, packed_read2}) {
         vector<kmer_t> kmers;
         packed_read.unpack(read_id_str, read_seq, read_quals, packed_reads->get_qual_offset());
@@ -148,21 +185,17 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
           kmer_t kmer = kmers[j];
           auto kmer_rc = kmer.revcomp();
           if (kmer < kmer_rc) kmer = kmer_rc;
-          cid = rpc(
-                    get_kmer_target_rank(kmer),
-                    [](dist_object<kmer_to_cid_map_t> &kmer_to_cid_map, uint64_t kmer) -> int64_t {
-                      const auto it = kmer_to_cid_map->find(kmer);
-                      if (it == kmer_to_cid_map->end()) return -1;
-                      return it->second;
-                    },
-                    kmer_to_cid_map, kmer.get_longs()[0])
-                    .wait();
-          if (cid != -1) break;
+          auto target = get_kmer_target_rank(kmer);
+          kmer_req_bufs[target].add(kmer.get_longs()[0], read_id);
+          if (kmer_req_bufs[target].kmers.size() == MAX_REQ_BUFF) {
+            update_cid_reads(target, kmer_req_bufs[target], kmer_to_cid_map, cid_reads_store);
+          }
         }
-        if (cid != -1) break;
       }
-      if (cid != -1) cid_reads_store.update(get_target_rank(cid), {cid, read_id});
     }
+  }
+  for (int i = 0; i < rank_n(); i++) {
+    if (!kmer_req_bufs[i].kmers.empty()) update_cid_reads(i, kmer_req_bufs[i], kmer_to_cid_map, cid_reads_store);
   }
   cid_reads_store.flush_updates();
   barrier();
@@ -222,7 +255,7 @@ static dist_object<cid_to_reads_map_t> process_alns(vector<PackedReads *> &packe
   return cid_to_reads_map;
 }
 
-static dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_to_reads_map_t> &cid_to_reads_map, string tmp_fname,
+static dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_to_reads_map_t> &cid_to_reads_map,
                                                                 int64_t tot_num_reads) {
   BarrierTimer timer(__FILEFUNC__);
   int64_t num_mapped_reads = 0;
@@ -243,14 +276,12 @@ static dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_
   dist_object<read_to_target_map_t> read_to_target_map({});
   read_to_target_map->reserve(avg_num_mapped_reads);
   int block = ceil((double)all_num_mapped_reads / rank_n());
-  int64_t num_reads_found = 0;
-  // ofstream tmpf(tmp_fname + "_" + to_string(rank_me()) + ".txt");
+  // int64_t num_reads_found = 0;
   for (auto &[cid, read_ids] : *cid_to_reads_map) {
     progress();
     if (read_ids.empty()) continue;
     for (auto read_id : read_ids) {
-      // tmpf << read_id << " " << cid << endl;
-      num_reads_found++;
+      // num_reads_found++;
       rpc(
           get_target_rank(read_id),
           [](dist_object<read_to_target_map_t> &read_to_target_map, int64_t read_id, int target) {
@@ -262,10 +293,9 @@ static dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_
       read_slot += 2;
     }
   }
-  // tmpf.close();
   barrier();
-  auto tot_num_reads_found = reduce_one(num_reads_found, op_fast_add, 0).wait();
-  SLOG(KLGREEN, "Number of read pairs mapping to contigs is ", perc_str(tot_num_reads_found, tot_num_reads / 2), KNORM, "\n");
+  auto tot_reads_found = reduce_one(read_to_target_map->size(), op_fast_add, 0).wait();
+  SLOG(KLGREEN, "Number of read pairs mapping to contigs is ", perc_str(tot_reads_found, tot_num_reads / 2), KNORM, "\n");
   fetch_add_domain.destroy();
   return read_to_target_map;
 }
@@ -330,13 +360,9 @@ void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Co
   for (auto packed_reads : packed_reads_list) num_reads += packed_reads->get_local_num_reads();
   auto all_num_reads = reduce_all(num_reads, op_fast_add).wait();
 
-  // auto cid_to_reads_map2 = process_alns(packed_reads_list, alns, ctgs.size());
-  // compute_read_locations(cid_to_reads_map2, "cid_to_reads_alns");
-
-  // auto cid_to_reads_map = process_alns(packed_reads_list, alns, ctgs.size());
   auto kmer_to_cid_map = compute_kmer_to_cid_map(ctgs);
   auto cid_to_reads_map = compute_cid_to_reads_map(packed_reads_list, kmer_to_cid_map, ctgs.size());
-  auto read_to_target_map = compute_read_locations(cid_to_reads_map, "cid_to_reads_kmers", all_num_reads);
+  auto read_to_target_map = compute_read_locations(cid_to_reads_map, all_num_reads);
   auto new_packed_reads = move_reads_to_targets(packed_reads_list, read_to_target_map, all_num_reads);
 
   // now copy the new packed reads to the old
