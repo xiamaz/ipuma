@@ -125,26 +125,28 @@ struct KmerReqBuf {
   }
 };
 
-static void update_cid_reads(intrank_t target, KmerReqBuf &kmer_req_buf, dist_object<kmer_to_cid_map_t> &kmer_to_cid_map,
-                             ThreeTierAggrStore<pair<int64_t, int64_t>> &cid_reads_store) {
-  auto cids = rpc(
-                  target,
-                  [](dist_object<kmer_to_cid_map_t> &kmer_to_cid_map, vector<uint64_t> kmers) -> vector<int64_t> {
-                    vector<int64_t> cids;
-                    cids.resize(kmers.size());
-                    for (int i = 0; i < kmers.size(); i++) {
-                      const auto it = kmer_to_cid_map->find(kmers[i]);
-                      cids[i] = (it == kmer_to_cid_map->end() ? -1 : it->second);
-                    }
-                    return cids;
-                  },
-                  kmer_to_cid_map, kmer_req_buf.kmers)
-                  .wait();
-  if (cids.size() != kmer_req_buf.kmers.size()) WARN("buff size is wrong, ", cids.size(), " != ", kmer_req_buf.kmers.size());
-  for (int i = 0; i < cids.size(); i++) {
-    if (cids[i] != -1) cid_reads_store.update(get_target_rank(cids[i]), {cids[i], kmer_req_buf.read_ids[i]});
-  }
+static future<> update_cid_reads(intrank_t target, KmerReqBuf &kmer_req_buf, dist_object<kmer_to_cid_map_t> &kmer_to_cid_map,
+                                 ThreeTierAggrStore<pair<int64_t, int64_t>> &cid_reads_store) {
+  auto fut = rpc(
+                 target,
+                 [](dist_object<kmer_to_cid_map_t> &kmer_to_cid_map, vector<uint64_t> kmers) -> vector<int64_t> {
+                   vector<int64_t> cids;
+                   cids.resize(kmers.size());
+                   for (int i = 0; i < kmers.size(); i++) {
+                     const auto it = kmer_to_cid_map->find(kmers[i]);
+                     cids[i] = (it == kmer_to_cid_map->end() ? -1 : it->second);
+                   }
+                   return cids;
+                 },
+                 kmer_to_cid_map, kmer_req_buf.kmers)
+                 .then([read_ids = kmer_req_buf.read_ids, &cid_reads_store](vector<int64_t> cids) {
+                   if (cids.size() != read_ids.size()) WARN("buff size is wrong, ", cids.size(), " != ", read_ids.size());
+                   for (int i = 0; i < cids.size(); i++) {
+                     if (cids[i] != -1) cid_reads_store.update(get_target_rank(cids[i]), {cids[i], read_ids[i]});
+                   }
+                 });
   kmer_req_buf.clear();
+  return fut;
 }
 
 static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedReads *> &packed_reads_list,
@@ -169,6 +171,7 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
   const int MAX_REQ_BUFF = 1000;
   vector<KmerReqBuf> kmer_req_bufs;
   kmer_req_bufs.resize(rank_n());
+  future<> fut_chain = make_future();
   for (auto packed_reads : packed_reads_list) {
     packed_reads->reset();
     for (int i = 0; i < packed_reads->get_local_num_reads(); i += 2) {
@@ -188,15 +191,17 @@ static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedRea
           auto target = get_kmer_target_rank(kmer);
           kmer_req_bufs[target].add(kmer.get_longs()[0], read_id);
           if (kmer_req_bufs[target].kmers.size() == MAX_REQ_BUFF) {
-            update_cid_reads(target, kmer_req_bufs[target], kmer_to_cid_map, cid_reads_store);
+            fut_chain = when_all(fut_chain, update_cid_reads(target, kmer_req_bufs[target], kmer_to_cid_map, cid_reads_store));
           }
         }
       }
     }
   }
   for (int i = 0; i < rank_n(); i++) {
-    if (!kmer_req_bufs[i].kmers.empty()) update_cid_reads(i, kmer_req_bufs[i], kmer_to_cid_map, cid_reads_store);
+    if (!kmer_req_bufs[i].kmers.empty())
+      fut_chain = when_all(fut_chain, update_cid_reads(i, kmer_req_bufs[i], kmer_to_cid_map, cid_reads_store));
   }
+  fut_chain.wait();
   cid_reads_store.flush_updates();
   barrier();
   return cid_to_reads_map;
