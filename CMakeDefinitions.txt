@@ -65,7 +65,7 @@ add_definitions(-DCONFIG_USE_COLORS)
 add_definitions(-DUSE_BYTELL)
 
 # for read shuffling
-add_definitions(-DSHUFFLE_KMER_LEN=21)
+add_definitions(-DSHUFFLE_KMER_LEN=31)
 
 # max allowed alignments per read (to reduce overhead & imbalance) - set to 0 to have no limit
 add_definitions(-DKLIGN_MAX_ALNS_PER_READ=20)
