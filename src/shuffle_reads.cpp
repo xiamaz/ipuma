@@ -300,7 +300,7 @@ static dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_
   }
   barrier();
   auto tot_reads_found = reduce_one(read_to_target_map->size(), op_fast_add, 0).wait();
-  SLOG(KLGREEN, "Number of read pairs mapping to contigs is ", perc_str(tot_reads_found, tot_num_reads / 2), KNORM, "\n");
+  SLOG_VERBOSE("Number of read pairs mapping to contigs is ", perc_str(tot_reads_found, tot_num_reads / 2), "\n");
   fetch_add_domain.destroy();
   return read_to_target_map;
 }
