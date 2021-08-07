@@ -74,6 +74,17 @@ You'll need to first set the environment, e.g.:
 
 `source contrib/environments/cori-knl/gnu.sh`
 
+If you see an error message when building like the following:
+
+`include could not find load file: GetGitVersion`
+
+Then you have probably not cloned the git submodules. You need to execute the following from the root directory:
+
+```
+git submodule init
+git submodule update
+```
+
 # Running
 
 To execute MHM2, run the `mhm2.py` script located at `install/bin`. Most parameters have sensible defaults, so it is possible to run
