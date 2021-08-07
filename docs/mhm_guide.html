@@ -5,13 +5,14 @@
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
   <title>MHM User Guide, Version 2.0 (09/30/2020)</title>
-  <style type="text/css">
-      code{white-space: pre-wrap;}
-      span.smallcaps{font-variant: small-caps;}
-      span.underline{text-decoration: underline;}
-      div.column{display: inline-block; vertical-align: top; width: 50%;}
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    span.underline{text-decoration: underline;}
+    div.column{display: inline-block; vertical-align: top; width: 50%;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
   </style>
-  <center><h1>MHM User Guide</h1><h3>Version 2.0 (09/30/2020)</h3></center>
   <center><h1>MHM User Guide</h1><h3>Version 2.0 (09/30/2020)</h3></center>
 </head>
 <body>
@@ -374,7 +375,6 @@ table td {
 <p><strong><em>Acknowledgments</em></strong></p>
 <p><em>This work was supported by the Exascale Computing Project (17-SC-20-SC), a collaborative effort of the U.S. Department of Energy Office of Science and the National Nuclear Security Administration.</em></p>
 <hr />
-
 <p>MetaHipMer (<em>MHM</em>) is a <em>de novo</em> metagenome short-read assembler. This document is for version 2 (MHM2), which is written entirely in <a href="https://upcxx.lbl.gov">UPC++</a> and runs efficiently on both single servers and on multinode supercomputers, where it can scale up to coassemble terabase-sized metagenomes. More information about MHM can be found in:</p>
 <ul>
 <li><a href="https://ieeexplore.ieee.org/document/8665813">E. Georganas et al., “Extreme Scale De Novo Metagenome Assembly,” SC18: International Conference for High Performance Computing, Networking, Storage and Analysis, Dallas, TX, USA, 2018, pp. 122-13.</a></li>
@@ -406,9 +406,14 @@ table td {
 <pre><code>mkdir -p .build
 cd .build
 cmake -DCMAKE_INSTALL_PREFIX=path-to-install ..
-make -j all check install</code></pre>
+make -j all install</code></pre>
 <p>You’ll need to first set the environment, e.g.:</p>
 <p><code>source contrib/environments/cori-knl/gnu.sh</code></p>
+<p>If you see an error message when building like the following:</p>
+<p><code>include could not find load file: GetGitVersion</code></p>
+<p>Then you have probably not cloned the git submodules. You need to execute the following from the root directory:</p>
+<pre><code>git submodule init
+git submodule update</code></pre>
 <h1 id="running">Running</h1>
 <p>To execute MHM2, run the <code>mhm2.py</code> script located at <code>install/bin</code>. Most parameters have sensible defaults, so it is possible to run with only the read FASTQ files specified, e.g. to run with two interleaved reads files, <code>lib1.fastq</code> and <code>lib2.fastq</code>, you could execute:</p>
 <p><code>mhm2.py -r lib1.fastq,lib2.fastq</code></p>
