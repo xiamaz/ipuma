@@ -67,7 +67,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 if(ENABLE_CUDA)
     message(STATUS "Building for GPUs with CUDA")
 else()
-    message(FATAL_ERROR "This build uses GPUS and requires CUDA")
+    message(STATUS "Building for CPUs")
 endif()
 
 # a bit of jiggery-pokery to get a list of all compile time definitions in the code
@@ -140,7 +140,7 @@ if(ENABLE_CUDA)
         ${MHM2_LINK_LIBRARIES}
         ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
 else()
-    message(FATAL_ERROR "This build uses GPUs and requires CUDA")
+    # FIXME: include files for cpu only implementations
 endif()
 
 set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} PARENT_SCOPE)
