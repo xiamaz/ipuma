@@ -368,18 +368,6 @@ class KmerCtgDHT {
     }
   };
 
-  static void _ssw_align_block(AlignBlockData &abd, IntermittentTimer &aln_kernel_timer) {
-    DBG_VERBOSE("Starting _ssw_align_block of ", abd.kernel_alns.size(), "\n");
-    auto alns_ptr = abd.alns.get();
-    for (int i = 0; i < abd.kernel_alns.size(); i++) {
-      Aln &aln = abd.kernel_alns[i];
-      string &cseq = abd.ctg_seqs[i];
-      string &rseq = abd.read_seqs[i];
-      ssw_align_read(abd.ssw_aligner, abd.ssw_filter, alns_ptr, abd.aln_scoring, aln_kernel_timer, aln, cseq, rseq,
-                     abd.read_group_id);
-    }
-  }
-
   upcxx::future<> ssw_align_block(IntermittentTimer &aln_kernel_timer, int read_group_id) {
     AsyncTimer t("ssw_align_block (thread)");
     auto &myself = *this;
@@ -389,7 +377,15 @@ class KmerCtgDHT {
     future<> fut = upcxx_utils::execute_in_thread_pool([sh_abd, t, &aln_kernel_timer]() {
       t.start();
       assert(!sh_abd->kernel_alns.empty());
-      _ssw_align_block(*sh_abd, aln_kernel_timer);
+      DBG_VERBOSE("Starting _ssw_align_block of ", sh_abd->kernel_alns.size(), "\n");
+      auto alns_ptr = sh_abd->alns.get();
+      for (int i = 0; i < sh_abd->kernel_alns.size(); i++) {
+        Aln &aln = sh_abd->kernel_alns[i];
+        string &cseq = sh_abd->ctg_seqs[i];
+        string &rseq = sh_abd->read_seqs[i];
+        ssw_align_read(sh_abd->ssw_aligner, sh_abd->ssw_filter, alns_ptr, sh_abd->aln_scoring, aln_kernel_timer, aln, cseq, rseq,
+                       sh_abd->read_group_id);
+      }
       t.stop();
     });
     fut = fut.then([&myself, sh_abd, t]() {
@@ -402,40 +398,6 @@ class KmerCtgDHT {
     return fut;
   }
 
-  static void _gpu_align_block_kernel(AlignBlockData &abd, IntermittentTimer &aln_kernel_timer) {
-    DBG_VERBOSE("Starting _gpu_align_block_kernel of ", abd.kernel_alns.size(), "\n");
-    aln_kernel_timer.start();
-
-    // align query_seqs, ref_seqs, max_query_size, max_ref_size
-    abd.gpu_driver.run_kernel_forwards(abd.read_seqs, abd.ctg_seqs, abd.max_rlen, abd.max_clen);
-    abd.gpu_driver.kernel_block();
-    abd.gpu_driver.run_kernel_backwards(abd.read_seqs, abd.ctg_seqs, abd.max_rlen, abd.max_clen);
-    abd.gpu_driver.kernel_block();
-    aln_kernel_timer.stop();
-
-    auto aln_results = abd.gpu_driver.get_aln_results();
-
-    for (int i = 0; i < abd.kernel_alns.size(); i++) {
-      // progress();
-      Aln &aln = abd.kernel_alns[i];
-      aln.rstop = aln.rstart + aln_results.query_end[i] + 1;
-      aln.rstart += aln_results.query_begin[i];
-      aln.cstop = aln.cstart + aln_results.ref_end[i] + 1;
-      aln.cstart += aln_results.ref_begin[i];
-      if (aln.orient == '-') switch_orient(aln.rstart, aln.rstop, aln.rlen);
-      aln.score1 = aln_results.top_scores[i];
-      // FIXME: needs to be set to the second best
-      aln.score2 = 0;
-      // FIXME: need to get the mismatches
-      aln.mismatches = 0;  // ssw_aln.mismatches;
-      aln.identity = 100 * aln.score1 / abd.aln_scoring.match / aln.rlen;
-      aln.read_group_id = abd.read_group_id;
-      // FIXME: need to get cigar
-      if (abd.ssw_filter.report_cigar) set_sam_string(aln, "*", "*");  // FIXME until there is a valid:ssw_aln.cigar_string);
-      abd.alns->add_aln(aln);
-    }
-  }
-
   upcxx::future<> gpu_align_block(IntermittentTimer &aln_kernel_timer, int read_group_id) {
     // AsyncTimer t("gpu_align_block (thread)");
     auto &myself = *this;
@@ -444,9 +406,37 @@ class KmerCtgDHT {
 
     // future<> fut = upcxx_utils::execute_in_thread_pool([&myself, t, sh_abd, &aln_kernel_timer] {
     future<> fut = upcxx_utils::execute_in_thread_pool([&myself, sh_abd, &aln_kernel_timer] {
-      // t.start();
-      _gpu_align_block_kernel(*sh_abd, aln_kernel_timer);
-      // t.stop();
+      DBG_VERBOSE("Starting _gpu_align_block_kernel of ", sh_abd->kernel_alns.size(), "\n");
+      aln_kernel_timer.start();
+
+      // align query_seqs, ref_seqs, max_query_size, max_ref_size
+      sh_abd->gpu_driver.run_kernel_forwards(sh_abd->read_seqs, sh_abd->ctg_seqs, sh_abd->max_rlen, sh_abd->max_clen);
+      sh_abd->gpu_driver.kernel_block();
+      sh_abd->gpu_driver.run_kernel_backwards(sh_abd->read_seqs, sh_abd->ctg_seqs, sh_abd->max_rlen, sh_abd->max_clen);
+      sh_abd->gpu_driver.kernel_block();
+      aln_kernel_timer.stop();
+
+      auto aln_results = sh_abd->gpu_driver.get_aln_results();
+
+      for (int i = 0; i < sh_abd->kernel_alns.size(); i++) {
+        // progress();
+        Aln &aln = sh_abd->kernel_alns[i];
+        aln.rstop = aln.rstart + aln_results.query_end[i] + 1;
+        aln.rstart += aln_results.query_begin[i];
+        aln.cstop = aln.cstart + aln_results.ref_end[i] + 1;
+        aln.cstart += aln_results.ref_begin[i];
+        if (aln.orient == '-') switch_orient(aln.rstart, aln.rstop, aln.rlen);
+        aln.score1 = aln_results.top_scores[i];
+        // FIXME: needs to be set to the second best
+        aln.score2 = 0;
+        // FIXME: need to get the mismatches
+        aln.mismatches = 0;  // ssw_aln.mismatches;
+        aln.identity = 100 * aln.score1 / sh_abd->aln_scoring.match / aln.rlen;
+        aln.read_group_id = sh_abd->read_group_id;
+        // FIXME: need to get cigar
+        if (sh_abd->ssw_filter.report_cigar) set_sam_string(aln, "*", "*");  // FIXME until there is a valid:ssw_aln.cigar_string);
+        sh_abd->alns->add_aln(aln);
+      }
     });
     // fut = fut.then([&myself, t, sh_abd]() {
     fut = fut.then([&myself, sh_abd]() {
