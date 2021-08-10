@@ -53,6 +53,58 @@
 
 using namespace std;
 
+static void revcomp(char *str, char *str_rc, int size) {
+  int size_rc = 0;
+  for (int i = size - 1; i >= 0; i--) {
+    switch (str[i]) {
+      case 'A': str_rc[size_rc] = 'T'; break;
+      case 'C': str_rc[size_rc] = 'G'; break;
+      case 'G': str_rc[size_rc] = 'C'; break;
+      case 'T': str_rc[size_rc] = 'A'; break;
+      case 'N': str_rc[size_rc] = 'N'; break;
+      case 'U':
+      case 'R':
+      case 'Y':
+      case 'K':
+      case 'M':
+      case 'S':
+      case 'W':
+      case 'B':
+      case 'D':
+      case 'H':
+      case 'V': str_rc[size_rc] = 'N'; break;
+      default: std::cout << "Illegal char:" << str[i] << "\n"; break;
+    }
+    size_rc++;
+  }
+}
+
+static std::string revcomp(std::string instr) {
+  std::string str_rc;
+  for (int i = instr.size() - 1; i >= 0; i--) {
+    switch (instr[i]) {
+      case 'A': str_rc += 'T'; break;
+      case 'C': str_rc += 'G'; break;
+      case 'G': str_rc += 'C'; break;
+      case 'T': str_rc += 'A'; break;
+      case 'N': str_rc += 'N'; break;
+      case 'U':
+      case 'R':
+      case 'Y':
+      case 'K':
+      case 'M':
+      case 'S':
+      case 'W':
+      case 'B':
+      case 'D':
+      case 'H':
+      case 'V': str_rc += 'N'; break;
+      default: std::cout << "Illegal char:" << instr[i] << "\n"; break;
+    }
+  }
+  return str_rc;
+}
+
 void locassm_driver::local_assem_driver(vector<CtgWithReads> &data_in, uint32_t max_ctg_size, uint32_t max_read_size,
                                         uint32_t max_r_count, uint32_t max_l_count, int mer_len, int max_kmer_len,
                                         accum_data &sizes_vecs, int walk_len_limit, int qual_offset, int ranks, int my_rank,
@@ -292,7 +344,7 @@ void locassm_driver::local_assem_driver(vector<CtgWithReads> &data_in, uint32_t 
         curr_seq = ctg_seqs_h.get() + ctg_seq_offsets_h[j - 1];
         curr_seq_rc = ctgs_seqs_rc_h.get() + ctg_seq_offsets_h[j - 1];
       }
-      locassm_driver::revcomp(curr_seq, curr_seq_rc, size_lst);
+      revcomp(curr_seq, curr_seq_rc, size_lst);
     }
     cudaErrchk(cudaMemcpy(longest_walks_r_h.get() + slice * max_walk_len * slice_size, longest_walks_d,
                           sizeof(char) * vec_size * max_walk_len, cudaMemcpyDeviceToHost));
@@ -322,7 +374,7 @@ void locassm_driver::local_assem_driver(vector<CtgWithReads> &data_in, uint32_t 
       if (final_walk_lens_l_h[j * slice_size + i] > 0) {
         string left(longest_walks_l_h.get() + j * slice_size * max_walk_len + max_walk_len * i,
                     final_walk_lens_l_h[j * slice_size + i]);
-        string left_rc = locassm_driver::revcomp(left);
+        string left_rc = revcomp(left);
         data_in[j * slice_size + i].seq.insert(0, left_rc);
       }
       if (final_walk_lens_r_h[j * slice_size + i] > 0) {
