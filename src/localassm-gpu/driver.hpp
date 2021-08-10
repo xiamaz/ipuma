@@ -42,9 +42,9 @@
  form.
 */
 
-#include "locassem_struct.hpp"
+#include "localassm_struct.hpp"
 
-namespace locassm_driver {
+namespace localassm_driver {
 
 struct accum_data {
   std::vector<uint32_t> ht_sizes;
@@ -64,8 +64,8 @@ struct ctg_bucket {
   void clear();
 };
 
-void local_assem_driver(std::vector<CtgWithReads>& data_in, uint32_t max_ctg_size, uint32_t max_read_size, uint32_t max_r_count,
-                        uint32_t max_l_count, int mer_len, int max_kmer_len, accum_data& sizes_outliers, int walk_len_limit,
-                        int qual_offset, int ranks, int my_rank, int g_rank_me);
+void localassm_driver(std::vector<CtgWithReads>& data_in, uint32_t max_ctg_size, uint32_t max_read_size, uint32_t max_r_count,
+                      uint32_t max_l_count, int mer_len, int max_kmer_len, accum_data& sizes_outliers, int walk_len_limit,
+                      int qual_offset, int ranks, int my_rank, int g_rank_me);
 
-}  // namespace locassm_driver
+}  // namespace localassm_driver

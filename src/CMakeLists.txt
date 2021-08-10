@@ -103,7 +103,8 @@ endforeach()
 
 foreach(tgt fastq alignments contigs packed_reads utils ctg_graph options
             merge_reads dbjg_traversal klign cgraph build_ctg_graph
-            walk_ctg_graph spanner splinter localassm histogrammer aln_depths shuffle_reads kmer kmer_dht
+            walk_ctg_graph spanner splinter localassm localassm_core
+            histogrammer aln_depths shuffle_reads kmer kmer_dht
             gasnet_stats
             ${EXTERN_TEMPLATE_FILES}
         )
@@ -113,6 +114,26 @@ foreach(tgt fastq alignments contigs packed_reads utils ctg_graph options
   endif()
   list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
 endforeach()
+
+if(ENABLE_CUDA)
+    foreach(tgt localassm_gpu)
+        add_library(${tgt} OBJECT ${tgt}.cpp)
+        if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13 AND DEFINED UPCXX_LIBRARIES)
+          target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+        endif()
+        list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
+        set(MHM2_TARGET_OBJECTS ${MHM2_TARGET_OBJECTS} PARENT_SCOPE)
+    endforeach()
+else()
+    foreach(tgt localassm_cpu)
+        add_library(${tgt} OBJECT ${tgt}.cpp)
+        if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13 AND DEFINED UPCXX_LIBRARIES)
+          target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+        endif()
+        list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
+        set(MHM2_TARGET_OBJECTS ${MHM2_TARGET_OBJECTS} PARENT_SCOPE)
+    endforeach()
+endif()
 
 set(MHM2_TARGET_OBJECTS ${MHM2_TARGET_OBJECTS} PARENT_SCOPE)
 add_executable(mhm2 main.cpp ${MHM2_TARGET_OBJECTS})
@@ -129,18 +150,16 @@ if(ENABLE_CUDA)
     add_subdirectory(adept-sw)
     include_directories("kcount-gpu")
     add_subdirectory(kcount-gpu)
-    include_directories("gpu-loc-assem")
-    add_subdirectory(gpu-loc-assem)
+    include_directories("localassm-gpu")
+    add_subdirectory(localassm-gpu)
     set_property(TARGET mhm2 PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF) # just to be sure. It should be off in parent dir
     set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} GPU_UTILS_LIBRARY_static)
     set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} ADEPT_SW_LIBRARY_static)
     set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} KCOUNT_GPU_LIBRARY_static)
-    set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} LOC_ASSEM_GPU_LIBRARY_static)
+    set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} LOCALASSM_GPU_LIBRARY_static)
     target_link_libraries(mhm2
         ${MHM2_LINK_LIBRARIES}
         ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
-else()
-    # FIXME: include files for cpu only implementations
 endif()
 
 set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} PARENT_SCOPE)
