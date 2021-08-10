@@ -570,6 +570,62 @@ class Aligner {
     return fut;
   }
 
+  void clear() {
+    if (kernel_alns.size() || !active_kernel_fut.ready())
+      DIE("clear called with alignments in the buffer or active kernel - was flush_remaining called before destrutor?\n");
+    clear_aln_bufs();
+    ctg_cache.clear();
+  }
+
+  void kernel_align_block(int read_group_id) {
+    BaseTimer steal_t("CPU work steal");
+    steal_t.start();
+    auto num = kernel_alns.size();
+
+    // steal work from this kernel block if the previous kernel is still active
+    // if true, this balances the block size that will be sent to the kernel
+    while ((gpu_devices == 0 || !active_kernel_fut.ready()) && !kernel_alns.empty()) {
+      assert(!ctg_seqs.empty());
+      assert(!read_seqs.empty());
+#ifndef NO_KLIGN_CPU_WORK_STEAL
+      // steal one from the block
+      ssw_align_read(kernel_alns.back(), ctg_seqs.back(), read_seqs.back(), read_group_id);
+      kernel_alns.pop_back();
+      ctg_seqs.pop_back();
+      read_seqs.pop_back();
+#endif
+      progress();
+    }
+
+    steal_t.stop();
+    auto steal_secs = steal_t.get_elapsed();
+    if (num != kernel_alns.size()) {
+      auto num_stole = num - kernel_alns.size();
+      LOG("Stole from kernel block ", num_stole, " alignments in ", steal_secs, "s (",
+          (steal_secs > 0 ? num_stole / steal_secs : 0.0), " aln/s), while waiting for previous block to complete",
+          (kernel_alns.empty() ? " - THE ENTIRE BLOCK" : ""), "\n");
+    } else if (steal_secs > 0.01) {
+      LOG("Waited ", steal_secs, "s for previous block to complete\n");
+    }
+    if (!kernel_alns.empty()) {
+      assert(active_kernel_fut.ready() && "active_kernel_fut should already be ready");
+      active_kernel_fut.wait();  // should be ready already
+      // for now, the GPU alignment doesn't support cigars
+      if (!ssw_filter.report_cigar && gpu_devices > 0) {
+        active_kernel_fut = gpu_align_block(read_group_id);
+      } else {
+#ifdef __PPC64__
+        SWARN("FIXME Issue #49,#60 no cigars for gpu alignments\n");
+        active_kernel_fut = gpu_align_block(read_group_id);
+#else
+        active_kernel_fut = ssw_align_block(read_group_id);
+#endif
+      }
+    }
+
+    clear_aln_bufs();
+  }
+
  public:
   Aligner(int kmer_len, Alns &alns, int rlen_limit, bool compute_cigar, int all_num_ctgs, int ranks_per_gpu)
       : kmer_len(kmer_len)
@@ -627,13 +683,6 @@ class Aligner {
     ctg_cache.reserve(2 * all_num_ctgs / rank_n());
   }
 
-  void clear() {
-    if (kernel_alns.size() || !active_kernel_fut.ready())
-      DIE("clear called with alignments in the buffer or active kernel - was flush_remaining called before destrutor?\n");
-    clear_aln_bufs();
-    ctg_cache.clear();
-  }
-
   ~Aligner() { clear(); }
 
   int64_t get_num_perfect_alns(bool all = false) {
@@ -657,55 +706,6 @@ class Aligner {
     read_seqs.clear();
     max_clen = 0;
     max_rlen = 0;
-  }
-
-  void kernel_align_block(int read_group_id) {
-    BaseTimer steal_t("CPU work steal");
-    steal_t.start();
-    auto num = kernel_alns.size();
-
-    // steal work from this kernel block if the previous kernel is still active
-    // if true, this balances the block size that will be sent to the kernel
-    while ((gpu_devices == 0 || !active_kernel_fut.ready()) && !kernel_alns.empty()) {
-      assert(!ctg_seqs.empty());
-      assert(!read_seqs.empty());
-#ifndef NO_KLIGN_CPU_WORK_STEAL
-      // steal one from the block
-      ssw_align_read(kernel_alns.back(), ctg_seqs.back(), read_seqs.back(), read_group_id);
-      kernel_alns.pop_back();
-      ctg_seqs.pop_back();
-      read_seqs.pop_back();
-#endif
-      progress();
-    }
-
-    steal_t.stop();
-    auto steal_secs = steal_t.get_elapsed();
-    if (num != kernel_alns.size()) {
-      auto num_stole = num - kernel_alns.size();
-      LOG("Stole from kernel block ", num_stole, " alignments in ", steal_secs, "s (",
-          (steal_secs > 0 ? num_stole / steal_secs : 0.0), " aln/s), while waiting for previous block to complete",
-          (kernel_alns.empty() ? " - THE ENTIRE BLOCK" : ""), "\n");
-    } else if (steal_secs > 0.01) {
-      LOG("Waited ", steal_secs, "s for previous block to complete\n");
-    }
-    if (!kernel_alns.empty()) {
-      assert(active_kernel_fut.ready() && "active_kernel_fut should already be ready");
-      active_kernel_fut.wait();  // should be ready already
-      // for now, the GPU alignment doesn't support cigars
-      if (!ssw_filter.report_cigar && gpu_devices > 0) {
-        active_kernel_fut = gpu_align_block(read_group_id);
-      } else {
-#ifdef __PPC64__
-        SWARN("FIXME Issue #49,#60 no cigars for gpu alignments\n");
-        active_kernel_fut = gpu_align_block(read_group_id);
-#else
-        active_kernel_fut = ssw_align_block(read_group_id);
-#endif
-      }
-    }
-
-    clear_aln_bufs();
   }
 
   void flush_remaining(int read_group_id) {
