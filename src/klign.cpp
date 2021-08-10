@@ -84,6 +84,12 @@ using cid_t = int64_t;
 
 using upcxx_utils::FixedSizeCache;
 
+static IntermittentTimer aln_cpu_bypass_timer(__FILENAME__ + string(":CPU_BSW-bypass"));
+static IntermittentTimer fetch_ctg_seqs_timer(__FILENAME__ + string(":Fetch ctg seqs"));
+static IntermittentTimer compute_alns_timer(__FILENAME__ + string(":Compute alns"));
+static IntermittentTimer get_ctgs_timer(__FILENAME__ + string(":Get ctgs with kmer"));
+static IntermittentTimer aln_kernel_timer(__FILENAME__ + string(":GPU_BSW"));
+
 struct CtgLoc {
   cid_t cid;
   global_ptr<char> seq_gptr;
@@ -132,9 +138,6 @@ struct KmerToRead {
   bool is_rc;
 };
 
-// global variables to avoid passing dist objs to rpcs
-static int64_t _num_dropped_seed_to_ctgs = 0;
-
 template <int MAX_K>
 class KmerCtgDHT {
   // maps a kmer to a contig - the first part of the pair is set to true if this is a conflict,
@@ -149,6 +152,7 @@ class KmerCtgDHT {
   int64_t num_alns;
   int64_t num_perfect_alns;
   int64_t num_overlaps;
+  int64_t num_dropped_seed_to_ctgs = 0;
 
   // default aligner and filter
   StripedSmithWaterman::Aligner ssw_aligner;
@@ -162,7 +166,6 @@ class KmerCtgDHT {
   vector<string> read_seqs;
 
   future<> active_kernel_fut;
-  IntermittentTimer aln_cpu_bypass_timer;
 
   int64_t max_clen = 0;
   int64_t max_rlen = 0;
@@ -186,7 +189,6 @@ class KmerCtgDHT {
  private:
   bool use_kmer_cache;
 
-  IntermittentTimer fetch_ctg_seqs_timer;
   int64_t ctg_bytes_fetched = 0;
   // using ctg_cache_t = FixedSizeCache<cid_t, string>;
   using ctg_cache_t = HASH_TABLE<cid_t, string>;
@@ -268,7 +270,7 @@ class KmerCtgDHT {
   }
 
   void align_read(const string &rname, int64_t cid, const string_view &rseq, const string_view &cseq, int rstart, int rlen,
-                  int cstart, int clen, char orient, int overlap_len, int read_group_id, IntermittentTimer &aln_kernel_timer) {
+                  int cstart, int clen, char orient, int overlap_len, int read_group_id) {
     if (cseq.compare(0, overlap_len, rseq, rstart, overlap_len) == 0) {
       num_perfect_alns++;
       int rstop = rstart + overlap_len;
@@ -295,14 +297,14 @@ class KmerCtgDHT {
       if (will_run_kernel) {
         DBG("tot_mem_est (", tot_mem_est, ") >= gpu_mem_avail (", gpu_mem_avail, " - dispatching ", kernel_alns.size(),
             " alignments\n");
-        kernel_align_block(aln_kernel_timer, read_group_id);
+        kernel_align_block(read_group_id);
       }
     }
   }
 
   static void ssw_align_read(StripedSmithWaterman::Aligner &ssw_aligner, StripedSmithWaterman::Filter &ssw_filter, Alns *alns,
-                             AlnScoring &aln_scoring, IntermittentTimer &aln_kernel_timer, Aln &aln, const string_view &cseq,
-                             const string_view &rseq, int read_group_id) {
+                             AlnScoring &aln_scoring, Aln &aln, const string_view &cseq, const string_view &rseq,
+                             int read_group_id) {
     assert(aln.clen >= cseq.length() && "contig seq is contained within the greater contig");
     assert(aln.rlen >= rseq.length() && "read seq is contained with the greater read");
 
@@ -328,8 +330,8 @@ class KmerCtgDHT {
     alns->add_aln(aln);
   }
 
-  void ssw_align_read(IntermittentTimer &aln_kernel_timer, Aln &aln, const string &cseq, const string &rseq, int read_group_id) {
-    ssw_align_read(ssw_aligner, ssw_filter, alns, aln_scoring, aln_kernel_timer, aln, cseq, rseq, read_group_id);
+  void ssw_align_read(Aln &aln, const string &cseq, const string &rseq, int read_group_id) {
+    ssw_align_read(ssw_aligner, ssw_filter, alns, aln_scoring, aln, cseq, rseq, read_group_id);
   }
 
   // encapsulate the data for a kernel to run a block independently
@@ -368,13 +370,13 @@ class KmerCtgDHT {
     }
   };
 
-  upcxx::future<> ssw_align_block(IntermittentTimer &aln_kernel_timer, int read_group_id) {
+  upcxx::future<> ssw_align_block(int read_group_id) {
     AsyncTimer t("ssw_align_block (thread)");
     auto &myself = *this;
     shared_ptr<AlignBlockData> sh_abd = make_shared<AlignBlockData>(myself, read_group_id);
     assert(kernel_alns.empty());
 
-    future<> fut = upcxx_utils::execute_in_thread_pool([sh_abd, t, &aln_kernel_timer]() {
+    future<> fut = upcxx_utils::execute_in_thread_pool([sh_abd, t]() {
       t.start();
       assert(!sh_abd->kernel_alns.empty());
       DBG_VERBOSE("Starting _ssw_align_block of ", sh_abd->kernel_alns.size(), "\n");
@@ -383,7 +385,7 @@ class KmerCtgDHT {
         Aln &aln = sh_abd->kernel_alns[i];
         string &cseq = sh_abd->ctg_seqs[i];
         string &rseq = sh_abd->read_seqs[i];
-        ssw_align_read(sh_abd->ssw_aligner, sh_abd->ssw_filter, alns_ptr, sh_abd->aln_scoring, aln_kernel_timer, aln, cseq, rseq,
+        ssw_align_read(sh_abd->ssw_aligner, sh_abd->ssw_filter, alns_ptr, sh_abd->aln_scoring, aln, cseq, rseq,
                        sh_abd->read_group_id);
       }
       t.stop();
@@ -398,17 +400,15 @@ class KmerCtgDHT {
     return fut;
   }
 
-  upcxx::future<> gpu_align_block(IntermittentTimer &aln_kernel_timer, int read_group_id) {
+  upcxx::future<> gpu_align_block(int read_group_id) {
     // AsyncTimer t("gpu_align_block (thread)");
     auto &myself = *this;
     shared_ptr<AlignBlockData> sh_abd = make_shared<AlignBlockData>(myself, read_group_id);
     assert(kernel_alns.empty());
 
-    // future<> fut = upcxx_utils::execute_in_thread_pool([&myself, t, sh_abd, &aln_kernel_timer] {
-    future<> fut = upcxx_utils::execute_in_thread_pool([&myself, sh_abd, &aln_kernel_timer] {
+    future<> fut = upcxx_utils::execute_in_thread_pool([&myself, sh_abd] {
       DBG_VERBOSE("Starting _gpu_align_block_kernel of ", sh_abd->kernel_alns.size(), "\n");
       aln_kernel_timer.start();
-
       // align query_seqs, ref_seqs, max_query_size, max_ref_size
       sh_abd->gpu_driver.run_kernel_forwards(sh_abd->read_seqs, sh_abd->ctg_seqs, sh_abd->max_rlen, sh_abd->max_clen);
       sh_abd->gpu_driver.kernel_block();
@@ -462,21 +462,21 @@ class KmerCtgDHT {
       , num_alns(0)
       , num_perfect_alns(0)
       , num_overlaps(0)
+      , num_dropped_seed_to_ctgs(0)
       , ssw_aligner(aln_scoring.match, aln_scoring.mismatch, aln_scoring.gap_opening, aln_scoring.gap_extending,
                     aln_scoring.ambiguity)
       , kernel_alns({})
       , ctg_seqs({})
       , read_seqs({})
       , active_kernel_fut(make_future())
-      , aln_cpu_bypass_timer("klign.cpp:CPU_BSW-bypass")
       , alns(&alns)
       , kmer_len(kmer_len)
-      , use_kmer_cache(use_kmer_cache)
-      , fetch_ctg_seqs_timer("klign.cpp:Fetch ctg seqs") {
+      , use_kmer_cache(use_kmer_cache) {
     this->aln_scoring = aln_scoring;
     ssw_filter.report_cigar = compute_cigar;
     kmer_store.set_size("insert ctg seeds", max_store_size, max_rpcs_in_flight);
-    kmer_store.set_update_func([&kmer_map = this->kmer_map](KmerAndCtgLoc<MAX_K> kmer_and_ctg_loc) {
+    kmer_store.set_update_func([&kmer_map = this->kmer_map,
+                                &num_dropped_seed_to_ctgs = this->num_dropped_seed_to_ctgs](KmerAndCtgLoc<MAX_K> kmer_and_ctg_loc) {
       CtgLoc ctg_loc = kmer_and_ctg_loc.ctg_loc;
       const auto it = kmer_map->find(kmer_and_ctg_loc.kmer);
       if (it == kmer_map->end()) {
@@ -484,7 +484,7 @@ class KmerCtgDHT {
       } else {
         // in this case, we have a conflict, i.e. the kmer maps to multiple contigs
         it->second.first = true;
-        _num_dropped_seed_to_ctgs++;
+        num_dropped_seed_to_ctgs++;
       }
     });
     gpu_devices = gpu_utils::get_num_node_gpus();
@@ -578,8 +578,8 @@ class KmerCtgDHT {
   }
 
   int64_t get_num_dropped_seed_to_ctgs(bool all = false) {
-    if (!all) return reduce_one(_num_dropped_seed_to_ctgs, op_fast_add, 0).wait();
-    return reduce_all(_num_dropped_seed_to_ctgs, op_fast_add).wait();
+    if (!all) return reduce_one(num_dropped_seed_to_ctgs, op_fast_add, 0).wait();
+    return reduce_all(num_dropped_seed_to_ctgs, op_fast_add).wait();
   }
 
   void add_kmer(const Kmer<MAX_K> &kmer_fw, CtgLoc &ctg_loc) {
@@ -608,7 +608,7 @@ class KmerCtgDHT {
     max_rlen = 0;
   }
 
-  void kernel_align_block(IntermittentTimer &aln_kernel_timer, int read_group_id) {
+  void kernel_align_block(int read_group_id) {
     BaseTimer steal_t("CPU work steal");
     steal_t.start();
     auto num = kernel_alns.size();
@@ -620,13 +620,10 @@ class KmerCtgDHT {
       assert(!read_seqs.empty());
 #ifndef NO_KLIGN_CPU_WORK_STEAL
       // steal one from the block
-      ssw_align_read(aln_cpu_bypass_timer, kernel_alns.back(), ctg_seqs.back(), read_seqs.back(), read_group_id);
+      ssw_align_read(kernel_alns.back(), ctg_seqs.back(), read_seqs.back(), read_group_id);
       kernel_alns.pop_back();
       ctg_seqs.pop_back();
       read_seqs.pop_back();
-#endif
-#ifndef ENABLE_GPUS
-      upcxx_utils::ThreadPool::yield_if_needed();  // yield if the kernel is CPU based
 #endif
       progress();
     }
@@ -646,13 +643,13 @@ class KmerCtgDHT {
       active_kernel_fut.wait();  // should be ready already
       // for now, the GPU alignment doesn't support cigars
       if (!ssw_filter.report_cigar && gpu_devices > 0) {
-        active_kernel_fut = gpu_align_block(aln_kernel_timer, read_group_id);
+        active_kernel_fut = gpu_align_block(read_group_id);
       } else {
 #ifdef __PPC64__
         SWARN("FIXME Issue #49,#60 no cigars for gpu alignments\n");
-        active_kernel_fut = gpu_align_block(aln_kernel_timer, read_group_id);
+        active_kernel_fut = gpu_align_block(read_group_id);
 #else
-        active_kernel_fut = ssw_align_block(aln_kernel_timer, read_group_id);
+        active_kernel_fut = ssw_align_block(read_group_id);
 #endif
       }
     }
@@ -660,19 +657,14 @@ class KmerCtgDHT {
     clear_aln_bufs();
   }
 
-  void flush_remaining(IntermittentTimer &aln_kernel_timer, int read_group_id) {
+  void flush_remaining(int read_group_id) {
     BaseTimer t(__FILEFUNC__);
     t.start();
     auto num = kernel_alns.size();
-    if (num) {
-      kernel_align_block(aln_kernel_timer, read_group_id);
-    }
+    if (num) kernel_align_block(read_group_id);
     bool is_ready = active_kernel_fut.ready();
     active_kernel_fut.wait();
     t.stop();
-    // if (num || !is_ready) {
-    //  SLOG_VERBOSE("Aligned and waited for final block with ", num, " alignments in ", t.get_elapsed(), "\n");
-    //}
   }
 
   future<vector<KmerAndCtgLoc<MAX_K>>> get_ctgs_with_kmers(int target_rank, vector<Kmer<MAX_K>> &kmers) {
@@ -730,7 +722,7 @@ class KmerCtgDHT {
 #endif
 
   void compute_alns_for_read(HASH_TABLE<cid_t, ReadAndCtgLoc> *aligned_ctgs_map, const string &rname, const string &rseq_fw,
-                             int read_group_id, IntermittentTimer &aln_kernel_timer) {
+                             int read_group_id) {
     int rlen = rseq_fw.length();
     string rseq_rc;
     string tmp_ctg;
@@ -868,7 +860,7 @@ class KmerCtgDHT {
       assert(memcmp(rseq_ptr.data() + pos_in_read, ctg_seq.data() + ctg_loc.pos_in_ctg, Kmer<MAX_K>::get_k()) == 0 &&
              "kmer seed exact matches read and ctg");
       align_read(rname, ctg_loc.cid, read_subseq, ctg_subseq, rstart, rlen, cstart, ctg_loc.clen, orient, overlap_len,
-                 read_group_id, aln_kernel_timer);
+                 read_group_id);
 #ifdef USE_KMER_CACHE
       // now cache all the kmers from this ctg subseq but only if this ctg was fetched for the first time and the contig has some
       // depth
@@ -1012,8 +1004,7 @@ static void build_alignment_index(KmerCtgDHT<MAX_K> &kmer_ctg_dht, Contigs &ctgs
 
 template <int MAX_K>
 static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, vector<KmerToRead>> &kmer_read_map,
-                       vector<ReadRecord *> &read_records, IntermittentTimer &compute_alns_timer, IntermittentTimer &get_ctgs_timer,
-                       IntermittentTimer &aln_kernel_timer, int64_t &num_excess_alns_reads, int &read_group_id,
+                       vector<ReadRecord *> &read_records, int64_t &num_excess_alns_reads, int &read_group_id,
                        int64_t &kmer_bytes_sent, int64_t &kmer_bytes_received) {
   auto process_kmer_ctg_loc = [](HASH_TABLE<Kmer<MAX_K>, vector<KmerToRead>> &kmer_read_map, int64_t &num_excess_alns_reads,
                                  int64_t &kmer_bytes_received, const Kmer<MAX_K> &kmer, const CtgLoc &ctg_loc) {
@@ -1109,8 +1100,7 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, HASH_TABLE<Kmer<MAX_K>, 
     // compute alignments
     if (read_record->aligned_ctgs_map.size()) {
       num_reads_aligned++;
-      kmer_ctg_dht.compute_alns_for_read(&read_record->aligned_ctgs_map, read_record->id, read_record->seq, read_group_id,
-                                         aln_kernel_timer);
+      kmer_ctg_dht.compute_alns_for_read(&read_record->aligned_ctgs_map, read_record->id, read_record->seq, read_group_id);
     }
     delete read_record;
   }
@@ -1127,10 +1117,6 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
   int64_t tot_num_kmers = 0;
   int64_t num_reads = 0;
   int64_t num_reads_aligned = 0, num_excess_alns_reads = 0;
-  IntermittentTimer compute_alns_timer(__FILENAME__ + string(":") + "Compute alns");
-  IntermittentTimer get_ctgs_timer(__FILENAME__ + string(":") + "Get ctgs with kmer");
-  IntermittentTimer aln_kernel_timer(__FILENAME__ + string(":") +
-                                     ((compute_cigar && kmer_ctg_dht.get_gpu_mem_avail()) ? "SSW" : "GPU_BSW"));
   kmer_ctg_dht.clear_aln_bufs();
   barrier();
   int64_t kmer_bytes_received = 0;
@@ -1185,22 +1171,20 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
       }
       if (kmer_read_map.size() + kmers.size() * 2 >= KLIGN_CTG_FETCH_BUF_SIZE) filled = true;
       if (filled) {
-        num_reads_aligned +=
-            align_kmers(kmer_ctg_dht, kmer_read_map, read_records, compute_alns_timer, get_ctgs_timer, aln_kernel_timer,
-                        num_excess_alns_reads, read_group_id, kmer_bytes_sent, kmer_bytes_received);
+        num_reads_aligned += align_kmers(kmer_ctg_dht, kmer_read_map, read_records, num_excess_alns_reads, read_group_id,
+                                         kmer_bytes_sent, kmer_bytes_received);
         assert(read_records.empty());
         assert(kmer_read_map.empty());
       }
       num_reads++;
     }
     if (read_records.size()) {
-      num_reads_aligned +=
-          align_kmers(kmer_ctg_dht, kmer_read_map, read_records, compute_alns_timer, get_ctgs_timer, aln_kernel_timer,
-                      num_excess_alns_reads, read_group_id, kmer_bytes_sent, kmer_bytes_received);
+      num_reads_aligned += align_kmers(kmer_ctg_dht, kmer_read_map, read_records, num_excess_alns_reads, read_group_id,
+                                       kmer_bytes_sent, kmer_bytes_received);
     }
     assert(read_records.empty());
     assert(kmer_read_map.empty());
-    kmer_ctg_dht.flush_remaining(aln_kernel_timer, read_group_id);
+    kmer_ctg_dht.flush_remaining(read_group_id);
     read_group_id++;
     all_done = when_all(all_done, progbar.set_done());
   }
@@ -1250,7 +1234,6 @@ double find_alignments(unsigned kmer_len, vector<PackedReads *> &packed_reads_li
                        Contigs &ctgs, Alns &alns, int seed_space, int rlen_limit, bool use_kmer_cache, bool compute_cigar,
                        int min_ctg_len, int ranks_per_gpu) {
   BarrierTimer timer(__FILEFUNC__);
-  _num_dropped_seed_to_ctgs = 0;
   Kmer<MAX_K>::set_k(kmer_len);
   SLOG_VERBOSE("Aligning with seed size of ", kmer_len, "\n");
   // default for normal alignments in the pipeline, but for final alignments, uses minimap2 defaults

@@ -45,7 +45,6 @@
 #include "alignments.hpp"
 #include "contigs.hpp"
 #include "packed_reads.hpp"
-#include "adept-sw/driver.hpp"
 
 struct AlnScoring {
   int match, mismatch, gap_opening, gap_extending, ambiguity;
