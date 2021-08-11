@@ -70,6 +70,110 @@ using namespace upcxx_utils;
 static uint64_t _num_kmers_counted = 0;
 static int num_inserts = 0;
 
+void ExtCounts::set(uint16_t *counts) {
+  count_A = counts[0];
+  count_C = counts[1];
+  count_G = counts[2];
+  count_T = counts[3];
+}
+
+void ExtCounts::set(uint32_t *counts) {
+  count_A = static_cast<uint16_t>(counts[0]);
+  count_C = static_cast<uint16_t>(counts[1]);
+  count_G = static_cast<uint16_t>(counts[2]);
+  count_T = static_cast<uint16_t>(counts[3]);
+}
+
+std::array<std::pair<char, int>, 4> ExtCounts::get_sorted() {
+  std::array<std::pair<char, int>, 4> counts = {std::make_pair('A', (int)count_A), std::make_pair('C', (int)count_C),
+                                                std::make_pair('G', (int)count_G), std::make_pair('T', (int)count_T)};
+  std::sort(std::begin(counts), std::end(counts), [](const auto &elem1, const auto &elem2) {
+    if (elem1.second == elem2.second)
+      return elem1.first > elem2.first;
+    else
+      return elem1.second > elem2.second;
+  });
+  return counts;
+}
+
+bool ExtCounts::is_zero() {
+  if (count_A + count_C + count_G + count_T == 0) return true;
+  return false;
+}
+
+ext_count_t ExtCounts::inc_with_limit(int count1, int count2) {
+  count1 += count2;
+  return std::min(count1, (int)std::numeric_limits<ext_count_t>::max());
+}
+
+void ExtCounts::inc(char ext, int count) {
+  switch (ext) {
+    case 'A': count_A = inc_with_limit(count_A, count); break;
+    case 'C': count_C = inc_with_limit(count_C, count); break;
+    case 'G': count_G = inc_with_limit(count_G, count); break;
+    case 'T': count_T = inc_with_limit(count_T, count); break;
+  }
+}
+
+void ExtCounts::add(ExtCounts &ext_counts) {
+  count_A = inc_with_limit(count_A, ext_counts.count_A);
+  count_C = inc_with_limit(count_C, ext_counts.count_C);
+  count_G = inc_with_limit(count_G, ext_counts.count_G);
+  count_T = inc_with_limit(count_T, ext_counts.count_T);
+}
+
+char ExtCounts::get_ext(kmer_count_t count) {
+  auto sorted_counts = get_sorted();
+  int top_count = sorted_counts[0].second;
+  int runner_up_count = sorted_counts[1].second;
+  // set dynamic_min_depth to 1.0 for single depth data (non-metagenomes)
+  int dmin_dyn = std::max((int)((1.0 - DYN_MIN_DEPTH) * count), _dmin_thres);
+  if (top_count < dmin_dyn) return 'X';
+  if (runner_up_count >= dmin_dyn) return 'F';
+  return sorted_counts[0].first;
+}
+
+string ExtCounts::to_string() {
+  ostringstream os;
+  os << count_A << "," << count_C << "," << count_G << "," << count_T;
+  return os.str();
+}
+
+void Supermer::pack(const string &unpacked_seq) {
+  // each position in the sequence is an upper or lower case nucleotide, not including Ns
+  seq = string(unpacked_seq.length() / 2 + unpacked_seq.length() % 2, 0);
+  for (int i = 0; i < unpacked_seq.length(); i++) {
+    char packed_val = 0;
+    switch (unpacked_seq[i]) {
+      case 'a': packed_val = 1; break;
+      case 'c': packed_val = 2; break;
+      case 'g': packed_val = 3; break;
+      case 't': packed_val = 4; break;
+      case 'A': packed_val = 5; break;
+      case 'C': packed_val = 6; break;
+      case 'G': packed_val = 7; break;
+      case 'T': packed_val = 8; break;
+      case 'N': packed_val = 9; break;
+      default: DIE("Invalid value encountered when packing '", unpacked_seq[i], "' ", (int)unpacked_seq[i]);
+    };
+    seq[i / 2] |= (!(i % 2) ? (packed_val << 4) : packed_val);
+    if (seq[i / 2] == '_') DIE("packed byte is same as sentinel _");
+  }
+}
+
+void Supermer::unpack() {
+  static const char to_base[] = {0, 'a', 'c', 'g', 't', 'A', 'C', 'G', 'T', 'N'};
+  string unpacked_seq;
+  for (int i = 0; i < seq.length(); i++) {
+    unpacked_seq += to_base[(seq[i] & 240) >> 4];
+    int right_ext = seq[i] & 15;
+    if (right_ext) unpacked_seq += to_base[right_ext];
+  }
+  seq = unpacked_seq;
+}
+
+int Supermer::get_bytes() { return seq.length() + sizeof(kmer_count_t); }
+
 template <int MAX_K>
 void KmerDHT<MAX_K>::get_kmers_and_exts(Supermer &supermer, vector<KmerAndExt<MAX_K>> &kmers_and_exts) {
   vector<bool> quals;

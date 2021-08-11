@@ -9,15 +9,22 @@ set(CMAKE_CXX_COMPILER ${UPCXX_EXEC})
 set(KCOUNT_TARGET_FILES)
 
 foreach(KMER_LENGTH ${MHM2_KMER_LENGTHS})
-  set(TEMPLATE "kcount")
-  set(TEMPLATE_FILE "${TEMPLATE}-extern-template-${KMER_LENGTH}")
-  string(TOUPPER ${TEMPLATE} TEMPLATE_UPPER)
-  configure_file("${CMAKE_SOURCE_DIR}/src/extern_template.in.cpp"
-                 "${TEMPLATE_FILE}.cpp" @ONLY)
-  list(APPEND KCOUNT_TARGET_FILES "${TEMPLATE_FILE}.cpp")
+  foreach(TEMPLATE "kcount")
+    set(TEMPLATE_FILE "${TEMPLATE}-extern-template-${KMER_LENGTH}")
+    string(TOUPPER ${TEMPLATE} TEMPLATE_UPPER)
+    configure_file("${CMAKE_SOURCE_DIR}/src/extern_template.in.cpp"
+                   "${TEMPLATE_FILE}.cpp" @ONLY)
+    list(APPEND KCOUNT_TARGET_FILES "${TEMPLATE_FILE}.cpp")
+  endforeach()
 endforeach()
 
 set(KCOUNT_TARGET_OBJECTS)
+
+foreach(tgt kmer_dht)
+  add_library(${tgt} OBJECT ${tgt}.cpp)
+  target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  list(APPEND KCOUNT_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
+endforeach()
 
 if(ENABLE_CUDA)
   set(tgt kcount_gpu)
