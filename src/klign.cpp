@@ -62,33 +62,24 @@
 #include "upcxx_utils/three_tier_aggr_store.hpp"
 #include "utils.hpp"
 #include "zstr.hpp"
-#include "gpu-utils/gpu_utils.hpp"
-#include "adept-sw/driver.hpp"
+#include "aligner_cpu.hpp"
 
-#ifdef __PPC64__  // FIXME remove after solving Issues #60 #35 #49
-#define NO_KLIGN_CPU_WORK_STEAL
-#endif
-
+using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
 
-using std::fixed;
-using std::max;
-using std::min;
-using std::pair;
-using std::setprecision;
-using std::string;
-using std::string_view;
-
 using cid_t = int64_t;
-
-using upcxx_utils::FixedSizeCache;
 
 static IntermittentTimer aln_cpu_bypass_timer(__FILENAME__ + string(":CPU_BSW-bypass"));
 static IntermittentTimer fetch_ctg_seqs_timer(__FILENAME__ + string(":Fetch ctg seqs"));
 static IntermittentTimer compute_alns_timer(__FILENAME__ + string(":Compute alns"));
 static IntermittentTimer get_ctgs_timer(__FILENAME__ + string(":Get ctgs with kmer"));
 static IntermittentTimer aln_kernel_timer(__FILENAME__ + string(":GPU_BSW"));
+
+void init_aligner(AlnScoring &aln_scoring, int rlen_limit);
+void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vector<string> &ctg_seqs, vector<string> &read_seqs,
+                        Alns *alns, future<> &active_kernel_fut, int read_group_id, int max_clen, int max_rlen,
+                        IntermittentTimer &aln_kernel_timer);
 
 struct CtgLoc {
   cid_t cid;
@@ -229,10 +220,6 @@ class KmerCtgDHT {
   }
 
   future<vector<KmerAndCtgLoc<MAX_K>>> get_ctgs_with_kmers(int target_rank, vector<Kmer<MAX_K>> &kmers) {
-    // FIXME: iterate through kmers and determine if the ctg loc for any is in the local hash map and remove
-    //        those that are from the rpc request.
-    //        And the rpc needs a .then in which we append the local lookup results to the returned results
-
     DBG_VERBOSE("Sending request for ", kmers.size(), " to ", target_rank, "\n");
     return rpc(
         target_rank,
@@ -257,7 +244,6 @@ class KmerCtgDHT {
         kmers, kmer_map);
   }
 
-#ifdef DEBUG
   void dump_ctg_kmers() {
     BarrierTimer timer(__FILEFUNC__, false);  // barrier on exit not entrance
     string dump_fname = "ctg_kmers-" + to_string(kmer_len) + ".txt.gz";
@@ -284,287 +270,7 @@ class KmerCtgDHT {
     progbar.done();
     SLOG_VERBOSE("Dumped ", this->get_num_kmers(), " kmers\n");
   }
-#endif
 };
-
-// encapsulate the data for a kernel to run a block independently
-struct AlignBlockData {
-  vector<Aln> kernel_alns;
-  vector<string> ctg_seqs;
-  vector<string> read_seqs;
-  shared_ptr<Alns> alns;
-  int64_t max_clen;
-  int64_t max_rlen;
-  int read_group_id;
-  AlnScoring aln_scoring;
-
-  AlignBlockData(vector<Aln> &_kernel_alns, vector<string> &_ctg_seqs, vector<string> &_read_seqs, int64_t max_clen,
-                 int64_t max_rlen, int read_group_id, AlnScoring &aln_scoring)
-      : max_clen(max_clen)
-      , max_rlen(max_rlen)
-      , read_group_id(read_group_id)
-      , aln_scoring(aln_scoring) {
-    // copy/swap/reserve necessary data and configs
-    kernel_alns.swap(_kernel_alns);
-    kernel_alns.reserve(_kernel_alns.size());
-    ctg_seqs.swap(_ctg_seqs);
-    ctg_seqs.reserve(_ctg_seqs.size());
-    read_seqs.swap(_read_seqs);
-    read_seqs.reserve(_read_seqs.size());
-    alns = make_shared<Alns>();
-    alns->reserve(_kernel_alns.size());
-  }
-};
-
-struct CPUAligner {
-  static int get_cigar_length(const string &cigar) {
-    // check that cigar string length is the same as the sequence, but only if the sequence is included
-    int base_count = 0;
-    string num = "";
-    for (char c : cigar) {
-      switch (c) {
-        case 'M':
-        case 'S':
-        case '=':
-        case 'X':
-        case 'I':
-          base_count += stoi(num);
-          num = "";
-          break;
-        case 'D':
-          // base_count -= stoi(num);
-          num = "";
-          break;
-        default:
-          if (!isdigit(c)) DIE("Invalid char detected in cigar: '", c, "'");
-          num += c;
-          break;
-      }
-    }
-    return base_count;
-  }
-
-  static void set_sam_string(Aln &aln, string_view read_seq, string cigar) {
-    assert(aln.is_valid());
-    aln.sam_string = aln.read_id + "\t";
-    string tmp;
-    if (aln.orient == '-') {
-      aln.sam_string += "16\t";
-      if (read_seq != "*") {
-        tmp = revcomp(string(read_seq.data(), read_seq.size()));
-        read_seq = string_view(tmp.data(), tmp.size());
-      }
-      // reverse(read_quals.begin(), read_quals.end());
-    } else {
-      aln.sam_string += "0\t";
-    }
-    aln.sam_string += "Contig" + to_string(aln.cid) + "\t" + to_string(aln.cstart + 1) + "\t";
-    uint32_t mapq;
-    // for perfect match, set to same maximum as used by minimap or bwa
-    if (aln.score2 == 0) {
-      mapq = 60;
-    } else {
-      mapq = -4.343 * log(1 - (double)abs(aln.score1 - aln.score2) / (double)aln.score1);
-      mapq = (uint32_t)(mapq + 4.99);
-      mapq = mapq < 254 ? mapq : 254;
-    }
-    aln.sam_string += to_string(mapq) + "\t";
-    // aln.sam_string += cigar + "\t*\t0\t0\t" + read_subseq + "\t*\t";
-    // Don't output either the read sequence or quals - that causes the SAM file to bloat up hugely, and that info is already
-    // available in the read files
-    aln.sam_string += cigar + "\t*\t0\t0\t*\t*\t";
-    aln.sam_string +=
-        "AS:i:" + to_string(aln.score1) + "\tNM:i:" + to_string(aln.mismatches) + "\tRG:Z:" + to_string(aln.read_group_id);
-    // for debugging
-    // aln.sam_string += " rstart " + to_string(aln.rstart) + " rstop " + to_string(aln.rstop) + " cstop " + to_string(aln.cstop) +
-    //                  " clen " + to_string(aln.clen) + " alnlen " + to_string(aln.rstop - aln.rstart);
-    /*
-  #ifdef DEBUG
-    // only used if we actually include the read seq and quals in the SAM, which we don't
-    int base_count = get_cigar_length(cigar);
-    if (base_count != read_seq.length())
-      DIE("number of bases in cigar != aln rlen, ", base_count, " != ", read_subseq.length(), "\nsam string ", aln.sam_string);
-  #endif
-    */
-  }
-
- public:
-  // default aligner and filter
-  StripedSmithWaterman::Aligner ssw_aligner;
-  StripedSmithWaterman::Filter ssw_filter;
-  AlnScoring aln_scoring;
-
-  CPUAligner(bool compute_cigar)
-      : ssw_aligner() {
-    // default for normal alignments in the pipeline, but for final alignments, uses minimap2 defaults
-    if (!compute_cigar)
-      aln_scoring = {.match = ALN_MATCH_SCORE,
-                     .mismatch = ALN_MISMATCH_COST,
-                     .gap_opening = ALN_GAP_OPENING_COST,
-                     .gap_extending = ALN_GAP_EXTENDING_COST,
-                     .ambiguity = ALN_AMBIGUITY_COST};
-    else
-      aln_scoring = {.match = 2, .mismatch = 4, .gap_opening = 4, .gap_extending = 2, .ambiguity = 1};
-    SLOG_VERBOSE("Alignment scoring parameters: ", aln_scoring.to_string(), "\n");
-
-    // aligner construction: SSW internal defaults are 2 2 3 1
-    ssw_aligner.Clear();
-    ssw_aligner.ReBuild(aln_scoring.match, aln_scoring.mismatch, aln_scoring.gap_opening, aln_scoring.gap_extending,
-                        aln_scoring.ambiguity);
-    ssw_filter.report_cigar = compute_cigar;
-  }
-
-  static void ssw_align_read(StripedSmithWaterman::Aligner &ssw_aligner, StripedSmithWaterman::Filter &ssw_filter, Alns *alns,
-                             AlnScoring &aln_scoring, Aln &aln, const string_view &cseq, const string_view &rseq,
-                             int read_group_id) {
-    assert(aln.clen >= cseq.length() && "contig seq is contained within the greater contig");
-    assert(aln.rlen >= rseq.length() && "read seq is contained with the greater read");
-
-    StripedSmithWaterman::Alignment ssw_aln;
-    // align query, ref, reflen
-    ssw_aligner.Align(cseq.data(), cseq.length(), rseq.data(), rseq.length(), ssw_filter, &ssw_aln,
-                      max((int)(rseq.length() / 2), 15));
-
-    aln.rstop = aln.rstart + ssw_aln.ref_end + 1;
-    aln.rstart += ssw_aln.ref_begin;
-    aln.cstop = aln.cstart + ssw_aln.query_end + 1;
-    aln.cstart += ssw_aln.query_begin;
-    if (aln.orient == '-') switch_orient(aln.rstart, aln.rstop, aln.rlen);
-
-    aln.score1 = ssw_aln.sw_score;
-    aln.score2 = ssw_aln.sw_score_next_best;
-    aln.mismatches = ssw_aln.mismatches;
-    aln.identity = (unsigned)100 * (unsigned)ssw_aln.sw_score / (unsigned)aln_scoring.match / (unsigned)aln.rlen;
-    aln.read_group_id = read_group_id;
-    if (ssw_filter.report_cigar) set_sam_string(aln, rseq, ssw_aln.cigar_string);
-    alns->add_aln(aln);
-  }
-
-  void ssw_align_read(Alns *alns, Aln &aln, const string &cseq, const string &rseq, int read_group_id) {
-    ssw_align_read(ssw_aligner, ssw_filter, alns, aln_scoring, aln, cseq, rseq, read_group_id);
-  }
-
-  upcxx::future<> ssw_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns) {
-    AsyncTimer t("ssw_align_block (thread)");
-    future<> fut = upcxx_utils::execute_in_thread_pool(
-        [&ssw_aligner = this->ssw_aligner, &ssw_filter = this->ssw_filter, &aln_scoring = this->aln_scoring, aln_block_data, t]() {
-          t.start();
-          assert(!aln_block_data->kernel_alns.empty());
-          DBG_VERBOSE("Starting _ssw_align_block of ", aln_block_data->kernel_alns.size(), "\n");
-          auto alns_ptr = aln_block_data->alns.get();
-          for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
-            Aln &aln = aln_block_data->kernel_alns[i];
-            string &cseq = aln_block_data->ctg_seqs[i];
-            string &rseq = aln_block_data->read_seqs[i];
-            ssw_align_read(ssw_aligner, ssw_filter, alns_ptr, aln_scoring, aln, cseq, rseq, aln_block_data->read_group_id);
-          }
-          t.stop();
-        });
-    fut = fut.then([alns = alns, aln_block_data, t]() {
-      SLOG_VERBOSE("Finished CPU SSW aligning block of ", aln_block_data->kernel_alns.size(), " in ", t.get_elapsed(), " s (",
-                   (t.get_elapsed() > 0 ? aln_block_data->kernel_alns.size() / t.get_elapsed() : 0.0), " aln/s)\n");
-      DBG_VERBOSE("appending and returning ", aln_block_data->alns->size(), "\n");
-      alns->append(*(aln_block_data->alns));
-    });
-
-    return fut;
-  }
-
-  upcxx::future<> gpu_align_block(shared_ptr<AlignBlockData> aln_block_data, adept_sw::GPUDriver &gpu_driver, Alns *alns,
-                                  bool report_cigar) {
-    future<> fut = upcxx_utils::execute_in_thread_pool([aln_block_data, &gpu_driver, report_cigar] {
-      DBG_VERBOSE("Starting _gpu_align_block_kernel of ", aln_block_data->kernel_alns.size(), "\n");
-      aln_kernel_timer.start();
-
-      // align query_seqs, ref_seqs, max_query_size, max_ref_size
-      gpu_driver.run_kernel_forwards(aln_block_data->read_seqs, aln_block_data->ctg_seqs, aln_block_data->max_rlen,
-                                     aln_block_data->max_clen);
-      gpu_driver.kernel_block();
-      gpu_driver.run_kernel_backwards(aln_block_data->read_seqs, aln_block_data->ctg_seqs, aln_block_data->max_rlen,
-                                      aln_block_data->max_clen);
-      gpu_driver.kernel_block();
-      aln_kernel_timer.stop();
-
-      auto aln_results = gpu_driver.get_aln_results();
-
-      for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
-        // progress();
-        Aln &aln = aln_block_data->kernel_alns[i];
-        aln.rstop = aln.rstart + aln_results.query_end[i] + 1;
-        aln.rstart += aln_results.query_begin[i];
-        aln.cstop = aln.cstart + aln_results.ref_end[i] + 1;
-        aln.cstart += aln_results.ref_begin[i];
-        if (aln.orient == '-') switch_orient(aln.rstart, aln.rstop, aln.rlen);
-        aln.score1 = aln_results.top_scores[i];
-        // FIXME: needs to be set to the second best
-        aln.score2 = 0;
-        // FIXME: need to get the mismatches
-        aln.mismatches = 0;  // ssw_aln.mismatches;
-        aln.identity = 100 * aln.score1 / aln_block_data->aln_scoring.match / aln.rlen;
-        aln.read_group_id = aln_block_data->read_group_id;
-        // FIXME: need to get cigar
-        if (report_cigar) set_sam_string(aln, "*", "*");  // FIXME until there is a valid:ssw_aln.cigar_string);
-        aln_block_data->alns->add_aln(aln);
-      }
-    });
-    fut = fut.then([alns = alns, aln_block_data]() {
-      DBG_VERBOSE("appending and returning ", aln_block_data->alns->size(), "\n");
-      alns->append(*(aln_block_data->alns));
-    });
-
-    return fut;
-  }
-};
-
-static void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vector<string> &ctg_seqs,
-                               vector<string> &read_seqs, Alns *alns, future<> &active_kernel_fut, int read_group_id,
-                               int gpu_devices, int max_clen, int max_rlen, adept_sw::GPUDriver &gpu_driver) {
-  BaseTimer steal_t("CPU work steal");
-  steal_t.start();
-  auto num = kernel_alns.size();
-  // steal work from this kernel block if the previous kernel is still active
-  // if true, this balances the block size that will be sent to the kernel
-  while ((gpu_devices == 0 || !active_kernel_fut.ready()) && !kernel_alns.empty()) {
-    assert(!ctg_seqs.empty());
-    assert(!read_seqs.empty());
-#ifndef NO_KLIGN_CPU_WORK_STEAL
-    // steal one from the block
-    cpu_aligner.ssw_align_read(alns, kernel_alns.back(), ctg_seqs.back(), read_seqs.back(), read_group_id);
-    kernel_alns.pop_back();
-    ctg_seqs.pop_back();
-    read_seqs.pop_back();
-#endif
-    progress();
-  }
-  steal_t.stop();
-  auto steal_secs = steal_t.get_elapsed();
-  if (num != kernel_alns.size()) {
-    auto num_stole = num - kernel_alns.size();
-    LOG("Stole from kernel block ", num_stole, " alignments in ", steal_secs, "s (",
-        (steal_secs > 0 ? num_stole / steal_secs : 0.0), " aln/s), while waiting for previous block to complete",
-        (kernel_alns.empty() ? " - THE ENTIRE BLOCK" : ""), "\n");
-  } else if (steal_secs > 0.01) {
-    LOG("Waited ", steal_secs, "s for previous block to complete\n");
-  }
-  if (!kernel_alns.empty()) {
-    assert(active_kernel_fut.ready() && "active_kernel_fut should already be ready");
-    active_kernel_fut.wait();  // should be ready already
-    shared_ptr<AlignBlockData> aln_block_data =
-        make_shared<AlignBlockData>(kernel_alns, ctg_seqs, read_seqs, max_clen, max_rlen, read_group_id, cpu_aligner.aln_scoring);
-    assert(kernel_alns.empty());
-    // for now, the GPU alignment doesn't support cigars
-    if (!cpu_aligner.ssw_filter.report_cigar && gpu_devices > 0) {
-      active_kernel_fut = cpu_aligner.gpu_align_block(aln_block_data, gpu_driver, alns, cpu_aligner.ssw_filter.report_cigar);
-    } else {
-#ifdef __PPC64__
-      SWARN("FIXME Issue #49,#60 no cigars for gpu alignments\n");
-      active_kernel_fut = gpu_align_block(aln_block_data, alns);
-#else
-      active_kernel_fut = cpu_aligner.ssw_align_block(aln_block_data, alns);
-#endif
-    }
-  }
-}
 
 class Aligner {
   int64_t num_alns;
@@ -580,9 +286,6 @@ class Aligner {
 
   int64_t max_clen = 0;
   int64_t max_rlen = 0;
-  size_t gpu_mem_avail = 0;
-  int gpu_devices = 0;
-  adept_sw::GPUDriver gpu_driver;
   CPUAligner cpu_aligner;
 
   Alns *alns;
@@ -608,8 +311,7 @@ class Aligner {
       int identity = 100 * score1 / cpu_aligner.aln_scoring.match / rlen;
       Aln aln(rname, cid, rstart, rstop, rlen, cstart, cstop, clen, orient, score1, 0, identity, 0, read_group_id);
       assert(aln.is_valid());
-      if (cpu_aligner.ssw_filter.report_cigar)
-        cpu_aligner.set_sam_string(aln, rseq, to_string(overlap_len) + "=");  // exact match '=' not 'M'
+      if (cpu_aligner.ssw_filter.report_cigar) set_sam_string(aln, rseq, to_string(overlap_len) + "=");  // exact match '=' not 'M'
       alns->add_aln(aln);
     } else {
       max_clen = max((int64_t)cseq.size(), max_clen);
@@ -622,12 +324,9 @@ class Aligner {
       kernel_alns.emplace_back(rname, cid, 0, 0, rlen, cstart, 0, clen, orient);
       ctg_seqs.emplace_back(cseq);
       read_seqs.emplace_back(rseq);
-      bool will_run_kernel = (tot_mem_est >= gpu_mem_avail) | (num_alns >= KLIGN_GPU_BLOCK_SIZE);
-      if (will_run_kernel) {
-        DBG("tot_mem_est (", tot_mem_est, ") >= gpu_mem_avail (", gpu_mem_avail, " - dispatching ", kernel_alns.size(),
-            " alignments\n");
-        kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, gpu_devices,
-                           max_clen, max_rlen, gpu_driver);
+      if (num_alns >= KLIGN_GPU_BLOCK_SIZE) {
+        kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, max_clen,
+                           max_rlen, aln_kernel_timer);
         clear_aln_bufs();
       }
     }
@@ -641,7 +340,7 @@ class Aligner {
   }
 
  public:
-  Aligner(int kmer_len, Alns &alns, int rlen_limit, bool compute_cigar, int all_num_ctgs, int ranks_per_gpu)
+  Aligner(int kmer_len, Alns &alns, int rlen_limit, bool compute_cigar, int all_num_ctgs)
       : kmer_len(kmer_len)
       , num_alns(0)
       , num_perfect_alns(0)
@@ -652,32 +351,6 @@ class Aligner {
       , active_kernel_fut(make_future())
       , alns(&alns)
       , cpu_aligner(compute_cigar) {
-    // default for normal alignments in the pipeline, but for final alignments, uses minimap2 defaults
-    gpu_devices = gpu_utils::get_num_node_gpus();
-    if (gpu_devices <= 0) {
-      // CPU only
-      gpu_devices = 0;
-    } else {
-      if (ranks_per_gpu == 0) {
-        // auto detect
-        gpu_mem_avail = gpu_utils::get_avail_gpu_mem_per_rank(local_team().rank_n(), gpu_devices);
-      } else {
-        gpu_mem_avail = gpu_utils::get_avail_gpu_mem_per_rank(ranks_per_gpu, 1);
-      }
-      if (gpu_mem_avail) {
-        SLOG_VERBOSE("GPU memory available: ", get_size_str(gpu_mem_avail), "\n");
-        auto init_time = gpu_driver.init(local_team().rank_me(), local_team().rank_n(), (short)cpu_aligner.aln_scoring.match,
-                                         (short)-cpu_aligner.aln_scoring.mismatch, (short)-cpu_aligner.aln_scoring.gap_opening,
-                                         (short)-cpu_aligner.aln_scoring.gap_extending, rlen_limit);
-        SLOG_VERBOSE("Initialized adept_sw driver in ", init_time, " s\n");
-      } else {
-        gpu_devices = 0;
-      }
-    }
-    if (gpu_devices == 0) {
-      SWARN("No GPU will be used for alignments");
-      gpu_mem_avail = 32 * 1024 * 1024;  // cpu needs a block of memory
-    }
     // ctg_cache.set_invalid_key(std::numeric_limits<cid_t>::max());
     ctg_cache.reserve(2 * all_num_ctgs / rank_n());
   }
@@ -712,8 +385,8 @@ class Aligner {
     t.start();
     auto num = kernel_alns.size();
     if (num) {
-      kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, gpu_devices,
-                         max_clen, max_rlen, gpu_driver);
+      kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, max_clen, max_rlen,
+                         aln_kernel_timer);
       clear_aln_bufs();
     }
     bool is_ready = active_kernel_fut.ready();
@@ -876,8 +549,6 @@ class Aligner {
     alns->sort_alns().wait();
   }
 
-  int get_gpu_mem_avail() { return gpu_mem_avail; }
-
   void log_ctg_bytes_fetched() {
     auto all_ctg_bytes_fetched = reduce_one(ctg_bytes_fetched, op_fast_add, 0).wait();
     auto max_ctg_bytes_fetched = reduce_one(ctg_bytes_fetched, op_fast_max, 0).wait();
@@ -1031,7 +702,7 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
   int64_t tot_num_kmers = 0;
   int64_t num_reads = 0;
   int64_t num_reads_aligned = 0, num_excess_alns_reads = 0;
-  Aligner aligner(Kmer<MAX_K>::get_k(), alns, rlen_limit, compute_cigar, all_num_ctgs, ranks_per_gpu);
+  Aligner aligner(Kmer<MAX_K>::get_k(), alns, rlen_limit, compute_cigar, all_num_ctgs);
   aligner.clear_aln_bufs();
   barrier();
   int64_t kmer_bytes_received = 0;

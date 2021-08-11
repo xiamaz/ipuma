@@ -102,7 +102,7 @@ endforeach()
 
 
 foreach(tgt fastq alignments contigs packed_reads utils ctg_graph options
-            merge_reads dbjg_traversal klign cgraph build_ctg_graph
+            merge_reads dbjg_traversal klign aligner_cpu cgraph build_ctg_graph
             walk_ctg_graph spanner splinter localassm localassm_core
             histogrammer aln_depths shuffle_reads kmer kmer_dht
             gasnet_stats
@@ -116,7 +116,7 @@ foreach(tgt fastq alignments contigs packed_reads utils ctg_graph options
 endforeach()
 
 if(ENABLE_CUDA)
-    foreach(tgt localassm_gpu)
+    foreach(tgt localassm_gpu block_align_gpu)
         add_library(${tgt} OBJECT ${tgt}.cpp)
         if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13 AND DEFINED UPCXX_LIBRARIES)
           target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
@@ -125,7 +125,7 @@ if(ENABLE_CUDA)
         set(MHM2_TARGET_OBJECTS ${MHM2_TARGET_OBJECTS} PARENT_SCOPE)
     endforeach()
 else()
-    foreach(tgt localassm_cpu)
+    foreach(tgt localassm_cpu block_align_cpu)
         add_library(${tgt} OBJECT ${tgt}.cpp)
         if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13 AND DEFINED UPCXX_LIBRARIES)
           target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})

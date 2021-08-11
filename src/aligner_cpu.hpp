@@ -42,33 +42,63 @@
  form.
 */
 
+#include <string_view>
+#include <algorithm>
+#include <iostream>
+
+#include <upcxx/upcxx.hpp>
+
+#include "upcxx_utils.hpp"
+#include "kmer.hpp"
+#include "ssw.hpp"
+#include "utils.hpp"
 #include "alignments.hpp"
-#include "contigs.hpp"
-#include "packed_reads.hpp"
 
-template <int MAX_K>
-double find_alignments(unsigned kmer_len, std::vector<PackedReads *> &packed_reads_list, int max_store_size, int max_rpcs_in_flight,
-                       Contigs &ctgs, Alns &alns, int seed_space, int rlen_limit, bool use_kmer_cache, bool compute_cigar = false,
-                       int min_ctg_len = 0, int ranks_per_gpu = 0);
+using std::string;
+using std::string_view;
 
-// Reduce compile time by instantiating templates of common types
-// extern template declarations are in kmer.hpp
-// template instantiations each happen in src/CMakeLists via kmer-extern-template.in.cpp
+struct AlnScoring {
+  int match, mismatch, gap_opening, gap_extending, ambiguity;
 
-#define __MACRO_KLIGN__(KMER_LEN, MODIFIER)                                                                                      \
-  MODIFIER double find_alignments<KMER_LEN>(unsigned, std::vector<PackedReads *> &, int, int, Contigs &, Alns &, int, int, bool, \
-                                            bool, int, int);
+  string to_string() {
+    std::ostringstream oss;
+    oss << "match " << match << " mismatch " << mismatch << " gap open " << gap_opening << " gap extend " << gap_extending
+        << " ambiguity " << ambiguity;
+    return oss.str();
+  }
+};
 
-__MACRO_KLIGN__(32, extern template);
-#if MAX_BUILD_KMER >= 64
-__MACRO_KLIGN__(64, extern template);
-#endif
-#if MAX_BUILD_KMER >= 96
-__MACRO_KLIGN__(96, extern template);
-#endif
-#if MAX_BUILD_KMER >= 128
-__MACRO_KLIGN__(128, extern template);
-#endif
-#if MAX_BUILD_KMER >= 160
-__MACRO_KLIGN__(160, extern template);
-#endif
+// encapsulate the data for a kernel to run a block independently
+struct AlignBlockData {
+  vector<Aln> kernel_alns;
+  vector<string> ctg_seqs;
+  vector<string> read_seqs;
+  shared_ptr<Alns> alns;
+  int64_t max_clen;
+  int64_t max_rlen;
+  int read_group_id;
+  AlnScoring aln_scoring;
+
+  AlignBlockData(vector<Aln> &_kernel_alns, vector<string> &_ctg_seqs, vector<string> &_read_seqs, int64_t max_clen,
+                 int64_t max_rlen, int read_group_id, AlnScoring &aln_scoring);
+};
+
+int get_cigar_length(const string &cigar);
+void set_sam_string(Aln &aln, string_view read_seq, string cigar);
+
+struct CPUAligner {
+  // default aligner and filter
+  StripedSmithWaterman::Aligner ssw_aligner;
+  StripedSmithWaterman::Filter ssw_filter;
+  AlnScoring aln_scoring;
+
+  CPUAligner(bool compute_cigar);
+
+  static void ssw_align_read(StripedSmithWaterman::Aligner &ssw_aligner, StripedSmithWaterman::Filter &ssw_filter, Alns *alns,
+                             AlnScoring &aln_scoring, Aln &aln, const string_view &cseq, const string_view &rseq,
+                             int read_group_id);
+
+  void ssw_align_read(Alns *alns, Aln &aln, const string &cseq, const string &rseq, int read_group_id);
+
+  upcxx::future<> ssw_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns);
+};

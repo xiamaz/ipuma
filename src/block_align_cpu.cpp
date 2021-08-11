@@ -1,5 +1,3 @@
-#pragma once
-
 /*
  HipMer v 2.0, Copyright (c) 2020, The Regents of the University of California,
  through Lawrence Berkeley National Laboratory (subject to receipt of any required
@@ -42,33 +40,25 @@
  form.
 */
 
-#include "alignments.hpp"
-#include "contigs.hpp"
-#include "packed_reads.hpp"
+#include "klign.hpp"
+#include "kmer.hpp"
+#include "aligner_cpu.hpp"
 
-template <int MAX_K>
-double find_alignments(unsigned kmer_len, std::vector<PackedReads *> &packed_reads_list, int max_store_size, int max_rpcs_in_flight,
-                       Contigs &ctgs, Alns &alns, int seed_space, int rlen_limit, bool use_kmer_cache, bool compute_cigar = false,
-                       int min_ctg_len = 0, int ranks_per_gpu = 0);
+using namespace std;
+using namespace upcxx;
+using namespace upcxx_utils;
 
-// Reduce compile time by instantiating templates of common types
-// extern template declarations are in kmer.hpp
-// template instantiations each happen in src/CMakeLists via kmer-extern-template.in.cpp
+void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {}
 
-#define __MACRO_KLIGN__(KMER_LEN, MODIFIER)                                                                                      \
-  MODIFIER double find_alignments<KMER_LEN>(unsigned, std::vector<PackedReads *> &, int, int, Contigs &, Alns &, int, int, bool, \
-                                            bool, int, int);
-
-__MACRO_KLIGN__(32, extern template);
-#if MAX_BUILD_KMER >= 64
-__MACRO_KLIGN__(64, extern template);
-#endif
-#if MAX_BUILD_KMER >= 96
-__MACRO_KLIGN__(96, extern template);
-#endif
-#if MAX_BUILD_KMER >= 128
-__MACRO_KLIGN__(128, extern template);
-#endif
-#if MAX_BUILD_KMER >= 160
-__MACRO_KLIGN__(160, extern template);
-#endif
+void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vector<string> &ctg_seqs, vector<string> &read_seqs,
+                        Alns *alns, future<> &active_kernel_fut, int read_group_id, int max_clen, int max_rlen,
+                        IntermittentTimer &aln_kernel_timer) {
+  if (!kernel_alns.empty()) {
+    assert(active_kernel_fut.ready() && "active_kernel_fut should already be ready");
+    active_kernel_fut.wait();  // should be ready already
+    shared_ptr<AlignBlockData> aln_block_data =
+        make_shared<AlignBlockData>(kernel_alns, ctg_seqs, read_seqs, max_clen, max_rlen, read_group_id, cpu_aligner.aln_scoring);
+    assert(kernel_alns.empty());
+    active_kernel_fut = cpu_aligner.ssw_align_block(aln_block_data, alns);
+  }
+}

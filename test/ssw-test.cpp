@@ -1,6 +1,7 @@
 #include "ssw.hpp"
 #include "gtest/gtest.h"
 #include "klign.hpp"
+#include "aligner_cpu.hpp"
 
 #include <sstream>
 #include <string>
