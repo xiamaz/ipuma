@@ -48,8 +48,8 @@
 
 #include "driver.hpp"
 #include "kernel.hpp"
-#include "gpu_utils.hpp"
-#include "gpu_common.hpp"
+#include "gpu-utils/gpu_utils.hpp"
+#include "gpu-utils/gpu_common.hpp"
 
 using namespace std;
 

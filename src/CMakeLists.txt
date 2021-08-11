@@ -81,12 +81,14 @@ endforeach()
 
 add_definitions(-DALL_DEFNS=\"${all_defs}\")
 
-# include ssw library
 include_directories("ssw")
 add_subdirectory(ssw)
 
 include_directories(kcount)
 add_subdirectory(kcount)
+
+include_directories(localassm)
+add_subdirectory(localassm)
 
 set(MHM2_TARGET_OBJECTS)
 add_library(hash_funcs OBJECT hash_funcs.c)
@@ -106,8 +108,7 @@ endforeach()
 
 foreach(tgt fastq alignments contigs packed_reads utils ctg_graph options
             merge_reads dbjg_traversal aligner_cpu cgraph build_ctg_graph
-            walk_ctg_graph spanner splinter localassm localassm_core
-            histogrammer aln_depths shuffle_reads
+            walk_ctg_graph spanner splinter histogrammer aln_depths shuffle_reads
             gasnet_stats
             ${EXTERN_TEMPLATE_FILES}
         )
@@ -119,7 +120,7 @@ foreach(tgt fastq alignments contigs packed_reads utils ctg_graph options
 endforeach()
 
 if(ENABLE_CUDA)
-    foreach(tgt localassm_gpu block_align_gpu)
+    foreach(tgt block_align_gpu)
         add_library(${tgt} OBJECT ${tgt}.cpp)
         if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13 AND DEFINED UPCXX_LIBRARIES)
           target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
@@ -128,7 +129,7 @@ if(ENABLE_CUDA)
         set(MHM2_TARGET_OBJECTS ${MHM2_TARGET_OBJECTS} PARENT_SCOPE)
     endforeach()
 else()
-    foreach(tgt localassm_cpu block_align_cpu)
+    foreach(tgt block_align_cpu)
         add_library(${tgt} OBJECT ${tgt}.cpp)
         if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13 AND DEFINED UPCXX_LIBRARIES)
           target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
@@ -141,24 +142,23 @@ endif()
 set(MHM2_TARGET_OBJECTS ${MHM2_TARGET_OBJECTS} PARENT_SCOPE)
 add_executable(mhm2 main.cpp ${MHM2_TARGET_OBJECTS})
 
-set(MHM2_LINK_LIBRARIES Threads::Threads SSW_LIBRARY KCOUNT_LIBRARY ${ZLIB_LIBRARIES} MHM2_VERSION_LIB)
+set(MHM2_LINK_LIBRARIES
+    Threads::Threads
+    SSW_LIBRARY
+    KCOUNT_LIBRARY
+    LOCALASSM_LIBRARY
+    ${ZLIB_LIBRARIES}
+    MHM2_VERSION_LIB)
 
 if(ENABLE_CUDA)
     include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-    # include the gpu directories
-    set_property(TARGET mhm2 PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF) # just to be sure. It should be off in parent dir
+    set_property(TARGET mhm2 PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF)
     include_directories("gpu-utils")
     add_subdirectory(gpu-utils)
     include_directories("adept-sw")
     add_subdirectory(adept-sw)
-    #include_directories("kcount-gpu")
-    #add_subdirectory(kcount-gpu)
-    include_directories("localassm-gpu")
-    add_subdirectory(localassm-gpu)
     set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} GPU_UTILS_LIBRARY_static)
     set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} ADEPT_SW_LIBRARY_static)
-    #set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} KCOUNT_GPU_LIBRARY_static)
-    set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} LOCALASSM_GPU_LIBRARY_static)
     target_link_libraries(mhm2
         ${MHM2_LINK_LIBRARIES}
         ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
