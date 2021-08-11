@@ -15,4 +15,3 @@ foreach(tgt cgraph build_ctg_graph ctg_graph walk_ctg_graph)
 endforeach()
 
 add_library(CGRAPH_LIBRARY ${CGRAPH_TARGET_OBJECTS})
-
