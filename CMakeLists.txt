@@ -225,7 +225,7 @@ message(
 # Build options
 if(NOT MAX_BUILD_KMER)
   set(MAX_BUILD_KMER
-      160
+      128
       CACHE STRING "The maximum kmer allowed to use (must be multiple of 32)")
 endif()
 math(EXPR TEST_MAX_KMER_SIZE "((${MAX_BUILD_KMER} + 31) / 32) * 32")
