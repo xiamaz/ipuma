@@ -101,13 +101,6 @@ void KmerDHT<MAX_K>::get_kmers_and_exts(Supermer &supermer, vector<KmerAndExt<MA
 }
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::update_count(Supermer supermer, dist_object<KmerMap> &kmers,
-                                  dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver) {
-  num_inserts++;
-  ht_gpu_driver->insert_supermer(supermer.seq, supermer.count);
-}
-
-template <int MAX_K>
 KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS)
     : kmers({})
     , ht_gpu_driver({})
@@ -152,34 +145,33 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
                node0_cores * my_adjusted_num_kmers, " entries on node 0\n");
   double init_free_mem = get_free_mem();
   if (my_adjusted_num_kmers <= 0) DIE("no kmers to reserve space for");
-  if (gpu_utils::get_num_node_gpus() <= 0) {
-    DIE("GPUs are enabled but no GPU could be configured for kmer counting");
-  } else {
-    // calculate total slots for hash table. Reserve space for parse and pack
-    int bytes_for_pnp = KCOUNT_GPU_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
-    int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
-    auto gpu_avail_mem = (gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp) * 0.95;
-    auto gpu_tot_mem = gpu_utils::get_tot_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
-    SLOG_GPU("Available GPU memory per rank for kmers hash table is ", get_size_str(gpu_avail_mem), " out of a max of ",
-             get_size_str(gpu_tot_mem), "\n");
-    double init_time;
-    size_t gpu_bytes_reqd;
-    my_adjusted_num_kmers *= 4;
-    ht_gpu_driver->init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), my_adjusted_num_kmers, gpu_avail_mem, init_time, gpu_bytes_reqd);
-    auto capacity = ht_gpu_driver->get_capacity(kcount_gpu::READ_KMERS_PASS);
-    SLOG_GPU("GPU read kmers hash table has capacity per rank of ", capacity, " for ", (int64_t)my_adjusted_num_kmers,
-             " elements\n");
-    if (capacity < my_adjusted_num_kmers * 0.8)
-      SLOG_VERBOSE("GPU read kmers hash table has less than requested capacity: ", perc_str(capacity, my_adjusted_num_kmers),
-                   "; full capacity requires ", get_size_str(gpu_bytes_reqd), " memory on GPU but only have ",
-                   get_size_str(gpu_avail_mem));
-
-    SLOG_GPU("Initialized hash table GPU driver in ", std::fixed, std::setprecision(3), init_time, " s\n");
-    auto gpu_free_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n();
-    SLOG_GPU("After initializing GPU hash table, there is ", get_size_str(gpu_free_mem), " memory available per rank, with ",
-             get_size_str(bytes_for_pnp), " reserved for PnP and ", get_size_str(gpu_bytes_reqd),
-             " reserved for the kmer hash table\n");
-  }
+  if (gpu_utils::get_num_node_gpus() <= 0) DIE("GPUs are enabled but no GPU could be configured for kmer counting");
+  kmer_store.set_update_func([&kmers = this->kmers, &ht_gpu_driver = this->ht_gpu_driver](Supermer supermer) {
+    num_inserts++;
+    ht_gpu_driver->insert_supermer(supermer.seq, supermer.count);
+  });
+  // calculate total slots for hash table. Reserve space for parse and pack
+  int bytes_for_pnp = KCOUNT_GPU_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
+  int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
+  auto gpu_avail_mem = (gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp) * 0.95;
+  auto gpu_tot_mem = gpu_utils::get_tot_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
+  SLOG_GPU("Available GPU memory per rank for kmers hash table is ", get_size_str(gpu_avail_mem), " out of a max of ",
+           get_size_str(gpu_tot_mem), "\n");
+  double init_time;
+  size_t gpu_bytes_reqd;
+  my_adjusted_num_kmers *= 4;
+  ht_gpu_driver->init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), my_adjusted_num_kmers, gpu_avail_mem, init_time, gpu_bytes_reqd);
+  auto capacity = ht_gpu_driver->get_capacity(kcount_gpu::READ_KMERS_PASS);
+  SLOG_GPU("GPU read kmers hash table has capacity per rank of ", capacity, " for ", (int64_t)my_adjusted_num_kmers, " elements\n");
+  if (capacity < my_adjusted_num_kmers * 0.8)
+    SLOG_VERBOSE("GPU read kmers hash table has less than requested capacity: ", perc_str(capacity, my_adjusted_num_kmers),
+                 "; full capacity requires ", get_size_str(gpu_bytes_reqd), " memory on GPU but only have ",
+                 get_size_str(gpu_avail_mem));
+  SLOG_GPU("Initialized hash table GPU driver in ", std::fixed, std::setprecision(3), init_time, " s\n");
+  auto gpu_free_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n();
+  SLOG_GPU("After initializing GPU hash table, there is ", get_size_str(gpu_free_mem), " memory available per rank, with ",
+           get_size_str(bytes_for_pnp), " reserved for PnP and ", get_size_str(gpu_bytes_reqd),
+           " reserved for the kmer hash table\n");
   barrier();
 }
 
@@ -226,9 +218,6 @@ void KmerDHT<MAX_K>::set_pass(PASS_TYPE pass_type) {
   _num_kmers_counted = 0;
   this->pass_type = pass_type;
   ht_gpu_driver->set_pass(pass_type == READ_KMERS_PASS ? kcount_gpu::READ_KMERS_PASS : kcount_gpu::CTG_KMERS_PASS);
-  kmer_store.set_update_func([&kmers = this->kmers, &ht_gpu_driver = this->ht_gpu_driver](Supermer supermer) {
-    update_count(supermer, kmers, ht_gpu_driver);
-  });
 }
 
 template <int MAX_K>

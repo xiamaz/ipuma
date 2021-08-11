@@ -17,7 +17,27 @@ foreach(KMER_LENGTH ${MHM2_KMER_LENGTHS})
   list(APPEND KCOUNT_TARGET_FILES "${TEMPLATE_FILE}.cpp")
 endforeach()
 
-add_library(KCOUNT_LIBRARY ${KCOUNT_TARGET_FILES})
+set(KCOUNT_TARGET_OBJECTS)
+
+if(ENABLE_CUDA)
+  set(tgt kcount_gpu)
+  add_library(${tgt} OBJECT ${tgt}.cpp)
+  target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  list(APPEND KCOUNT_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
+  set(KCOUNT_TARGET_OBJECTS
+      ${KCOUNT_TARGET_OBJECTS}
+      PARENT_SCOPE)
+else()
+  set(tgt kcount_cpu)
+  add_library(${tgt} OBJECT ${tgt}.cpp)
+  target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  list(APPEND KCOUNT_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
+  set(KCOUNT_TARGET_OBJECTS
+      ${KCOUNT_TARGET_OBJECTS}
+      PARENT_SCOPE)
+endif()
+
+add_library(KCOUNT_LIBRARY ${KCOUNT_TARGET_FILES} ${KCOUNT_TARGET_OBJECTS})
 
 if(ENABLE_CUDA)
   include_directories(${CMAKE_CURRENT_SOURCE_DIR})

@@ -235,11 +235,6 @@ class KmerDHT {
   int minimizer_len = 15;
   bool using_ctg_kmers = false;
 
-  static void update_count(Supermer supermer, dist_object<KmerMap> &kmers, dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver);
-
-  static void update_ctg_kmers_count(Supermer supermer, dist_object<KmerMap> &kmers,
-                                     dist_object<HashTableGPUDriver<MAX_K>> &ht_gpu_driver);
-
   void purge_kmers(int threshold);
 
   void insert_from_gpu_hashtable();
