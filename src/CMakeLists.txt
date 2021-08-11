@@ -85,6 +85,9 @@ add_definitions(-DALL_DEFNS=\"${all_defs}\")
 include_directories("ssw")
 add_subdirectory(ssw)
 
+include_directories(kcount)
+add_subdirectory(kcount)
+
 set(MHM2_TARGET_OBJECTS)
 add_library(hash_funcs OBJECT hash_funcs.c)
 list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:hash_funcs>)
@@ -92,7 +95,7 @@ list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:hash_funcs>)
 # build all the extern template souce code instantiation explosion
 
 foreach(KMER_LENGTH ${MHM2_KMER_LENGTHS})
-  foreach(TEMPLATE "kcount" "klign" "contigging" "scaffolding" "post_assembly" "kmer" "kmer_dht")
+  foreach(TEMPLATE "klign" "contigging" "scaffolding" "post_assembly" "kmer" "kmer_dht")
     set(TEMPLATE_FILE "${TEMPLATE}-extern-template-${KMER_LENGTH}")
     string(TOUPPER ${TEMPLATE} TEMPLATE_UPPER)
     configure_file("extern_template.in.cpp" "${TEMPLATE_FILE}.cpp" @ONLY)
@@ -102,9 +105,9 @@ endforeach()
 
 
 foreach(tgt fastq alignments contigs packed_reads utils ctg_graph options
-            merge_reads dbjg_traversal klign aligner_cpu cgraph build_ctg_graph
+            merge_reads dbjg_traversal aligner_cpu cgraph build_ctg_graph
             walk_ctg_graph spanner splinter localassm localassm_core
-            histogrammer aln_depths shuffle_reads kmer kmer_dht
+            histogrammer aln_depths shuffle_reads
             gasnet_stats
             ${EXTERN_TEMPLATE_FILES}
         )
@@ -138,7 +141,7 @@ endif()
 set(MHM2_TARGET_OBJECTS ${MHM2_TARGET_OBJECTS} PARENT_SCOPE)
 add_executable(mhm2 main.cpp ${MHM2_TARGET_OBJECTS})
 
-set(MHM2_LINK_LIBRARIES Threads::Threads SSW_LIBRARY ${ZLIB_LIBRARIES} MHM2_VERSION_LIB)
+set(MHM2_LINK_LIBRARIES Threads::Threads SSW_LIBRARY KCOUNT_LIBRARY ${ZLIB_LIBRARIES} MHM2_VERSION_LIB)
 
 if(ENABLE_CUDA)
     include_directories(${CMAKE_CURRENT_SOURCE_DIR})
@@ -148,14 +151,13 @@ if(ENABLE_CUDA)
     add_subdirectory(gpu-utils)
     include_directories("adept-sw")
     add_subdirectory(adept-sw)
-    include_directories("kcount-gpu")
-    add_subdirectory(kcount-gpu)
+    #include_directories("kcount-gpu")
+    #add_subdirectory(kcount-gpu)
     include_directories("localassm-gpu")
     add_subdirectory(localassm-gpu)
-    set_property(TARGET mhm2 PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF) # just to be sure. It should be off in parent dir
     set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} GPU_UTILS_LIBRARY_static)
     set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} ADEPT_SW_LIBRARY_static)
-    set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} KCOUNT_GPU_LIBRARY_static)
+    #set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} KCOUNT_GPU_LIBRARY_static)
     set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} LOCALASSM_GPU_LIBRARY_static)
     target_link_libraries(mhm2
         ${MHM2_LINK_LIBRARIES}

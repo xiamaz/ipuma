@@ -50,7 +50,7 @@
 #include <cuda.h>
 
 #include "upcxx_utils/colors.h"
-#include "gpu_common.hpp"
+#include "gpu-utils/gpu_common.hpp"
 #include "gpu_hash_table.hpp"
 #include "prime.hpp"
 

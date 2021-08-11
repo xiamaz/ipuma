@@ -44,7 +44,7 @@
 
 #include "gasnet_stats.hpp"
 #include "histogrammer.hpp"
-#include "kcount.hpp"
+#include "kcount/kcount.hpp"
 #include "klign.hpp"
 #include "kmer_dht.hpp"
 #include "stage_timers.hpp"
