@@ -83,12 +83,14 @@ add_definitions(-DALL_DEFNS=\"${all_defs}\")
 
 include_directories("ssw")
 add_subdirectory(ssw)
-
-include_directories(kcount)
+include_directories("kcount")
 add_subdirectory(kcount)
-
-include_directories(localassm)
+include_directories("klign")
+add_subdirectory(klign)
+include_directories("localassm")
 add_subdirectory(localassm)
+include_directories("cgraph")
+add_subdirectory(cgraph)
 
 set(MHM2_TARGET_OBJECTS)
 add_library(hash_funcs OBJECT hash_funcs.c)
@@ -97,7 +99,7 @@ list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:hash_funcs>)
 # build all the extern template souce code instantiation explosion
 
 foreach(KMER_LENGTH ${MHM2_KMER_LENGTHS})
-  foreach(TEMPLATE "klign" "contigging" "scaffolding" "post_assembly" "kmer" "kmer_dht")
+  foreach(TEMPLATE "contigging" "scaffolding" "post_assembly" "kmer" "kmer_dht")
     set(TEMPLATE_FILE "${TEMPLATE}-extern-template-${KMER_LENGTH}")
     string(TOUPPER ${TEMPLATE} TEMPLATE_UPPER)
     configure_file("extern_template.in.cpp" "${TEMPLATE_FILE}.cpp" @ONLY)
@@ -105,10 +107,8 @@ foreach(KMER_LENGTH ${MHM2_KMER_LENGTHS})
   endforeach()
 endforeach()
 
-
-foreach(tgt fastq alignments contigs packed_reads utils ctg_graph options
-            merge_reads dbjg_traversal aligner_cpu cgraph build_ctg_graph
-            walk_ctg_graph spanner splinter histogrammer aln_depths shuffle_reads
+foreach(tgt fastq alignments contigs packed_reads utils options
+            merge_reads dbjg_traversal spanner splinter histogrammer aln_depths shuffle_reads
             gasnet_stats
             ${EXTERN_TEMPLATE_FILES}
         )
@@ -119,26 +119,6 @@ foreach(tgt fastq alignments contigs packed_reads utils ctg_graph options
   list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
 endforeach()
 
-if(ENABLE_CUDA)
-    foreach(tgt block_align_gpu)
-        add_library(${tgt} OBJECT ${tgt}.cpp)
-        if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13 AND DEFINED UPCXX_LIBRARIES)
-          target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
-        endif()
-        list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
-        set(MHM2_TARGET_OBJECTS ${MHM2_TARGET_OBJECTS} PARENT_SCOPE)
-    endforeach()
-else()
-    foreach(tgt block_align_cpu)
-        add_library(${tgt} OBJECT ${tgt}.cpp)
-        if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13 AND DEFINED UPCXX_LIBRARIES)
-          target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
-        endif()
-        list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
-        set(MHM2_TARGET_OBJECTS ${MHM2_TARGET_OBJECTS} PARENT_SCOPE)
-    endforeach()
-endif()
-
 set(MHM2_TARGET_OBJECTS ${MHM2_TARGET_OBJECTS} PARENT_SCOPE)
 add_executable(mhm2 main.cpp ${MHM2_TARGET_OBJECTS})
 
@@ -146,7 +126,9 @@ set(MHM2_LINK_LIBRARIES
     Threads::Threads
     SSW_LIBRARY
     KCOUNT_LIBRARY
+    KLIGN_LIBRARY
     LOCALASSM_LIBRARY
+    CGRAPH_LIBRARY
     ${ZLIB_LIBRARIES}
     MHM2_VERSION_LIB)
 
@@ -155,10 +137,7 @@ if(ENABLE_CUDA)
     set_property(TARGET mhm2 PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF)
     include_directories("gpu-utils")
     add_subdirectory(gpu-utils)
-    include_directories("adept-sw")
-    add_subdirectory(adept-sw)
     set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} GPU_UTILS_LIBRARY_static)
-    set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} ADEPT_SW_LIBRARY_static)
     target_link_libraries(mhm2
         ${MHM2_LINK_LIBRARIES}
         ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})

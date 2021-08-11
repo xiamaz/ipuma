@@ -56,7 +56,7 @@
 
 #include "driver.hpp"
 #include "kernel.hpp"
-#include "gpu_common.hpp"
+#include "gpu-utils/gpu_common.hpp"
 
 struct gpu_alignments {
   short* ref_start_gpu;
@@ -231,7 +231,7 @@ double adept_sw::GPUDriver::init(int upcxx_rank_me, int upcxx_rank_n, short matc
 adept_sw::GPUDriver::~GPUDriver() {
   // won't have been allocated if there was no GPU present
   if (!alignments.ref_begin) return;
-  cudaErrchk(cudaSetDevice(driver_state->my_gpu_id)); // setting device mapping again
+  cudaErrchk(cudaSetDevice(driver_state->my_gpu_id));  // setting device mapping again
   cudaErrchk(cudaFreeHost(alignments.ref_begin));
   cudaErrchk(cudaFreeHost(alignments.ref_end));
   cudaErrchk(cudaFreeHost(alignments.query_begin));
@@ -262,8 +262,8 @@ void adept_sw::GPUDriver::kernel_block() {
 
 void adept_sw::GPUDriver::run_kernel_forwards(std::vector<std::string>& reads, std::vector<std::string>& contigs,
                                               unsigned maxReadSize, unsigned maxContigSize) {
-  cudaErrchk(cudaSetDevice(driver_state->my_gpu_id)); // setting device mapping again
-  unsigned totalAlignments = contigs.size();  // assuming that read and contig vectors are same length
+  cudaErrchk(cudaSetDevice(driver_state->my_gpu_id));  // setting device mapping again
+  unsigned totalAlignments = contigs.size();           // assuming that read and contig vectors are same length
 
   short* alAend = alignments.ref_end;
   short* alBend = alignments.query_end;

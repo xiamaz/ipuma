@@ -1,13 +1,14 @@
-#include "ssw.hpp"
-#include "gtest/gtest.h"
-#include "klign.hpp"
-#include "aligner_cpu.hpp"
-
 #include <sstream>
 #include <string>
 #include <vector>
 
-#include "adept-sw/driver.hpp"
+#include "ssw.hpp"
+#include "gtest/gtest.h"
+
+#include "klign/klign.hpp"
+#include "klign/aligner_cpu.hpp"
+#include "klign/adept-sw/driver.hpp"
+
 #include "gpu-utils/gpu_utils.hpp"
 
 using std::max;
