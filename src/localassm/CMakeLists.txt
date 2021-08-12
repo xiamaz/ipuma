@@ -1,11 +1,3 @@
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-find_package(UPCXX REQUIRED)
-find_program(UPCXX_EXEC upcxx)
-set(CMAKE_CXX_COMPILER ${UPCXX_EXEC})
-
 set(LOCALASSM_TARGET_OBJECTS)
 
 foreach(tgt localassm localassm_core)
