@@ -66,7 +66,7 @@ static int num_block_calls = 0;
 static ParseAndPackGPUDriver *pnp_gpu_driver;
 
 template <int MAX_K>
-BlockInserter<MAX_K>::BlockInserter(int qual_offset, int minimizer_len) {
+SeqBlockInserter<MAX_K>::SeqBlockInserter(int qual_offset, int minimizer_len) {
   if (gpu_utils::get_num_node_gpus() <= 0) DIE("GPUs are enabled but no GPU could be configured for kmer counting");
   double init_time;
   num_pnp_gpu_waits = 0;
@@ -81,7 +81,7 @@ BlockInserter<MAX_K>::BlockInserter(int qual_offset, int minimizer_len) {
 }
 
 template <int MAX_K>
-BlockInserter<MAX_K>::~BlockInserter() {
+SeqBlockInserter<MAX_K>::~SeqBlockInserter() {
   SLOG_GPU("Number of calls to progress while PnP GPU driver was running on rank 0: ", num_pnp_gpu_waits, "\n");
   SLOG_GPU("Number of calls to PnP GPU kernel for rank 0: ", num_block_calls, "\n");
   auto [gpu_time_tot, gpu_time_kernel] = pnp_gpu_driver->get_elapsed_times();
@@ -100,8 +100,8 @@ BlockInserter<MAX_K>::~BlockInserter() {
 }
 
 template <int MAX_K>
-void BlockInserter<MAX_K>::process_block(unsigned kmer_len, string &seq_block, const vector<kmer_count_t> &depth_block,
-                                         dist_object<KmerDHT<MAX_K>> &kmer_dht) {
+void SeqBlockInserter<MAX_K>::process_block(unsigned kmer_len, string &seq_block, const vector<kmer_count_t> &depth_block,
+                                            dist_object<KmerDHT<MAX_K>> &kmer_dht) {
   num_block_calls++;
   bool from_ctgs = !depth_block.empty();
   unsigned int num_valid_kmers = 0;
@@ -331,26 +331,26 @@ void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<M
   barrier();
 }
 
-#define BLOCK_INSERTER_K(KMER_LEN) template struct BlockInserter<KMER_LEN>;
+#define seq_block_inserter_K(KMER_LEN) template struct SeqBlockInserter<KMER_LEN>;
 #define HASH_TABLE_INSERTER_K(KMER_LEN) template struct HashTableInserter<KMER_LEN>;
 
-BLOCK_INSERTER_K(32);
+seq_block_inserter_K(32);
 HASH_TABLE_INSERTER_K(32);
 #if MAX_BUILD_KMER >= 64
-BLOCK_INSERTER_K(64);
+seq_block_inserter_K(64);
 HASH_TABLE_INSERTER_K(64);
 #endif
 #if MAX_BUILD_KMER >= 96
-BLOCK_INSERTER_K(96);
+seq_block_inserter_K(96);
 HASH_TABLE_INSERTER_K(96);
 #endif
 #if MAX_BUILD_KMER >= 128
-BLOCK_INSERTER_K(128);
+seq_block_inserter_K(128);
 HASH_TABLE_INSERTER_K(128);
 #endif
 #if MAX_BUILD_KMER >= 160
-BLOCK_INSERTER_K(160);
+seq_block_inserter_K(160);
 HASH_TABLE_INSERTER_K(160);
 #endif
-#undef BLOCK_INSERTER_K
+#undef seq_block_inserter_K
 #undef HASH_TABLE_INSERTER_K

@@ -55,10 +55,10 @@ using upcxx::dist_object;
 using count_t = uint32_t;
 
 template <int MAX_K>
-struct BlockInserter {
-  BlockInserter(int qual_offset, int minimizer_len);
+struct SeqBlockInserter {
+  SeqBlockInserter(int qual_offset, int minimizer_len);
 
-  ~BlockInserter();
+  ~SeqBlockInserter();
 
   void process_block(unsigned kmer_len, string &seq_block, const vector<kmer_count_t> &depth_block,
                      dist_object<KmerDHT<MAX_K>> &kmer_dht);

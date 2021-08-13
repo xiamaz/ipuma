@@ -65,7 +65,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   barrier();
   string seq_block;
   seq_block.reserve(KCOUNT_SEQ_BLOCK_SIZE);
-  BlockInserter<MAX_K> block_inserter(qual_offset, kmer_dht->get_minimizer_len());
+  SeqBlockInserter<MAX_K> seq_block_inserter(qual_offset, kmer_dht->get_minimizer_len());
   int64_t tot_num_local_reads = 0;
   for (auto packed_reads : packed_reads_list) {
     tot_num_local_reads += packed_reads->get_local_num_reads();
@@ -88,7 +88,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
         }
       }
       if (seq_block.length() + 1 + seq.length() >= KCOUNT_SEQ_BLOCK_SIZE) {
-        block_inserter.process_block(kmer_len, seq_block, {}, kmer_dht);
+        seq_block_inserter.process_block(kmer_len, seq_block, {}, kmer_dht);
         seq_block.clear();
       }
       seq_block += seq;
@@ -96,7 +96,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       progress();
     }
   }
-  if (!seq_block.empty()) block_inserter.process_block(kmer_len, seq_block, {}, kmer_dht);
+  if (!seq_block.empty()) seq_block_inserter.process_block(kmer_len, seq_block, {}, kmer_dht);
   progbar.done();
   kmer_dht->flush_updates();
   auto all_num_reads = reduce_one(num_reads, op_fast_add, 0).wait();
@@ -119,7 +119,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   vector<kmer_count_t> depth_block;
   seq_block.reserve(KCOUNT_SEQ_BLOCK_SIZE);
   depth_block.reserve(KCOUNT_SEQ_BLOCK_SIZE);
-  BlockInserter<MAX_K> block_inserter(0, kmer_dht->get_minimizer_len());
+  SeqBlockInserter<MAX_K> seq_block_inserter(0, kmer_dht->get_minimizer_len());
   // estimate number of kmers from ctgs
   int64_t max_kmers = 0;
   for (auto &ctg : ctgs) {
@@ -133,7 +133,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     progbar.update();
     if (ctg->seq.length() < kmer_len + 2) continue;
     if (seq_block.length() + 1 + ctg->seq.length() >= KCOUNT_SEQ_BLOCK_SIZE) {
-      block_inserter.process_block(kmer_len, seq_block, depth_block, kmer_dht);
+      seq_block_inserter.process_block(kmer_len, seq_block, depth_block, kmer_dht);
       seq_block.clear();
       depth_block.clear();
     }
@@ -144,7 +144,7 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     seq_block += "_";
     depth_block.insert(depth_block.end(), ctg->seq.length() + 1, ctg->get_uint16_t_depth());
   }
-  if (!seq_block.empty()) block_inserter.process_block(kmer_len, seq_block, depth_block, kmer_dht);
+  if (!seq_block.empty()) seq_block_inserter.process_block(kmer_len, seq_block, depth_block, kmer_dht);
   progbar.done();
   kmer_dht->flush_updates();
   auto all_num_ctgs = reduce_one(ctgs.size(), op_fast_add, 0).wait();
