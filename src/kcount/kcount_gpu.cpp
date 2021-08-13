@@ -127,7 +127,7 @@ void BlockInserter<MAX_K>::process_block(unsigned kmer_len, string &seq_block, c
     supermer.count = (from_ctgs ? depth_block[offset + 1] : (kmer_count_t)1);
     bytes_supermers_sent += supermer.get_bytes();
     kmer_dht->add_supermer(supermer, target);
-    num_kmers += supermer.seq.length() - Kmer<MAX_K>::get_k();
+    num_kmers += (2 * supermer.seq.length() - Kmer<MAX_K>::get_k());
     progress();
   }
 }
@@ -278,13 +278,10 @@ template <int MAX_K>
 std::tuple<bool, Kmer<MAX_K>, KmerCounts> HashTableInserter<MAX_K>::get_next_entry() {
   auto [kmer_array, count_exts] = state->ht_gpu_driver.get_next_entry();
   if (!kmer_array) return {true, {}, {}};
-  KmerCounts kmer_counts = {.left_exts = {0},
-                            .right_exts = {0},
-                            .uutig_frag = nullptr,
+  KmerCounts kmer_counts = {.uutig_frag = nullptr,
                             .count = static_cast<kmer_count_t>(min(count_exts->count, static_cast<count_t>(UINT16_MAX))),
                             .left = (char)count_exts->left,
-                            .right = (char)count_exts->right,
-                            .from_ctg = false};
+                            .right = (char)count_exts->right};
   Kmer<MAX_K> kmer(reinterpret_cast<const uint64_t *>(kmer_array->longs));
   return {false, kmer, kmer_counts};
 }

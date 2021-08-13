@@ -66,78 +66,7 @@ using namespace upcxx_utils;
 //#define DBG_INSERT_KMER DBG
 #define DBG_INSERT_KMER(...)
 
-// global variables to avoid passing dist objs to rpcs
-static uint64_t _num_kmers_counted = 0;
 static int num_inserts = 0;
-
-void ExtCounts::set(uint16_t *counts) {
-  count_A = counts[0];
-  count_C = counts[1];
-  count_G = counts[2];
-  count_T = counts[3];
-}
-
-void ExtCounts::set(uint32_t *counts) {
-  count_A = static_cast<uint16_t>(counts[0]);
-  count_C = static_cast<uint16_t>(counts[1]);
-  count_G = static_cast<uint16_t>(counts[2]);
-  count_T = static_cast<uint16_t>(counts[3]);
-}
-
-std::array<std::pair<char, int>, 4> ExtCounts::get_sorted() {
-  std::array<std::pair<char, int>, 4> counts = {std::make_pair('A', (int)count_A), std::make_pair('C', (int)count_C),
-                                                std::make_pair('G', (int)count_G), std::make_pair('T', (int)count_T)};
-  std::sort(std::begin(counts), std::end(counts), [](const auto &elem1, const auto &elem2) {
-    if (elem1.second == elem2.second)
-      return elem1.first > elem2.first;
-    else
-      return elem1.second > elem2.second;
-  });
-  return counts;
-}
-
-bool ExtCounts::is_zero() {
-  if (count_A + count_C + count_G + count_T == 0) return true;
-  return false;
-}
-
-ext_count_t ExtCounts::inc_with_limit(int count1, int count2) {
-  count1 += count2;
-  return std::min(count1, (int)std::numeric_limits<ext_count_t>::max());
-}
-
-void ExtCounts::inc(char ext, int count) {
-  switch (ext) {
-    case 'A': count_A = inc_with_limit(count_A, count); break;
-    case 'C': count_C = inc_with_limit(count_C, count); break;
-    case 'G': count_G = inc_with_limit(count_G, count); break;
-    case 'T': count_T = inc_with_limit(count_T, count); break;
-  }
-}
-
-void ExtCounts::add(ExtCounts &ext_counts) {
-  count_A = inc_with_limit(count_A, ext_counts.count_A);
-  count_C = inc_with_limit(count_C, ext_counts.count_C);
-  count_G = inc_with_limit(count_G, ext_counts.count_G);
-  count_T = inc_with_limit(count_T, ext_counts.count_T);
-}
-
-char ExtCounts::get_ext(kmer_count_t count) {
-  auto sorted_counts = get_sorted();
-  int top_count = sorted_counts[0].second;
-  int runner_up_count = sorted_counts[1].second;
-  // set dynamic_min_depth to 1.0 for single depth data (non-metagenomes)
-  int dmin_dyn = std::max((int)((1.0 - DYN_MIN_DEPTH) * count), _dmin_thres);
-  if (top_count < dmin_dyn) return 'X';
-  if (runner_up_count >= dmin_dyn) return 'F';
-  return sorted_counts[0].first;
-}
-
-string ExtCounts::to_string() {
-  ostringstream os;
-  os << count_A << "," << count_C << "," << count_G << "," << count_T;
-  return os.str();
-}
 
 void Supermer::pack(const string &unpacked_seq) {
   // each position in the sequence is an upper or lower case nucleotide, not including Ns
@@ -276,13 +205,6 @@ KmerDHT<MAX_K>::~KmerDHT() {
 }
 
 template <int MAX_K>
-pair<int64_t, int64_t> KmerDHT<MAX_K>::get_bytes_sent() {
-  auto all_bytes_sent = reduce_one(bytes_sent, op_fast_add, 0).wait();
-  auto max_bytes_sent = reduce_one(bytes_sent, op_fast_max, 0).wait();
-  return {all_bytes_sent, max_bytes_sent};
-}
-
-template <int MAX_K>
 void KmerDHT<MAX_K>::init_ctg_kmers(int64_t max_elems) {
   using_ctg_kmers = true;
   ht_inserter->init_ctg_kmers(max_elems);
@@ -367,28 +289,6 @@ void KmerDHT<MAX_K>::flush_updates() {
   kmer_store.flush_updates();
   barrier();
   ht_inserter->flush_inserts();
-  auto avg_kmers_processed = reduce_one(_num_kmers_counted, op_fast_add, 0).wait() / rank_n();
-  auto max_kmers_processed = reduce_one(_num_kmers_counted, op_fast_max, 0).wait();
-  SLOG_VERBOSE("Avg kmers processed per rank ", avg_kmers_processed, " (balance ",
-               (double)avg_kmers_processed / max_kmers_processed, ")\n");
-}
-
-template <int MAX_K>
-void KmerDHT<MAX_K>::purge_kmers(int threshold) {
-  BarrierTimer timer(__FILEFUNC__);
-  auto num_prior_kmers = get_num_kmers();
-  uint64_t num_purged = 0;
-  for (auto it = local_kmers->begin(); it != local_kmers->end();) {
-    auto kmer_counts = make_shared<KmerCounts>(it->second);
-    if ((kmer_counts->count < threshold) || (kmer_counts->left_exts.is_zero() && kmer_counts->right_exts.is_zero())) {
-      num_purged++;
-      it = local_kmers->erase(it);
-    } else {
-      ++it;
-    }
-  }
-  auto all_num_purged = reduce_one(num_purged, op_fast_add, 0).wait();
-  SLOG_VERBOSE("Purged ", perc_str(all_num_purged, num_prior_kmers), " kmers below frequency threshold of ", threshold, "\n");
 }
 
 #define SLOG_GPU SLOG_VERBOSE
@@ -477,7 +377,6 @@ void KmerDHT<MAX_K>::dump_kmers() {
   int64_t i = 0;
   for (auto &elem : *local_kmers) {
     out_buf << elem.first << " " << elem.second.count << " " << elem.second.left << " " << elem.second.right;
-    out_buf << " " << elem.second.left_exts.to_string() << " " << elem.second.right_exts.to_string();
     out_buf << endl;
     i++;
     if (!(i % 1000)) {

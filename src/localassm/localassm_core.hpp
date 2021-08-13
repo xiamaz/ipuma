@@ -50,7 +50,6 @@
 
 #include "alignments.hpp"
 #include "contigs.hpp"
-#include "kmer_dht.hpp"
 #include "packed_reads.hpp"
 #include "upcxx_utils.hpp"
 #include "utils.hpp"

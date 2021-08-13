@@ -51,54 +51,20 @@
 #include "upcxx_utils/flat_aggr_store.hpp"
 #include "upcxx_utils/three_tier_aggr_store.hpp"
 
-using ext_count_t = uint16_t;
 using kmer_count_t = uint16_t;
 
 // global variables to avoid passing dist objs to rpcs
 inline int _dmin_thres = 2.0;
 
-struct ExtCounts {
-  ext_count_t count_A;
-  ext_count_t count_C;
-  ext_count_t count_G;
-  ext_count_t count_T;
-
-  void set(uint16_t *counts);
-
-  void set(uint32_t *counts);
-
-  std::array<std::pair<char, int>, 4> get_sorted();
-
-  bool is_zero();
-
-  ext_count_t inc_with_limit(int count1, int count2);
-
-  void inc(char ext, int count);
-
-  void add(ExtCounts &ext_counts);
-
-  char get_ext(kmer_count_t count);
-
-  string to_string();
-};
-
 struct FragElem;
 
-// total bytes: 2+8+8=18
+// total bytes: 8+2+2
 struct KmerCounts {
-  // how many times this kmer has occurred: don't need to count beyond 65536
-  // count of high quality forward and backward exts
-  ExtCounts left_exts;
-  ExtCounts right_exts;
   global_ptr<FragElem> uutig_frag;
+  // how many times this kmer has occurred: don't need to count beyond 65536
   kmer_count_t count;
   // the final extensions chosen - A,C,G,T, or F,X
   char left, right;
-  bool from_ctg;
-
-  char get_left_ext() { return left_exts.get_ext(count); }
-
-  char get_right_ext() { return right_exts.get_ext(count); }
 };
 
 template <int MAX_K>
@@ -166,7 +132,6 @@ class KmerDHT {
   int max_rpcs_in_flight;
   double estimated_error_rate;
   std::chrono::time_point<std::chrono::high_resolution_clock> start_t;
-  int64_t bytes_sent = 0;
 
   int minimizer_len = 15;
   bool using_ctg_kmers = false;
@@ -183,8 +148,6 @@ class KmerDHT {
   void clear_stores();
 
   ~KmerDHT();
-
-  pair<int64_t, int64_t> get_bytes_sent();
 
   void init_ctg_kmers(int64_t max_elems);
 

@@ -48,7 +48,6 @@
 
 #include "alignments.hpp"
 #include "contigs.hpp"
-#include "kmer_dht.hpp"
 #include "packed_reads.hpp"
 #include "upcxx_utils.hpp"
 #include "utils.hpp"
@@ -58,9 +57,33 @@
 using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
-using namespace localassm_core;
+
+namespace localassm_core {
 
 enum class AlnStatus { NO_ALN, OVERLAPS_CONTIG, EXTENDS_CONTIG };
+
+using ext_count_t = uint16_t;
+
+struct ExtCounts {
+  ext_count_t count_A;
+  ext_count_t count_C;
+  ext_count_t count_G;
+  ext_count_t count_T;
+
+  ext_count_t inc_with_limit(int count1, int count2) {
+    count1 += count2;
+    return std::min(count1, (int)std::numeric_limits<ext_count_t>::max());
+  }
+
+  void inc(char ext, int count) {
+    switch (ext) {
+      case 'A': count_A = inc_with_limit(count_A, count); break;
+      case 'C': count_C = inc_with_limit(count_C, count); break;
+      case 'G': count_G = inc_with_limit(count_G, count); break;
+      case 'T': count_T = inc_with_limit(count_T, count); break;
+    }
+  }
+};
 
 size_t ReadsToCtgsDHT::get_target_rank(const string &read_id) { return std::hash<string>{}(read_id) % rank_n(); }
 
@@ -308,8 +331,8 @@ struct MerFreqs {
   }
 };
 
-void localassm_core::process_reads(unsigned kmer_len, vector<PackedReads *> &packed_reads_list, ReadsToCtgsDHT &reads_to_ctgs,
-                                   CtgsWithReadsDHT &ctgs_dht) {
+void process_reads(unsigned kmer_len, vector<PackedReads *> &packed_reads_list, ReadsToCtgsDHT &reads_to_ctgs,
+                   CtgsWithReadsDHT &ctgs_dht) {
   BarrierTimer timer(__FILEFUNC__);
   int64_t num_reads = 0;
   int64_t num_read_maps_found = 0;
@@ -459,7 +482,7 @@ static void get_best_aln_for_read(const Alns &alns, int64_t &i, Aln &best_aln, A
   }
 }
 
-void localassm_core::process_alns(const Alns &alns, ReadsToCtgsDHT &reads_to_ctgs, int insert_avg, int insert_stddev) {
+void process_alns(const Alns &alns, ReadsToCtgsDHT &reads_to_ctgs, int insert_avg, int insert_stddev) {
   auto pair_overlap = [](Aln &aln, int min_pair_len) -> bool {
     // make sure that the mate won't overlap the same contig
     if (aln.orient == '+') {
@@ -645,9 +668,8 @@ static string iterative_walks(string &seq, int seq_depth, vector<ReadSeq> &reads
   return longest_walk;
 }
 
-void localassm_core::extend_ctg(CtgWithReads *ctg, WalkMetrics &wm, int insert_avg, int insert_stddev, int max_kmer_len,
-                                int kmer_len, int qual_offset, int walk_len_limit, IntermittentTimer &count_mers_timer,
-                                IntermittentTimer &walk_mers_timer) {
+void extend_ctg(CtgWithReads *ctg, WalkMetrics &wm, int insert_avg, int insert_stddev, int max_kmer_len, int kmer_len,
+                int qual_offset, int walk_len_limit, IntermittentTimer &count_mers_timer, IntermittentTimer &walk_mers_timer) {
   wm.sum_clen += ctg->seq.length();
   if (ctg->reads_right.size()) {
     wm.num_sides++;
@@ -676,7 +698,7 @@ void localassm_core::extend_ctg(CtgWithReads *ctg, WalkMetrics &wm, int insert_a
   }
 }
 
-void localassm_core::add_ctgs(CtgsWithReadsDHT &ctgs_dht, Contigs &ctgs) {
+void add_ctgs(CtgsWithReadsDHT &ctgs_dht, Contigs &ctgs) {
   BarrierTimer timer(__FILEFUNC__);
   // process the local ctgs and insert into the distributed hash table
   ProgressBar progbar(ctgs.size(), "Adding contigs to distributed hash table");
@@ -689,3 +711,5 @@ void localassm_core::add_ctgs(CtgsWithReadsDHT &ctgs_dht, Contigs &ctgs) {
   progbar.done();
   SLOG_VERBOSE("Added ", ctgs_dht.get_num_ctgs(), " contigs\n");
 }
+
+}  // namespace localassm_core
