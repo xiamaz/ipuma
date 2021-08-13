@@ -528,9 +528,9 @@ class Aligner {
       // set the subsequence to be the overlap region on the contig
       string_view ctg_subseq = string_view(ctg_seq.data() + cstart, overlap_len);
 
-      assert(pos_in_read + Kmer<MAX_K>::get_k() <= rseq_ptr.size() && "kmer fits in read");
-      assert(ctg_loc.pos_in_ctg + Kmer<MAX_K>::get_k() <= ctg_seq.size() && "kmer fits in ctg");
-      assert(memcmp(rseq_ptr.data() + pos_in_read, ctg_seq.data() + ctg_loc.pos_in_ctg, Kmer<MAX_K>::get_k()) == 0 &&
+      assert(pos_in_read + kmer_len <= rseq_ptr.size() && "kmer fits in read");
+      assert(ctg_loc.pos_in_ctg + kmer_len <= ctg_seq.size() && "kmer fits in ctg");
+      assert(memcmp(rseq_ptr.data() + pos_in_read, ctg_seq.data() + ctg_loc.pos_in_ctg, kmer_len) == 0 &&
              "kmer seed exact matches read and ctg");
       align_read(rname, ctg_loc.cid, read_subseq, ctg_subseq, rstart, rlen, cstart, ctg_loc.clen, orient, overlap_len,
                  read_group_id);

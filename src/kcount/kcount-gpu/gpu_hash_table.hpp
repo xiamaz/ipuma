@@ -51,7 +51,7 @@
 
 namespace kcount_gpu {
 
-enum PASS_TYPE { READ_KMERS_PASS, CTG_KMERS_PASS };
+enum PASS_TYPE { READ_KMERS_PASS = 0, CTG_KMERS_PASS = 1 };
 
 using count_t = uint32_t;
 using ext_count_t = uint16_t;
@@ -137,12 +137,12 @@ class HashTableGPUDriver {
   InsertStats *gpu_insert_stats;
   int num_gpu_calls = 0;
 
-  PASS_TYPE pass_type;
-
   void insert_supermer_block();
   void purge_invalid(int &num_purged, int &num_entries);
 
  public:
+  PASS_TYPE pass_type;
+
   HashTableGPUDriver();
   ~HashTableGPUDriver();
 
@@ -151,21 +151,22 @@ class HashTableGPUDriver {
 
   void init_ctg_kmers(int max_elems, size_t gpu_avail_mem);
 
-  void set_pass(PASS_TYPE p);
-
   void insert_supermer(const std::string &supermer_seq, count_t supermer_count);
+
   void flush_inserts();
+
   void done_ctg_kmer_inserts(int &attempted_inserts, int &dropped_inserts, int &new_inserts);
+
   void done_all_inserts(int &num_dropped, int &num_unique, int &num_purged);
 
-  // FIXME: return a pair of kmerarr and a struct of int, char, char whiich is the count and left and right exts
   std::pair<KmerArray<MAX_K> *, CountExts *> get_next_entry();
 
-  static int get_N_LONGS();
-
   void get_elapsed_time(double &insert_time, double &kernel_time);
-  int64_t get_capacity(PASS_TYPE p);
-  InsertStats &get_stats(PASS_TYPE p);
+
+  int64_t get_capacity();
+
+  InsertStats &get_stats();
+
   int get_num_gpu_calls();
 };
 

@@ -436,6 +436,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   this->upcxx_rank_me = upcxx_rank_me;
   this->upcxx_rank_n = upcxx_rank_n;
   this->kmer_len = kmer_len;
+  pass_type = READ_KMERS_PASS;
   int device_count = 0;
   cudaErrchk(cudaGetDeviceCount(&device_count));
   int my_gpu_id = upcxx_rank_me % device_count;
@@ -472,6 +473,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::init_ctg_kmers(int max_elems, size_t gpu_avail_mem) {
+  pass_type = CTG_KMERS_PASS;
   size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * (1 + sizeof(count_t)) * 1.5;
   size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(CountsArray);
   size_t max_slots = 0.9 * (gpu_avail_mem - elem_buff_size) / elem_size;
@@ -643,11 +645,6 @@ void HashTableGPUDriver<MAX_K>::done_ctg_kmer_inserts(int &attempted_inserts, in
 }
 
 template <int MAX_K>
-void HashTableGPUDriver<MAX_K>::set_pass(PASS_TYPE p) {
-  pass_type = p;
-}
-
-template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::get_elapsed_time(double &insert_time, double &kernel_time) {
   insert_time = dstate->insert_timer.get_elapsed();
   kernel_time = dstate->kernel_timer.get_elapsed();
@@ -661,16 +658,16 @@ pair<KmerArray<MAX_K> *, CountExts *> HashTableGPUDriver<MAX_K>::get_next_entry(
 }
 
 template <int MAX_K>
-int64_t HashTableGPUDriver<MAX_K>::get_capacity(PASS_TYPE p) {
-  if (p == READ_KMERS_PASS)
+int64_t HashTableGPUDriver<MAX_K>::get_capacity() {
+  if (pass_type == READ_KMERS_PASS)
     return read_kmers_dev.capacity;
   else
     return ctg_kmers_dev.capacity;
 }
 
 template <int MAX_K>
-InsertStats &HashTableGPUDriver<MAX_K>::get_stats(PASS_TYPE p) {
-  if (p == READ_KMERS_PASS)
+InsertStats &HashTableGPUDriver<MAX_K>::get_stats() {
+  if (pass_type == READ_KMERS_PASS)
     return read_kmers_stats;
   else
     return ctg_kmers_stats;

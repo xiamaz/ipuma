@@ -238,17 +238,17 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
   cudaErrchk(cudaGetDeviceCount(&device_count));
   int my_gpu_id = upcxx_rank_me % device_count;
   cudaErrchk(cudaSetDevice(my_gpu_id));
-  max_kmers = KCOUNT_GPU_SEQ_BLOCK_SIZE - kmer_len + 1;
+  max_kmers = KCOUNT_SEQ_BLOCK_SIZE - kmer_len + 1;
 
-  cudaErrchk(cudaMalloc((void **)&dev_seqs, KCOUNT_GPU_SEQ_BLOCK_SIZE));
+  cudaErrchk(cudaMalloc((void **)&dev_seqs, KCOUNT_SEQ_BLOCK_SIZE));
   cudaErrchk(cudaMalloc((void **)&dev_kmer_targets, max_kmers * sizeof(int)));
 
   cudaErrchk(cudaMalloc((void **)&dev_supermers, max_kmers * sizeof(SupermerInfo)));
-  cudaErrchk(cudaMalloc((void **)&dev_packed_seqs, halve_up(KCOUNT_GPU_SEQ_BLOCK_SIZE)));
+  cudaErrchk(cudaMalloc((void **)&dev_packed_seqs, halve_up(KCOUNT_SEQ_BLOCK_SIZE)));
   cudaErrchk(cudaMalloc((void **)&dev_num_supermers, sizeof(int)));
   cudaErrchk(cudaMalloc((void **)&dev_num_valid_kmers, sizeof(int)));
 
-  // total storage required is approx KCOUNT_GPU_SEQ_BLOCK_SIZE * (1 + num_kmers_longs * sizeof(uint64_t) + sizeof(int) + 1)
+  // total storage required is approx KCOUNT_SEQ_BLOCK_SIZE * (1 + num_kmers_longs * sizeof(uint64_t) + sizeof(int) + 1)
   dstate = new ParseAndPackDriverState();
   init_timer.stop();
   init_time = init_timer.get_elapsed();
@@ -269,7 +269,7 @@ kcount_gpu::ParseAndPackGPUDriver::~ParseAndPackGPUDriver() {
 bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, unsigned int &num_valid_kmers) {
   QuickTimer func_timer, kernel_timer;
 
-  if (seqs.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) return false;
+  if (seqs.length() >= KCOUNT_SEQ_BLOCK_SIZE) return false;
   if (seqs.length() == 0) return false;
   if (seqs.length() < (unsigned int)kmer_len) return false;
 

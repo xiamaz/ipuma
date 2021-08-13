@@ -51,18 +51,8 @@
 #include "upcxx_utils/flat_aggr_store.hpp"
 #include "upcxx_utils/three_tier_aggr_store.hpp"
 
-//#define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
-#define SLOG_GPU SLOG_VERBOSE
-
-#include "gpu-utils/gpu_utils.hpp"
-#include "kcount-gpu/gpu_hash_table.hpp"
-
-enum PASS_TYPE { READ_KMERS_PASS, CTG_KMERS_PASS };
-
 using ext_count_t = uint16_t;
 using kmer_count_t = uint16_t;
-
-using kcount_gpu::HashTableGPUDriver;
 
 // global variables to avoid passing dist objs to rpcs
 inline int _dmin_thres = 2.0;
@@ -134,13 +124,40 @@ struct Supermer {
 };
 
 template <int MAX_K>
+struct HashTableInserter {
+  struct HashTableInserterState;
+  HashTableInserterState *state = nullptr;
+
+  HashTableInserter();
+  ~HashTableInserter();
+
+  void init(int max_elems);
+
+  void init_ctg_kmers(int max_elems);
+
+  void insert_supermer(const std::string &supermer_seq, kmer_count_t supermer_count);
+
+  void flush_inserts();
+
+  void done_ctg_kmer_inserts(int &attempted_inserts, int &dropped_inserts, int &new_inserts);
+
+  void done_all_inserts(int &num_dropped, int &num_unique, int &num_purged);
+
+  std::tuple<bool, Kmer<MAX_K>, KmerCounts> get_next_entry();
+
+  void get_elapsed_time(double &insert_time, double &kernel_time);
+
+  int64_t get_capacity();
+};
+
+template <int MAX_K>
 class KmerDHT {
  public:
   using KmerMap = HASH_TABLE<Kmer<MAX_K>, KmerCounts>;
 
  private:
-  upcxx::dist_object<KmerMap> kmers;
-  dist_object<HashTableGPUDriver<MAX_K>> ht_gpu_driver;
+  dist_object<KmerMap> local_kmers;
+  dist_object<HashTableInserter<MAX_K>> ht_inserter;
 
   upcxx_utils::ThreeTierAggrStore<Supermer> kmer_store;
   int64_t max_kmer_store_bytes;
@@ -149,7 +166,6 @@ class KmerDHT {
   int max_rpcs_in_flight;
   double estimated_error_rate;
   std::chrono::time_point<std::chrono::high_resolution_clock> start_t;
-  PASS_TYPE pass_type;
   int64_t bytes_sent = 0;
 
   int minimizer_len = 15;
@@ -173,8 +189,6 @@ class KmerDHT {
   pair<int64_t, int64_t> get_bytes_sent();
 
   void init_ctg_kmers(int64_t max_elems);
-
-  void set_pass(PASS_TYPE pass_type);
 
   int get_minimizer_len();
 

@@ -52,29 +52,20 @@ using namespace upcxx_utils;
 using namespace upcxx;
 
 template <int MAX_K>
-void init_parse_and_pack(int qual_offset, int minimizer_len);
-
-void done_parse_and_pack();
-
-template <int MAX_K>
-void process_block(unsigned kmer_len, string &seq_block, const vector<kmer_count_t> &depth_block,
-                   dist_object<KmerDHT<MAX_K>> &kmer_dht);
-
-template <int MAX_K>
 static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *> &packed_reads_list,
                         dist_object<KmerDHT<MAX_K>> &kmer_dht) {
   BarrierTimer timer(__FILEFUNC__);
   int64_t num_reads = 0;
   int64_t num_lines = 0;
   int64_t num_bad_quals = 0;
+  int64_t tot_read_len = 0;
 
   string progbar_prefix = "";
   IntermittentTimer t_pp(__FILENAME__ + string(":kmer parse and pack"));
-  kmer_dht->set_pass(READ_KMERS_PASS);
   barrier();
   string seq_block;
-  seq_block.reserve(KCOUNT_GPU_SEQ_BLOCK_SIZE);
-  init_parse_and_pack<MAX_K>(qual_offset, kmer_dht->get_minimizer_len());
+  seq_block.reserve(KCOUNT_SEQ_BLOCK_SIZE);
+  BlockInserter<MAX_K> block_inserter(qual_offset, kmer_dht->get_minimizer_len());
   int64_t tot_num_local_reads = 0;
   for (auto packed_reads : packed_reads_list) {
     tot_num_local_reads += packed_reads->get_local_num_reads();
@@ -89,14 +80,15 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       num_reads++;
       progbar.update();
       if (seq.length() < kmer_len) continue;
+      tot_read_len += seq.length();
       for (int i = 0; i < seq.length(); i++) {
         if (quals[i] < qual_offset + KCOUNT_QUAL_CUTOFF) {
           seq[i] = tolower(seq[i]);
           num_bad_quals++;
         }
       }
-      if (seq_block.length() + 1 + seq.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) {
-        process_block<MAX_K>(kmer_len, seq_block, {}, kmer_dht);
+      if (seq_block.length() + 1 + seq.length() >= KCOUNT_SEQ_BLOCK_SIZE) {
+        block_inserter.process_block(kmer_len, seq_block, {}, kmer_dht);
         seq_block.clear();
       }
       seq_block += seq;
@@ -104,15 +96,15 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
       progress();
     }
   }
-  if (!seq_block.empty()) process_block<MAX_K>(kmer_len, seq_block, {}, kmer_dht);
+  if (!seq_block.empty()) block_inserter.process_block(kmer_len, seq_block, {}, kmer_dht);
   progbar.done();
-  done_parse_and_pack();
-
   kmer_dht->flush_updates();
   auto all_num_reads = reduce_one(num_reads, op_fast_add, 0).wait();
   SLOG_VERBOSE("Processed a total of ", all_num_reads, " reads\n");
   auto all_num_bad_quals = reduce_one(num_bad_quals, op_fast_add, 0).wait();
-  if (all_num_bad_quals) SLOG_VERBOSE("Found ", all_num_bad_quals, " bad quality positions\n");
+  auto all_tot_read_len = reduce_one(tot_read_len, op_fast_add, 0).wait();
+  if (all_num_bad_quals) SLOG_VERBOSE("Found ", perc_str(all_num_bad_quals, all_tot_read_len), " bad quality positions\n");
+  // DIE("********** DONE ************");
 };
 
 template <int MAX_K>
@@ -121,15 +113,13 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   int64_t num_prev_kmers = kmer_dht->get_num_kmers();
 
   ProgressBar progbar(ctgs.size(), "Adding extra contig kmers from kmer length " + to_string(prev_kmer_len));
-  kmer_dht->set_pass(CTG_KMERS_PASS);
   auto start_local_num_kmers = kmer_dht->get_local_num_kmers();
 
-  int num_ctg_blocks = 0;
   string seq_block = "";
   vector<kmer_count_t> depth_block;
-  seq_block.reserve(KCOUNT_GPU_SEQ_BLOCK_SIZE);
-  depth_block.reserve(KCOUNT_GPU_SEQ_BLOCK_SIZE);
-  init_parse_and_pack<MAX_K>(0, kmer_dht->get_minimizer_len());
+  seq_block.reserve(KCOUNT_SEQ_BLOCK_SIZE);
+  depth_block.reserve(KCOUNT_SEQ_BLOCK_SIZE);
+  BlockInserter<MAX_K> block_inserter(0, kmer_dht->get_minimizer_len());
   // estimate number of kmers from ctgs
   int64_t max_kmers = 0;
   for (auto &ctg : ctgs) {
@@ -142,25 +132,20 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     auto ctg = it;
     progbar.update();
     if (ctg->seq.length() < kmer_len + 2) continue;
-    if (seq_block.length() + 1 + ctg->seq.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE) {
-      process_block<MAX_K>(kmer_len, seq_block, depth_block, kmer_dht);
+    if (seq_block.length() + 1 + ctg->seq.length() >= KCOUNT_SEQ_BLOCK_SIZE) {
+      block_inserter.process_block(kmer_len, seq_block, depth_block, kmer_dht);
       seq_block.clear();
       depth_block.clear();
-      num_ctg_blocks++;
     }
-    if (ctg->seq.length() >= KCOUNT_GPU_SEQ_BLOCK_SIZE)
+    if (ctg->seq.length() >= KCOUNT_SEQ_BLOCK_SIZE)
       DIE("Oh dear, my laziness is revealed: the ctg seq is too long ", ctg->seq.length(), " for this GPU implementation ",
-          KCOUNT_GPU_SEQ_BLOCK_SIZE);
+          KCOUNT_SEQ_BLOCK_SIZE);
     seq_block += ctg->seq;
     seq_block += "_";
     depth_block.insert(depth_block.end(), ctg->seq.length() + 1, ctg->get_uint16_t_depth());
   }
+  if (!seq_block.empty()) block_inserter.process_block(kmer_len, seq_block, depth_block, kmer_dht);
   progbar.done();
-  if (!seq_block.empty()) {
-    process_block<MAX_K>(kmer_len, seq_block, depth_block, kmer_dht);
-    num_ctg_blocks++;
-  }
-  done_parse_and_pack();
   kmer_dht->flush_updates();
   auto all_num_ctgs = reduce_one(ctgs.size(), op_fast_add, 0).wait();
   SLOG_VERBOSE("Processed a total of ", all_num_ctgs, " contigs\n");
