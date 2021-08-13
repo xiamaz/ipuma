@@ -57,8 +57,8 @@ void init_devices() {
   double gpu_startup_duration = 0;
   size_t gpu_mem = 0;
   detect_gpu_fut = execute_in_thread_pool(
-      [&gpu_startup_duration, &num_gpus, &gpu_mem]() { gpu_utils::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
-  detect_gpu_fut = detect_gpu_fut.then([&gpu_startup_duration, &num_gpus, &gpu_mem]() {
+      [&gpu_startup_duration, &gpu_mem]() { gpu_utils::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
+  detect_gpu_fut = detect_gpu_fut.then([&gpu_startup_duration, &gpu_mem]() {
     if (num_gpus > 0) {
       SLOG_VERBOSE(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
                    get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
