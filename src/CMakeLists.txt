@@ -140,9 +140,22 @@ foreach(
   list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
 endforeach()
 
+if(ENABLE_CUDA)
+  set(tgt devices_gpu)
+  add_library(${tgt} OBJECT ${tgt}.cpp)
+  target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
+else()
+  set(tgt devices_cpu)
+  add_library(${tgt} OBJECT ${tgt}.cpp)
+  target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
+endif()
+
 set(MHM2_TARGET_OBJECTS
     ${MHM2_TARGET_OBJECTS}
     PARENT_SCOPE)
+
 add_executable(mhm2 main.cpp ${MHM2_TARGET_OBJECTS})
 
 set(MHM2_LINK_LIBRARIES
@@ -155,15 +168,17 @@ set(MHM2_LINK_LIBRARIES
     ${ZLIB_LIBRARIES}
     MHM2_VERSION_LIB)
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 if(ENABLE_CUDA)
-  include_directories(${CMAKE_CURRENT_SOURCE_DIR})
   set_property(TARGET mhm2 PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF)
   include_directories("gpu-utils")
   add_subdirectory(gpu-utils)
   set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} GPU_UTILS_LIBRARY_static)
-  target_link_libraries(mhm2 ${MHM2_LINK_LIBRARIES} ${UPCXX_LIBRARIES}
-                        ${UPCXX_UTILS_LIBRARIES})
 endif()
+
+target_link_libraries(mhm2 ${MHM2_LINK_LIBRARIES} ${UPCXX_LIBRARIES}
+                      ${UPCXX_UTILS_LIBRARIES})
 
 set(MHM2_LINK_LIBRARIES
     ${MHM2_LINK_LIBRARIES}

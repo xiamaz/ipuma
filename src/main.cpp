@@ -52,7 +52,6 @@
 #include "upcxx_utils.hpp"
 #include "upcxx_utils/thread_pool.hpp"
 #include "utils.hpp"
-#include "gpu-utils/gpu_utils.hpp"
 
 #include "kmer.hpp"
 
@@ -60,6 +59,9 @@ using std::fixed;
 using std::setprecision;
 
 using namespace upcxx_utils;
+
+void init_devices();
+void done_init_devices();
 
 void merge_reads(vector<string> reads_fname_list, int qual_offset, double &elapsed_write_io_t,
                  vector<PackedReads *> &packed_reads_list, bool checkpoint, const string &adapter_fname, int min_kmer_len);
@@ -164,22 +166,8 @@ int main(int argc, char **argv) {
             " nodes for this amount of data.\n\tTotal free memory is approx ", get_size_str(total_free_mem),
             " and should be at least 3x the data size of ", get_size_str(tot_file_size), "\n");
   }
-  // initialize the GPU and first-touch memory and functions in a new thread as this can take many seconds to complete
-  double gpu_startup_duration = 0;
-  int num_gpus = -1;
-  size_t gpu_mem = 0;
-  bool init_gpu_thread = true;
-  auto detect_gpu_fut = execute_in_thread_pool(
-      [&gpu_startup_duration, &num_gpus, &gpu_mem]() { gpu_utils::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
-  detect_gpu_fut = detect_gpu_fut.then([&gpu_startup_duration, &num_gpus, &gpu_mem]() {
-    if (num_gpus > 0) {
-      SLOG_VERBOSE(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
-                   get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
-      SLOG_VERBOSE(gpu_utils::get_gpu_device_description());
-    } else {
-      SDIE("No GPUs available - this build requires GPUs");
-    }
-  });
+
+  init_devices();
 
   Contigs ctgs;
   int max_kmer_len = 0;
@@ -231,13 +219,7 @@ int main(int argc, char **argv) {
     int ins_avg = 0;
     int ins_stddev = 0;
 
-    if (init_gpu_thread) {
-      Timer t("Waiting for GPU to be initialized (should be noop)");
-      init_gpu_thread = false;
-      detect_gpu_fut.wait();
-    }
-    int max_dev_id = reduce_one(num_gpus > 0 ? gpu_utils::get_gpu_device_pci_id() : 0, op_fast_max, 0).wait();
-    SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
+    done_init_devices();
 
     // contigging loops
     if (options->kmer_lens.size()) {

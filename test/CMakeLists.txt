@@ -12,7 +12,6 @@ add_subdirectory(googletest)
 if(ENABLE_CUDA)
   add_definitions(-DENABLE_GPUS)
   message(STATUS "Building tests for GPUs with CUDA")
-  include_directories(${CMAKE_SOURCE_DIR}/src)
 endif()
 
 set(BINARY mhm2_test)
@@ -24,6 +23,7 @@ file(
 
 set(SOURCES ${TEST_SOURCES})
 
+include_directories("${CMAKE_SOURCE_DIR}/src")
 include_directories("${CMAKE_SOURCE_DIR}/src/ssw")
 
 add_executable(${BINARY} ${TEST_SOURCES} ${MHM2_TARGET_OBJECTS})

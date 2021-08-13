@@ -9,7 +9,9 @@
 #include "klign/aligner_cpu.hpp"
 #include "klign/adept-sw/driver.hpp"
 
+#ifdef ENABLE_GPUS
 #include "gpu-utils/gpu_utils.hpp"
+#endif
 
 using std::max;
 using std::min;
@@ -38,6 +40,7 @@ void translate_adept_to_ssw(Alignment &aln, const adept_sw::AlignmentResults &al
   aln.cigar.clear();
 }
 
+#ifdef ENABLE_GPUS
 void test_aligns_gpu(vector<Alignment> &alns, vector<string> query, vector<string> ref, adept_sw::GPUDriver &gpu_driver) {
   alns.reserve(query.size());
   unsigned max_q_len = 0, max_ref_len = 0;
@@ -78,6 +81,7 @@ void check_alns_gpu(vector<Alignment> &alns, vector<int> qstart, vector<int> qen
     i++;
   }
 }
+#endif
 
 string aln2string(Alignment &aln) {
   std::stringstream ss;
@@ -234,6 +238,7 @@ TEST(MHMTest, AdeptSW) {
   double time_to_initialize;
   int device_count;
   size_t total_mem;
+#ifdef ENABLE_GPUS
   gpu_utils::initialize_gpu(time_to_initialize, device_count, total_mem);
   if (device_count > 0) {
     EXPECT_TRUE(total_mem > 32 * 1024 * 1024);  // >32 MB
@@ -243,6 +248,7 @@ TEST(MHMTest, AdeptSW) {
   auto init_time = gpu_driver.init(0, 1, (short)aln_scoring.match, (short)-aln_scoring.mismatch, (short)-aln_scoring.gap_opening,
                                    (short)-aln_scoring.gap_extending, 300);
   std::cout << "Initialized gpu in " << time_to_initialize << "s and " << init_time << "s\n";
+#endif
 
   vector<Alignment> alns;
   vector<string> refs, queries;
@@ -411,9 +417,11 @@ TEST(MHMTest, AdeptSW) {
   rstarts.push_back(0);
   rends.push_back(15);
 
+#ifdef ENABLE_GPUS
   // run kernel
   test_aligns_gpu(alns, queries, refs, gpu_driver);
   // verify results
   check_alns_gpu(alns, qstarts, qends, rstarts, rends);
   // cuda tear down happens in driver destructor
+#endif
 }

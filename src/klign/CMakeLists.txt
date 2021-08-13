@@ -37,12 +37,14 @@ endif()
 
 add_library(KLIGN_LIBRARY ${KLIGN_TARGET_FILES} ${KLIGN_TARGET_OBJECTS})
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 if(ENABLE_CUDA)
-  include_directories(${CMAKE_CURRENT_SOURCE_DIR})
   set_property(TARGET KLIGN_LIBRARY PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF)
   include_directories("adept-sw")
   add_subdirectory(adept-sw)
   set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} ADEPT_SW_LIBRARY_static)
-  target_link_libraries(KLIGN_LIBRARY ${MHM2_LINK_LIBRARIES} ${UPCXX_LIBRARIES}
-                        ${UPCXX_UTILS_LIBRARIES})
 endif()
+
+target_link_libraries(KLIGN_LIBRARY ${MHM2_LINK_LIBRARIES} ${UPCXX_LIBRARIES}
+                      ${UPCXX_UTILS_LIBRARIES})

@@ -38,12 +38,14 @@ endif()
 
 add_library(KCOUNT_LIBRARY ${KCOUNT_TARGET_FILES} ${KCOUNT_TARGET_OBJECTS})
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 if(ENABLE_CUDA)
-  include_directories(${CMAKE_CURRENT_SOURCE_DIR})
   set_property(TARGET KCOUNT_LIBRARY PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF)
   include_directories("kcount-gpu")
   add_subdirectory(kcount-gpu)
   set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} KCOUNT_GPU_LIBRARY_static)
-  target_link_libraries(KCOUNT_LIBRARY ${MHM2_LINK_LIBRARIES}
-                        ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
 endif()
+
+target_link_libraries(KCOUNT_LIBRARY ${MHM2_LINK_LIBRARIES} ${UPCXX_LIBRARIES}
+                      ${UPCXX_UTILS_LIBRARIES})

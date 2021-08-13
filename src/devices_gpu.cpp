@@ -1,5 +1,3 @@
-#pragma once
-
 /*
  HipMer v 2.0, Copyright (c) 2020, The Regents of the University of California,
  through Lawrence Berkeley National Laboratory (subject to receipt of any required
@@ -44,81 +42,39 @@
 
 #include <upcxx/upcxx.hpp>
 
-#include "contigs.hpp"
-#include "version.h"
+#include "upcxx_utils/thread_pool.hpp"
+#include "gpu-utils/gpu_utils.hpp"
 
-using upcxx::future;
+using namespace upcxx;
+using namespace upcxx_utils;
 
-struct Aln {
-  Aln();
-  Aln(const string &read_id, int64_t cid, int rstart, int rstop, int rlen, int cstart, int cstop, int clen, char orient,
-      int score1 = 0, int score2 = 0, int identity = 0, int mismatches = 0, int read_group_id = -1);
+static bool init_gpu_thread = true;
+static future<> detect_gpu_fut;
+static int num_gpus = -1;
 
-  // optimal packing of data fields (does not match constructor exactly)
-  string read_id;
-  int64_t cid;
-  int cstart, cstop, clen;
-  int rstart, rstop, rlen;  // TODO can these be int16_t (for short reads only)?
-  int score1, score2;       // TODO can this be uint16_t (for short reads only)?
-  int mismatches;           // TODO can this be uint16_t (for short reads only)?
-  string sam_string;
-  int16_t read_group_id;
-  char orient;      // TODO can this be bool?
-  int8_t identity;  // this can be uint8_t - used as integer 0-100 %  // TODO can it even a member function int identity(int
-                    // match_score)
-
-  // writes out in the format meraligner uses
-  string to_string() const;
-  bool is_valid() const;
-};
-
-class Alns {
-  vector<Aln> alns;
-  int64_t num_dups;
-
- public:
-  Alns();
-
-  void clear();
-
-  bool check_dup(Aln &aln);
-
-  void add_aln(Aln &aln);
-
-  void append(Alns &more_alns);
-
-  const Aln &get_aln(int64_t i) const;
-
-  Aln &get_aln(int64_t i);
-
-  size_t size() const;
-
-  void reserve(size_t capacity);
-
-  void reset();
-
-  int64_t get_num_dups();
-
-  inline auto begin() { return alns.begin(); }
-  inline auto end() { return alns.end(); };
-
-  template <typename OSTREAM>
-  void dump_all(OSTREAM &os, bool as_sam_format, int min_ctg_len = 0) const {
-    // all ranks dump their valid alignments
-    for (const auto &aln : alns) {
-      if (aln.clen < min_ctg_len) continue;
-      if (!as_sam_format)
-        os << aln.to_string() << "\n";
-      else
-        os << aln.sam_string << "\n";
+void init_devices() {
+  // initialize the GPU and first-touch memory and functions in a new thread as this can take many seconds to complete
+  double gpu_startup_duration = 0;
+  size_t gpu_mem = 0;
+  detect_gpu_fut = execute_in_thread_pool(
+      [&gpu_startup_duration, &num_gpus, &gpu_mem]() { gpu_utils::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
+  detect_gpu_fut = detect_gpu_fut.then([&gpu_startup_duration, &num_gpus, &gpu_mem]() {
+    if (num_gpus > 0) {
+      SLOG_VERBOSE(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
+                   get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
+      SLOG_VERBOSE(gpu_utils::get_gpu_device_description());
+    } else {
+      SDIE("No GPUs available - this build requires GPUs");
     }
+  });
+}
+
+void done_init_devices() {
+  if (init_gpu_thread) {
+    Timer t("Waiting for GPU to be initialized (should be noop)");
+    init_gpu_thread = false;
+    detect_gpu_fut.wait();
   }
-
-  void dump_single_file(const string fname) const;
-  void dump_sam_file(const string fname, const vector<string> &read_group_names, const Contigs &ctgs, int min_contig_len = 0) const;
-  void dump_rank_file(const string fname) const;
-
-  int calculate_unmerged_rlen();
-
-  future<> sort_alns();
-};
+  int max_dev_id = reduce_one(num_gpus > 0 ? gpu_utils::get_gpu_device_pci_id() : 0, op_fast_max, 0).wait();
+  SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
+}

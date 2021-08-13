@@ -30,8 +30,13 @@ BINARY="${MHM2_BINARY:=mhm2}"
 rm -rf $INSTALL_PATH/bin/mhm2
 rm -rf $INSTALL_PATH/bin/${BINARY}
 
-if [ "$1" == "clean" ]; then
+if [ "$1" == "cleanall" ]; then
     rm -rf .build/*
+    # if this isn't removed then the the rebuild will not work
+    rm -rf $INSTALL_PATH/cmake
+    exit 0
+elif [ "$1" == "clean" ]; then
+    rm -rf .build/bin .build/CMake* .build/lib* .build/makeVersionFile .build/src .build/test .build/cmake* .build/Makefile .build/make*
     # if this isn't removed then the the rebuild will not work
     rm -rf $INSTALL_PATH/cmake
     exit 0
@@ -41,11 +46,11 @@ else
     if [ "$1" == "Debug" ] || [ "$1" == "Release" ] || [ "$1" == "RelWithDebInfo" ]; then
         rm -rf *
         rm -rf $INSTALL_PATH/cmake
-        cmake $rootdir -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=$1 -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH $MHM2_CMAKE_EXTRAS #-DENABLE_CUDA=0
+        cmake $rootdir -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=$1 -DCMAKE_INSTALL_PREFIX=$INSTALL_PATH \
+         -DMHM2_ENABLE_TESTING=0 $MHM2_CMAKE_EXTRAS #-DENABLE_CUDA=0
     fi
     make -j ${MHM2_BUILD_THREADS} all install
-    # this check could fail on cross-compiled systems, so don't abort
-#    make -j ${MHM2_BUILD_THREADS} check
+    # make -j ${MHM2_BUILD_THREADS} check
     if [ "$BINARY" != "mhm2" ]; then
         mv -f $INSTALL_PATH/bin/mhm2 $INSTALL_PATH/bin/${BINARY}
     fi

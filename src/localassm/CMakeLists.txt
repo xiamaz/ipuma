@@ -26,13 +26,15 @@ endif()
 
 add_library(LOCALASSM_LIBRARY ${LOCALASSM_TARGET_OBJECTS})
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 if(ENABLE_CUDA)
-  include_directories(${CMAKE_CURRENT_SOURCE_DIR})
   set_property(TARGET LOCALASSM_LIBRARY PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS
                                                  OFF)
   include_directories("localassm-gpu")
   add_subdirectory(localassm-gpu)
   set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} LOCALASSM_GPU_LIBRARY_static)
-  target_link_libraries(LOCALASSM_LIBRARY ${MHM2_LINK_LIBRARIES}
-                        ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
 endif()
+
+target_link_libraries(LOCALASSM_LIBRARY ${MHM2_LINK_LIBRARIES}
+                      ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
