@@ -62,6 +62,8 @@ static int64_t bytes_supermers_sent = 0;
 static int64_t num_kmers = 0;
 static int64_t num_Ns = 0;
 static int num_block_calls = 0;
+static string seq_block;
+static vector<kmer_count_t> depth_block;
 
 static ParseAndPackGPUDriver *pnp_gpu_driver;
 
@@ -77,6 +79,8 @@ SeqBlockInserter<MAX_K>::SeqBlockInserter(int qual_offset, int minimizer_len) {
   num_block_calls = 0;
   pnp_gpu_driver = new ParseAndPackGPUDriver(rank_me(), rank_n(), qual_offset, Kmer<MAX_K>::get_k(), Kmer<MAX_K>::get_N_LONGS(),
                                              minimizer_len, init_time);
+  seq_block.reserve(KCOUNT_SEQ_BLOCK_SIZE);
+  depth_block.reserve(KCOUNT_SEQ_BLOCK_SIZE);
   SLOG_GPU("Initialized PnP GPU driver in ", fixed, setprecision(3), init_time, " s\n");
 }
 
@@ -100,8 +104,7 @@ SeqBlockInserter<MAX_K>::~SeqBlockInserter() {
 }
 
 template <int MAX_K>
-void SeqBlockInserter<MAX_K>::process_block(unsigned kmer_len, string &seq_block, const vector<kmer_count_t> &depth_block,
-                                            dist_object<KmerDHT<MAX_K>> &kmer_dht) {
+static void process_block(dist_object<KmerDHT<MAX_K>> &kmer_dht) {
   num_block_calls++;
   bool from_ctgs = !depth_block.empty();
   unsigned int num_valid_kmers = 0;
@@ -130,6 +133,27 @@ void SeqBlockInserter<MAX_K>::process_block(unsigned kmer_len, string &seq_block
     num_kmers += (2 * supermer.seq.length() - Kmer<MAX_K>::get_k());
     progress();
   }
+  seq_block.clear();
+  depth_block.clear();
+}
+
+template <int MAX_K>
+void SeqBlockInserter<MAX_K>::process_seq(string &seq, kmer_count_t depth, dist_object<KmerDHT<MAX_K>> &kmer_dht) {
+  if (seq.length() >= KCOUNT_SEQ_BLOCK_SIZE)
+    DIE("Oh dear, my laziness is revealed: the ctg seq is too long ", seq.length(), " for this GPU implementation ",
+        KCOUNT_SEQ_BLOCK_SIZE);
+  if (seq_block.length() + 1 + seq.length() >= KCOUNT_SEQ_BLOCK_SIZE) {
+    process_block(kmer_dht);
+  } else {
+    seq_block += seq;
+    seq_block += "_";
+    if (depth) depth_block.insert(depth_block.end(), seq.length() + 1, depth);
+  }
+}
+
+template <int MAX_K>
+void SeqBlockInserter<MAX_K>::done_processing(dist_object<KmerDHT<MAX_K>> &kmer_dht) {
+  if (!seq_block.empty()) process_block(kmer_dht);
 }
 
 template <int MAX_K>

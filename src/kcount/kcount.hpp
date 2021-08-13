@@ -60,8 +60,9 @@ struct SeqBlockInserter {
 
   ~SeqBlockInserter();
 
-  void process_block(unsigned kmer_len, string &seq_block, const vector<kmer_count_t> &depth_block,
-                     dist_object<KmerDHT<MAX_K>> &kmer_dht);
+  void process_seq(string &seq, kmer_count_t depth, dist_object<KmerDHT<MAX_K>> &kmer_dht);
+
+  void done_processing(dist_object<KmerDHT<MAX_K>> &kmer_dht);
 };
 
 template <int MAX_K>
