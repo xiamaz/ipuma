@@ -261,7 +261,7 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
 template <int MAX_K>
 void KmerDHT<MAX_K>::clear() {
   local_kmers->clear();
-  KmerMap().swap(*local_kmers);
+  KmerMap<MAX_K>().swap(*local_kmers);
   clear_stores();
 }
 
@@ -394,7 +394,8 @@ void KmerDHT<MAX_K>::purge_kmers(int threshold) {
 #define SLOG_GPU SLOG_VERBOSE
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
+static void insert_from_gpu_hashtable(dist_object<KmerMap<MAX_K>> &local_kmers,
+                                      dist_object<HashTableInserter<MAX_K>> &ht_inserter) {
   barrier();
   Timer insert_timer("gpu insert to cpu timer");
   insert_timer.start();
@@ -457,7 +458,7 @@ void KmerDHT<MAX_K>::compute_kmer_exts() {
     ht_inserter->done_ctg_kmer_inserts();
     barrier();
   }
-  insert_from_gpu_hashtable();
+  insert_from_gpu_hashtable(local_kmers, ht_inserter);
 }
 
 // one line per kmer, format:
@@ -492,12 +493,12 @@ void KmerDHT<MAX_K>::dump_kmers() {
 }
 
 template <int MAX_K>
-typename KmerDHT<MAX_K>::KmerMap::iterator KmerDHT<MAX_K>::local_kmers_begin() {
+typename KmerMap<MAX_K>::iterator KmerDHT<MAX_K>::local_kmers_begin() {
   return local_kmers->begin();
 }
 
 template <int MAX_K>
-typename KmerDHT<MAX_K>::KmerMap::iterator KmerDHT<MAX_K>::local_kmers_end() {
+typename KmerMap<MAX_K>::iterator KmerDHT<MAX_K>::local_kmers_end() {
   return local_kmers->end();
 }
 

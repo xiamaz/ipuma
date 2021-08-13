@@ -151,12 +151,12 @@ struct HashTableInserter {
 };
 
 template <int MAX_K>
-class KmerDHT {
- public:
-  using KmerMap = HASH_TABLE<Kmer<MAX_K>, KmerCounts>;
+using KmerMap = HASH_TABLE<Kmer<MAX_K>, KmerCounts>;
 
+template <int MAX_K>
+class KmerDHT {
  private:
-  dist_object<KmerMap> local_kmers;
+  dist_object<KmerMap<MAX_K>> local_kmers;
   dist_object<HashTableInserter<MAX_K>> ht_inserter;
 
   upcxx_utils::ThreeTierAggrStore<Supermer> kmer_store;
@@ -172,8 +172,6 @@ class KmerDHT {
   bool using_ctg_kmers = false;
 
   void purge_kmers(int threshold);
-
-  void insert_from_gpu_hashtable();
 
   static void get_kmers_and_exts(Supermer &supermer, vector<KmerAndExt<MAX_K>> &kmers_and_exts);
 
@@ -222,9 +220,9 @@ class KmerDHT {
   // where N is the count of the kmer frequency
   void dump_kmers();
 
-  typename KmerMap::iterator local_kmers_begin();
+  typename KmerMap<MAX_K>::iterator local_kmers_begin();
 
-  typename KmerMap::iterator local_kmers_end();
+  typename KmerMap<MAX_K>::iterator local_kmers_end();
 
   int32_t get_time_offset_us();
 };
