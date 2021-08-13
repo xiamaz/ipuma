@@ -291,74 +291,12 @@ void KmerDHT<MAX_K>::flush_updates() {
   ht_inserter->flush_inserts();
 }
 
-#define SLOG_GPU SLOG_VERBOSE
-
-template <int MAX_K>
-static void insert_from_gpu_hashtable(dist_object<KmerMap<MAX_K>> &local_kmers,
-                                      dist_object<HashTableInserter<MAX_K>> &ht_inserter) {
-  barrier();
-  Timer insert_timer("gpu insert to cpu timer");
-  insert_timer.start();
-  auto num_entries = ht_inserter->done_all_inserts();
-  barrier();
-
-  // add some space for the ctg kmers
-  local_kmers->reserve(num_entries * 1.5);
-  uint64_t invalid = 0;
-  while (true) {
-    auto [done, kmer, kmer_counts] = ht_inserter->get_next_entry();
-    if (done) break;
-    // empty slot
-    if (!kmer_counts.count) continue;
-    if (kmer_counts.left == 'X' && kmer_counts.right == 'X') {
-      // these are eliminated during purging in CPU version
-      invalid++;
-      continue;
-    }
-    if ((kmer_counts.count < 2)) {
-      WARN("Found a kmer that should have been purged, count is ", kmer_counts.count);
-      invalid++;
-      continue;
-    }
-    const auto it = local_kmers->find(kmer);
-    if (it != local_kmers->end())
-      WARN("Found a duplicate kmer ", kmer.to_string(), " - shouldn't happen: existing count ", it->second.count, " new count ",
-           kmer_counts.count);
-    local_kmers->insert({kmer, kmer_counts});
-  }
-  insert_timer.stop();
-
-  auto all_avg_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_add, 0).wait() / rank_n();
-  auto all_max_elapsed_time = reduce_one(insert_timer.get_elapsed(), op_fast_max, 0).wait();
-  SLOG_GPU("Inserting kmers from GPU to cpu hash table took ", all_avg_elapsed_time, " avg, ", all_max_elapsed_time, " max\n");
-  auto all_kmers_size = reduce_one((uint64_t)local_kmers->size(), op_fast_add, 0).wait();
-  if (local_kmers->size() != (num_entries - invalid))
-    WARN("kmers->size() is ", local_kmers->size(), " != ", (num_entries - invalid), " num_entries");
-  auto all_num_entries = reduce_one((uint64_t)num_entries, op_fast_add, 0).wait();
-  auto all_invalid = reduce_one((uint64_t)invalid, op_fast_add, 0).wait();
-  if (all_kmers_size != all_num_entries - all_invalid)
-    SWARN("CPU kmer counts not equal to gpu kmer counts: ", all_kmers_size, " != ", (all_num_entries - all_invalid),
-          " all_num_entries: ", all_num_entries, " all_invalid: ", all_invalid);
-  double gpu_insert_time = 0, gpu_kernel_time = 0;
-  ht_inserter->get_elapsed_time(gpu_insert_time, gpu_kernel_time);
-  auto avg_gpu_insert_time = reduce_one(gpu_insert_time, op_fast_add, 0).wait() / rank_n();
-  auto max_gpu_insert_time = reduce_one(gpu_insert_time, op_fast_max, 0).wait();
-  auto avg_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_add, 0).wait() / rank_n();
-  auto max_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_max, 0).wait();
-  stage_timers.kernel_kmer_analysis->inc_elapsed(max_gpu_kernel_time);
-  SLOG_GPU("Elapsed GPU time for kmer hash tables:\n");
-  SLOG_GPU("  insert: ", fixed, setprecision(3), avg_gpu_insert_time, " avg, ", max_gpu_insert_time, " max\n");
-  SLOG_GPU("  kernel: ", fixed, setprecision(3), avg_gpu_kernel_time, " avg, ", max_gpu_kernel_time, " max\n");
-  barrier();
-}
-
 template <int MAX_K>
 void KmerDHT<MAX_K>::compute_kmer_exts() {
-  if (using_ctg_kmers) {
-    ht_inserter->done_ctg_kmer_inserts();
-    barrier();
-  }
-  insert_from_gpu_hashtable(local_kmers, ht_inserter);
+  ht_inserter->insert_into_local_hashtable(local_kmers);
+  double insert_time, kernel_time;
+  ht_inserter->get_elapsed_time(insert_time, kernel_time);
+  stage_timers.kernel_kmer_analysis->inc_elapsed(kernel_time);
 }
 
 // one line per kmer, format:

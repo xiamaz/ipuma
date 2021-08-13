@@ -58,7 +58,7 @@ inline int _dmin_thres = 2.0;
 
 struct FragElem;
 
-// total bytes: 8+2+2
+// total bytes: 8+2+2=12
 struct KmerCounts {
   global_ptr<FragElem> uutig_frag;
   // how many times this kmer has occurred: don't need to count beyond 65536
@@ -90,10 +90,14 @@ struct Supermer {
 };
 
 template <int MAX_K>
-struct HashTableInserter {
+using KmerMap = HASH_TABLE<Kmer<MAX_K>, KmerCounts>;
+
+template <int MAX_K>
+class HashTableInserter {
   struct HashTableInserterState;
   HashTableInserterState *state = nullptr;
 
+ public:
   HashTableInserter();
   ~HashTableInserter();
 
@@ -105,19 +109,10 @@ struct HashTableInserter {
 
   void flush_inserts();
 
-  void done_ctg_kmer_inserts();
-
-  int done_all_inserts();
-
-  std::tuple<bool, Kmer<MAX_K>, KmerCounts> get_next_entry();
+  void insert_into_local_hashtable(dist_object<KmerMap<MAX_K>> &local_kmers);
 
   void get_elapsed_time(double &insert_time, double &kernel_time);
-
-  int64_t get_capacity();
 };
-
-template <int MAX_K>
-using KmerMap = HASH_TABLE<Kmer<MAX_K>, KmerCounts>;
 
 template <int MAX_K>
 class KmerDHT {
