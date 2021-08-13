@@ -398,18 +398,7 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
   barrier();
   Timer insert_timer("gpu insert to cpu timer");
   insert_timer.start();
-  int num_dropped = 0, num_entries = 0, num_purged = 0;
-  ht_inserter->done_all_inserts(num_dropped, num_entries, num_purged);
-  if (num_dropped)
-    WARN("GPU dropped ", num_dropped, " entries out of ", num_entries, " when compacting to output hash table" KNORM "\n");
-  auto all_capacity = reduce_one((uint64_t)ht_inserter->get_capacity(), op_fast_add, 0).wait();
-  auto all_num_purged = reduce_one((uint64_t)num_purged, op_fast_add, 0).wait();
-  auto all_num_entries = reduce_one((uint64_t)num_entries, op_fast_add, 0).wait();
-  auto prepurge_num_entries = all_num_entries + all_num_purged;
-  SLOG_GPU("GPU read kmers hash table: purged ", perc_str(all_num_purged, prepurge_num_entries), " singleton kmers out of ",
-           prepurge_num_entries, "\n");
-  SLOG_GPU("GPU hash table final size is ", all_num_entries, " entries and final load factor is ",
-           ((double)all_num_entries / all_capacity), "\n");
+  auto num_entries = ht_inserter->done_all_inserts();
   barrier();
 
   // add some space for the ctg kmers
@@ -444,6 +433,7 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
   auto all_kmers_size = reduce_one((uint64_t)local_kmers->size(), op_fast_add, 0).wait();
   if (local_kmers->size() != (num_entries - invalid))
     WARN("kmers->size() is ", local_kmers->size(), " != ", (num_entries - invalid), " num_entries");
+  auto all_num_entries = reduce_one((uint64_t)num_entries, op_fast_add, 0).wait();
   auto all_invalid = reduce_one((uint64_t)invalid, op_fast_add, 0).wait();
   if (all_kmers_size != all_num_entries - all_invalid)
     SWARN("CPU kmer counts not equal to gpu kmer counts: ", all_kmers_size, " != ", (all_num_entries - all_invalid),
@@ -464,23 +454,7 @@ void KmerDHT<MAX_K>::insert_from_gpu_hashtable() {
 template <int MAX_K>
 void KmerDHT<MAX_K>::compute_kmer_exts() {
   if (using_ctg_kmers) {
-    barrier();
-    int attempted_inserts = 0, dropped_inserts = 0, new_inserts = 0;
-    ht_inserter->done_ctg_kmer_inserts(attempted_inserts, dropped_inserts, new_inserts);
-    barrier();
-    auto num_dropped_elems = reduce_one((uint64_t)dropped_inserts, op_fast_add, 0).wait();
-    auto num_attempted_inserts = reduce_one((uint64_t)attempted_inserts, op_fast_add, 0).wait();
-    auto num_new_inserts = reduce_one((uint64_t)new_inserts, op_fast_add, 0).wait();
-    SLOG_GPU("GPU ctg kmers hash table: inserted ", num_new_inserts, " new elements into read kmers hash table\n");
-    auto all_capacity = reduce_one((uint64_t)ht_inserter->get_capacity(), op_fast_add, 0).wait();
-    if (num_dropped_elems) {
-      if (num_dropped_elems > num_attempted_inserts / 10000)
-        SWARN("GPU read kmers hash table: failed to insert ", perc_str(num_dropped_elems, num_attempted_inserts),
-              " ctg kmers; total capacity ", all_capacity);
-      else
-        SLOG_VERBOSE("GPU read kmers hash table: failed to insert ", perc_str(num_dropped_elems, num_attempted_inserts),
-                     " ctg kmers; total capacity ", all_capacity, "\n");
-    }
+    ht_inserter->done_ctg_kmer_inserts();
     barrier();
   }
   insert_from_gpu_hashtable();

@@ -139,9 +139,9 @@ struct HashTableInserter {
 
   void flush_inserts();
 
-  void done_ctg_kmer_inserts(int &attempted_inserts, int &dropped_inserts, int &new_inserts);
+  void done_ctg_kmer_inserts();
 
-  void done_all_inserts(int &num_dropped, int &num_unique, int &num_purged);
+  int done_all_inserts();
 
   std::tuple<bool, Kmer<MAX_K>, KmerCounts> get_next_entry();
 

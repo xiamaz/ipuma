@@ -235,13 +235,43 @@ void HashTableInserter<MAX_K>::flush_inserts() {
 }
 
 template <int MAX_K>
-void HashTableInserter<MAX_K>::done_ctg_kmer_inserts(int &attempted_inserts, int &dropped_inserts, int &new_inserts) {
+void HashTableInserter<MAX_K>::done_ctg_kmer_inserts() {
+  barrier();
+  int attempted_inserts = 0, dropped_inserts = 0, new_inserts = 0;
   state->ht_gpu_driver.done_ctg_kmer_inserts(attempted_inserts, dropped_inserts, new_inserts);
+  barrier();
+  auto num_dropped_elems = reduce_one((uint64_t)dropped_inserts, op_fast_add, 0).wait();
+  auto num_attempted_inserts = reduce_one((uint64_t)attempted_inserts, op_fast_add, 0).wait();
+  auto num_new_inserts = reduce_one((uint64_t)new_inserts, op_fast_add, 0).wait();
+  SLOG_GPU("GPU ctg kmers hash table: inserted ", num_new_inserts, " new elements into read kmers hash table\n");
+  auto all_capacity = reduce_one((uint64_t)state->ht_gpu_driver.get_capacity(), op_fast_add, 0).wait();
+  if (num_dropped_elems) {
+    if (num_dropped_elems > num_attempted_inserts / 10000)
+      SWARN("GPU read kmers hash table: failed to insert ", perc_str(num_dropped_elems, num_attempted_inserts),
+            " ctg kmers; total capacity ", all_capacity);
+    else
+      SLOG_VERBOSE("GPU read kmers hash table: failed to insert ", perc_str(num_dropped_elems, num_attempted_inserts),
+                   " ctg kmers; total capacity ", all_capacity, "\n");
+  }
 }
 
 template <int MAX_K>
-void HashTableInserter<MAX_K>::done_all_inserts(int &num_dropped, int &num_unique, int &num_purged) {
-  state->ht_gpu_driver.done_all_inserts(num_dropped, num_unique, num_purged);
+int HashTableInserter<MAX_K>::done_all_inserts() {
+  int num_dropped = 0, num_entries = 0, num_purged = 0;
+  barrier();
+  state->ht_gpu_driver.done_all_inserts(num_dropped, num_entries, num_purged);
+  barrier();
+  if (num_dropped)
+    WARN("GPU dropped ", num_dropped, " entries out of ", num_entries, " when compacting to output hash table" KNORM "\n");
+  auto all_capacity = reduce_one((uint64_t)state->ht_gpu_driver.get_capacity(), op_fast_add, 0).wait();
+  auto all_num_purged = reduce_one((uint64_t)num_purged, op_fast_add, 0).wait();
+  auto all_num_entries = reduce_one((uint64_t)num_entries, op_fast_add, 0).wait();
+  auto prepurge_num_entries = all_num_entries + all_num_purged;
+  SLOG_GPU("GPU read kmers hash table: purged ", perc_str(all_num_purged, prepurge_num_entries), " singleton kmers out of ",
+           prepurge_num_entries, "\n");
+  SLOG_GPU("GPU hash table final size is ", all_num_entries, " entries and final load factor is ",
+           ((double)all_num_entries / all_capacity), "\n");
+  return num_entries;
 }
 
 template <int MAX_K>
