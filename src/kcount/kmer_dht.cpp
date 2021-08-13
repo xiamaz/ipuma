@@ -104,45 +104,13 @@ void Supermer::unpack() {
 int Supermer::get_bytes() { return seq.length() + sizeof(kmer_count_t); }
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::get_kmers_and_exts(Supermer &supermer, vector<KmerAndExt<MAX_K>> &kmers_and_exts) {
-  vector<bool> quals;
-  quals.resize(supermer.seq.length());
-  for (int i = 0; i < supermer.seq.length(); i++) {
-    quals[i] = isupper(supermer.seq[i]);
-    supermer.seq[i] = toupper(supermer.seq[i]);
-  }
-  auto kmer_len = Kmer<MAX_K>::get_k();
-  vector<Kmer<MAX_K>> kmers;
-  Kmer<MAX_K>::get_kmers(kmer_len, supermer.seq, kmers);
-  kmers_and_exts.clear();
-  for (int i = 1; i < (int)(supermer.seq.length() - kmer_len); i++) {
-    Kmer<MAX_K> kmer = kmers[i];
-    char left_ext = supermer.seq[i - 1];
-    if (!quals[i - 1]) left_ext = '0';
-    char right_ext = supermer.seq[i + kmer_len];
-    if (!quals[i + kmer_len]) right_ext = '0';
-    // get the lexicographically smallest
-    Kmer<MAX_K> kmer_rc = kmer.revcomp();
-    if (kmer_rc < kmer) {
-      kmer = kmer_rc;
-      swap(left_ext, right_ext);
-      left_ext = comp_nucleotide(left_ext);
-      right_ext = comp_nucleotide(right_ext);
-    };
-    kmers_and_exts.push_back({.kmer = kmer, .count = supermer.count, .left = left_ext, .right = right_ext});
-  }
-}
-
-template <int MAX_K>
 KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS)
     : local_kmers({})
     , ht_inserter({})
     , kmer_store()
     , max_kmer_store_bytes(max_kmer_store_bytes)
-    , initial_kmer_dht_reservation(0)
     , my_num_kmers(my_num_kmers)
-    , max_rpcs_in_flight(max_rpcs_in_flight)
-    , estimated_error_rate(0.0) {
+    , max_rpcs_in_flight(max_rpcs_in_flight) {
   // minimizer len depends on k
   minimizer_len = Kmer<MAX_K>::get_k() * 2 / 3 + 1;
   if (minimizer_len < 15) minimizer_len = 15;
@@ -172,7 +140,6 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
   // hash table resize
   // Unfortunately, this estimate depends on the depth of the sample - high depth means more wasted memory,
   // but low depth means potentially resizing the hash table, which is very expensive
-  initial_kmer_dht_reservation = my_adjusted_num_kmers;
   double kmers_space_reserved = my_adjusted_num_kmers * (sizeof(Kmer<MAX_K>) + sizeof(KmerCounts));
   SLOG_VERBOSE("Reserving at least ", get_size_str(node0_cores * kmers_space_reserved), " for kmer hash tables with ",
                node0_cores * my_adjusted_num_kmers, " entries on node 0\n");
@@ -188,20 +155,15 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
 }
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::clear() {
-  local_kmers->clear();
-  KmerMap<MAX_K>().swap(*local_kmers);
-  clear_stores();
-}
-
-template <int MAX_K>
 void KmerDHT<MAX_K>::clear_stores() {
   kmer_store.clear();
 }
 
 template <int MAX_K>
 KmerDHT<MAX_K>::~KmerDHT() {
-  clear();
+  local_kmers->clear();
+  KmerMap<MAX_K>().swap(*local_kmers);
+  clear_stores();
 }
 
 template <int MAX_K>
@@ -224,27 +186,8 @@ uint64_t KmerDHT<MAX_K>::get_num_kmers(bool all) {
 }
 
 template <int MAX_K>
-float KmerDHT<MAX_K>::max_load_factor() {
-  return reduce_one(local_kmers->max_load_factor(), op_fast_max, 0).wait();
-}
-
-template <int MAX_K>
-void KmerDHT<MAX_K>::print_load_factor() {
-  int64_t num_kmers_est = initial_kmer_dht_reservation * rank_n();
-  int64_t num_kmers = get_num_kmers();
-  SLOG_VERBOSE("Originally reserved ", num_kmers_est, " and now have ", num_kmers, " elements\n");
-  auto avg_load_factor = reduce_one(local_kmers->load_factor(), op_fast_add, 0).wait() / upcxx::rank_n();
-  SLOG_VERBOSE("kmer DHT load factor: ", avg_load_factor, "\n");
-}
-
-template <int MAX_K>
 int64_t KmerDHT<MAX_K>::get_local_num_kmers(void) {
   return local_kmers->size();
-}
-
-template <int MAX_K>
-double KmerDHT<MAX_K>::get_estimated_error_rate() {
-  return estimated_error_rate;
 }
 
 template <int MAX_K>
@@ -260,7 +203,6 @@ KmerCounts *KmerDHT<MAX_K>::get_local_kmer_counts(Kmer<MAX_K> &kmer) {
   return &it->second;
 }
 
-#ifdef DEBUG
 template <int MAX_K>
 bool KmerDHT<MAX_K>::kmer_exists(Kmer<MAX_K> kmer_fw) {
   const Kmer<MAX_K> kmer_rc = kmer_fw.revcomp();
@@ -268,7 +210,7 @@ bool KmerDHT<MAX_K>::kmer_exists(Kmer<MAX_K> kmer_fw) {
 
   return rpc(
              get_kmer_target_rank(kmer_fw, &kmer_rc),
-             [](Kmer<MAX_K> kmer, dist_object<KmerMap> &local_kmers) -> bool {
+             [](Kmer<MAX_K> kmer, dist_object<KmerMap<MAX_K>> &local_kmers) -> bool {
                const auto it = local_kmers->find(kmer);
                if (it == local_kmers->end()) return false;
                return true;
@@ -276,7 +218,6 @@ bool KmerDHT<MAX_K>::kmer_exists(Kmer<MAX_K> kmer_fw) {
              *kmer, local_kmers)
       .wait();
 }
-#endif
 
 template <int MAX_K>
 void KmerDHT<MAX_K>::add_supermer(Supermer &supermer, int target_rank) {
@@ -292,7 +233,7 @@ void KmerDHT<MAX_K>::flush_updates() {
 }
 
 template <int MAX_K>
-void KmerDHT<MAX_K>::compute_kmer_exts() {
+void KmerDHT<MAX_K>::finish_updates() {
   ht_inserter->insert_into_local_hashtable(local_kmers);
   double insert_time, kernel_time;
   ht_inserter->get_elapsed_time(insert_time, kernel_time);

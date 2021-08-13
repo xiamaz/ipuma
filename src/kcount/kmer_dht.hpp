@@ -122,23 +122,15 @@ class KmerDHT {
 
   upcxx_utils::ThreeTierAggrStore<Supermer> kmer_store;
   int64_t max_kmer_store_bytes;
-  int64_t initial_kmer_dht_reservation;
   int64_t my_num_kmers;
   int max_rpcs_in_flight;
-  double estimated_error_rate;
   std::chrono::time_point<std::chrono::high_resolution_clock> start_t;
 
   int minimizer_len = 15;
   bool using_ctg_kmers = false;
 
-  void purge_kmers(int threshold);
-
-  static void get_kmers_and_exts(Supermer &supermer, vector<KmerAndExt<MAX_K>> &kmers_and_exts);
-
  public:
   KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS);
-
-  void clear();
 
   void clear_stores();
 
@@ -150,27 +142,19 @@ class KmerDHT {
 
   uint64_t get_num_kmers(bool all = false);
 
-  float max_load_factor();
-
-  void print_load_factor();
-
   int64_t get_local_num_kmers(void);
-
-  double get_estimated_error_rate();
 
   upcxx::intrank_t get_kmer_target_rank(const Kmer<MAX_K> &kmer, const Kmer<MAX_K> *kmer_rc = nullptr) const;
 
   KmerCounts *get_local_kmer_counts(Kmer<MAX_K> &kmer);
 
-#ifdef DEBUG
   bool kmer_exists(Kmer<MAX_K> kmer);
-#endif
 
   void add_supermer(Supermer &supermer, int target_rank);
 
   void flush_updates();
 
-  void compute_kmer_exts();
+  void finish_updates();
 
   // one line per kmer, format:
   // KMERCHARS LR N

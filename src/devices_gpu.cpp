@@ -51,22 +51,13 @@ using namespace upcxx_utils;
 static bool init_gpu_thread = true;
 static future<> detect_gpu_fut;
 static int num_gpus = -1;
+static double gpu_startup_duration = 0;
+static size_t gpu_mem = 0;
 
 void init_devices() {
+  init_gpu_thread = true;
   // initialize the GPU and first-touch memory and functions in a new thread as this can take many seconds to complete
-  double gpu_startup_duration = 0;
-  size_t gpu_mem = 0;
-  detect_gpu_fut = execute_in_thread_pool(
-      [&gpu_startup_duration, &gpu_mem]() { gpu_utils::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
-  detect_gpu_fut = detect_gpu_fut.then([&gpu_startup_duration, &gpu_mem]() {
-    if (num_gpus > 0) {
-      SLOG_VERBOSE(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
-                   get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
-      SLOG_VERBOSE(gpu_utils::get_gpu_device_description());
-    } else {
-      SDIE("No GPUs available - this build requires GPUs");
-    }
-  });
+  detect_gpu_fut = execute_in_thread_pool([]() { gpu_utils::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
 }
 
 void done_init_devices() {
@@ -74,7 +65,14 @@ void done_init_devices() {
     Timer t("Waiting for GPU to be initialized (should be noop)");
     init_gpu_thread = false;
     detect_gpu_fut.wait();
+    if (num_gpus > 0) {
+      SLOG_VERBOSE(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
+                   get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
+      int max_dev_id = reduce_one(num_gpus > 0 ? gpu_utils::get_gpu_device_pci_id() : 0, op_fast_max, 0).wait();
+      SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
+      SLOG_VERBOSE(gpu_utils::get_gpu_device_description());
+    } else {
+      SDIE("No GPUs available - this build requires GPUs");
+    }
   }
-  int max_dev_id = reduce_one(num_gpus > 0 ? gpu_utils::get_gpu_device_pci_id() : 0, op_fast_max, 0).wait();
-  SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
 }

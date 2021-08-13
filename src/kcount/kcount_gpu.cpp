@@ -268,7 +268,7 @@ void HashTableInserter<MAX_K>::get_elapsed_time(double &insert_time, double &ker
 template <int MAX_K>
 void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<MAX_K>> &local_kmers) {
   barrier();
-  Timer insert_timer("gpu insert to cpu timer");
+  IntermittentTimer insert_timer("gpu insert to cpu timer");
   insert_timer.start();
   if (state->ht_gpu_driver.pass_type == CTG_KMERS_PASS) {
     int attempted_inserts = 0, dropped_inserts = 0, new_inserts = 0;
