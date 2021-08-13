@@ -44,15 +44,69 @@
 #include "kcount.hpp"
 #include "kmer_dht.hpp"
 
-template <int MAX_K>
-SeqBlockInserter<MAX_K>::SeqBlockInserter(int qual_offset, int minimizer_len) {}
+using namespace std;
+using namespace upcxx;
+using namespace upcxx_utils;
 
 template <int MAX_K>
-SeqBlockInserter<MAX_K>::~SeqBlockInserter() {}
+struct SeqBlockInserter<MAX_K>::SeqBlockInserterState {
+  int64_t num_kmers = 0;
+  int64_t bytes_kmers_sent = 0;
+  int64_t bytes_supermers_sent = 0;
+  vector<Kmer<MAX_K>> kmers;
+};
 
 template <int MAX_K>
-void SeqBlockInserter<MAX_K>::process_block(unsigned kmer_len, string &seq_block, const vector<kmer_count_t> &depth_block,
-                                            dist_object<KmerDHT<MAX_K>> &kmer_dht) {}
+SeqBlockInserter<MAX_K>::SeqBlockInserter(int qual_offset, int minimizer_len) {
+  state = new SeqBlockInserterState();
+}
+
+template <int MAX_K>
+SeqBlockInserter<MAX_K>::~SeqBlockInserter() {
+  if (state) delete state;
+}
+
+template <int MAX_K>
+void SeqBlockInserter<MAX_K>::process_seq(string &seq, kmer_count_t depth, dist_object<KmerDHT<MAX_K>> &kmer_dht) {
+  if (!depth) depth = 1;
+  auto kmer_len = Kmer<MAX_K>::get_k();
+  Kmer<MAX_K>::get_kmers(kmer_len, seq, state->kmers);
+  for (int i = 0; i < state->kmers.size(); i++) {
+    state->bytes_kmers_sent += sizeof(KmerAndExt<MAX_K>);
+    Kmer<MAX_K> kmer_rc = state->kmers[i].revcomp();
+    if (kmer_rc < state->kmers[i]) state->kmers[i] = kmer_rc;
+  }
+
+  Supermer supermer{.seq = seq.substr(0, kmer_len + 1), .count = (kmer_count_t)depth};
+  auto prev_target_rank = kmer_dht->get_kmer_target_rank(state->kmers[1]);
+  for (int i = 1; i < (int)(seq.length() - kmer_len); i++) {
+    auto &kmer = state->kmers[i];
+    auto target_rank = kmer_dht->get_kmer_target_rank(kmer);
+    if (target_rank == prev_target_rank) {
+      supermer.seq += seq[i + kmer_len];
+    } else {
+      state->bytes_supermers_sent += supermer.get_bytes();
+      kmer_dht->add_supermer(supermer, prev_target_rank);
+      supermer.seq = seq.substr(i - 1, kmer_len + 2);
+      prev_target_rank = target_rank;
+    }
+  }
+  if (supermer.seq.length() >= kmer_len + 2) {
+    state->bytes_supermers_sent += supermer.get_bytes();
+    kmer_dht->add_supermer(supermer, prev_target_rank);
+  }
+  state->num_kmers += seq.length() - 2 - kmer_len;
+}
+
+template <int MAX_K>
+void SeqBlockInserter<MAX_K>::done_processing(dist_object<KmerDHT<MAX_K>> &kmer_dht) {
+  auto tot_supermers_bytes_sent = reduce_one(state->bytes_supermers_sent, op_fast_add, 0).wait();
+  auto tot_kmers_bytes_sent = reduce_one(state->bytes_kmers_sent, op_fast_add, 0).wait();
+  SLOG_VERBOSE("Total bytes sent in compressed supermers ", get_size_str(tot_supermers_bytes_sent), " (compression is ", fixed,
+               setprecision(3), (double)tot_kmers_bytes_sent / tot_supermers_bytes_sent, " over kmers)\n");
+  auto all_num_kmers = reduce_one(state->num_kmers, op_fast_add, 0).wait();
+  SLOG_VERBOSE("Processed a total of ", all_num_kmers, " kmers\n");
+}
 
 template <int MAX_K>
 HashTableInserter<MAX_K>::HashTableInserter() {}

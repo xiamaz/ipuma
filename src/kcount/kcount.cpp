@@ -97,6 +97,7 @@ static void count_kmers(unsigned kmer_len, int qual_offset, vector<PackedReads *
   auto all_num_bad_quals = reduce_one(num_bad_quals, op_fast_add, 0).wait();
   auto all_tot_read_len = reduce_one(tot_read_len, op_fast_add, 0).wait();
   if (all_num_bad_quals) SLOG_VERBOSE("Found ", perc_str(all_num_bad_quals, all_tot_read_len), " bad quality positions\n");
+  exit(0);
 };
 
 template <int MAX_K>

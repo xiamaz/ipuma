@@ -56,6 +56,9 @@ using count_t = uint32_t;
 
 template <int MAX_K>
 struct SeqBlockInserter {
+  struct SeqBlockInserterState;
+  SeqBlockInserterState *state = nullptr;
+
   SeqBlockInserter(int qual_offset, int minimizer_len);
 
   ~SeqBlockInserter();
