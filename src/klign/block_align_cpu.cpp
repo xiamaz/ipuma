@@ -54,7 +54,6 @@ void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vecto
                         Alns *alns, future<> &active_kernel_fut, int read_group_id, int max_clen, int max_rlen,
                         IntermittentTimer &aln_kernel_timer) {
   if (!kernel_alns.empty()) {
-    assert(active_kernel_fut.ready() && "active_kernel_fut should already be ready");
     active_kernel_fut.wait();  // should be ready already
     shared_ptr<AlignBlockData> aln_block_data =
         make_shared<AlignBlockData>(kernel_alns, ctg_seqs, read_seqs, max_clen, max_rlen, read_group_id, cpu_aligner.aln_scoring);

@@ -202,16 +202,6 @@ template <int MAX_K>
 using KmerMapExts = HASH_TABLE<Kmer<MAX_K>, KmerExtsCounts>;
 
 template <int MAX_K>
-struct HashTableInserter<MAX_K>::HashTableInserterState {
-  int64_t initial_max_kmers = 0;
-  bool using_ctg_kmers = false;
-  dist_object<KmerMapExts<MAX_K>> kmers;
-
-  HashTableInserterState()
-      : kmers({}) {}
-};
-
-template <int MAX_K>
 static void get_kmers_and_exts(Supermer &supermer, vector<KmerAndExt<MAX_K>> &kmers_and_exts) {
   vector<bool> quals;
   quals.resize(supermer.seq.length());
@@ -335,9 +325,17 @@ static void insert_supermer_from_ctg(Supermer &supermer, dist_object<KmerMapExts
 }
 
 template <int MAX_K>
-HashTableInserter<MAX_K>::HashTableInserter() {
-  state = new HashTableInserterState();
-}
+struct HashTableInserter<MAX_K>::HashTableInserterState {
+  int64_t initial_max_kmers = 0;
+  bool using_ctg_kmers = false;
+  dist_object<KmerMapExts<MAX_K>> kmers;
+
+  HashTableInserterState()
+      : kmers({}) {}
+};
+
+template <int MAX_K>
+HashTableInserter<MAX_K>::HashTableInserter() {}
 
 template <int MAX_K>
 HashTableInserter<MAX_K>::~HashTableInserter() {
@@ -346,6 +344,7 @@ HashTableInserter<MAX_K>::~HashTableInserter() {
 
 template <int MAX_K>
 void HashTableInserter<MAX_K>::init(int max_elems) {
+  state = new HashTableInserterState();
   state->using_ctg_kmers = false;
   state->kmers->reserve(max_elems);
   state->initial_max_kmers = max_elems;

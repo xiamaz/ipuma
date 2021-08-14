@@ -99,9 +99,7 @@ class CtgsDepths {
   CtgsDepths(int edge_base_len, int num_read_groups)
       : ctgs_depths({})
       , edge_base_len(edge_base_len)
-      , num_read_groups(num_read_groups) {
-    assert(num_read_groups > 0);
-  }
+      , num_read_groups(num_read_groups) {}
 
   int64_t get_num_ctgs() { return reduce_one((int64_t)ctgs_depths->size(), upcxx::op_fast_add, 0).wait(); }
 
