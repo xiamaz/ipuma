@@ -187,10 +187,7 @@ struct ExtCounts {
 struct KmerExtsCounts {
   ExtCounts left_exts;
   ExtCounts right_exts;
-  global_ptr<FragElem> uutig_frag;
   kmer_count_t count;
-  // the final extensions chosen - A,C,G,T, or F,X
-  char left, right;
   bool from_ctg;
 
   char get_left_ext() { return left_exts.get_ext(count); }
@@ -241,13 +238,7 @@ static void insert_supermer_from_read(Supermer &supermer, dist_object<KmerMapExt
     // find it - if it isn't found then insert it, otherwise increment the counts
     const auto it = kmers->find(kmer_and_ext.kmer);
     if (it == kmers->end()) {
-      KmerExtsCounts kmer_counts = {.left_exts = {0},
-                                    .right_exts = {0},
-                                    .uutig_frag = nullptr,
-                                    .count = kmer_and_ext.count,
-                                    .left = 'X',
-                                    .right = 'X',
-                                    .from_ctg = false};
+      KmerExtsCounts kmer_counts = {.left_exts = {0}, .right_exts = {0}, .count = kmer_and_ext.count, .from_ctg = false};
       kmer_counts.left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
       kmer_counts.right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
       auto prev_bucket_count = kmers->bucket_count();
@@ -315,8 +306,7 @@ static void insert_supermer_from_ctg(Supermer &supermer, dist_object<KmerMapExts
     }
     if (insert) {
       kmer_count_t count = kmer_and_ext.count;
-      KmerExtsCounts kmer_counts = {
-          .left_exts = {0}, .right_exts = {0}, .uutig_frag = nullptr, .count = count, .left = 'X', .right = 'X', .from_ctg = true};
+      KmerExtsCounts kmer_counts = {.left_exts = {0}, .right_exts = {0}, .count = count, .from_ctg = true};
       kmer_counts.left_exts.inc(kmer_and_ext.left, count);
       kmer_counts.right_exts.inc(kmer_and_ext.right, count);
       (*kmers)[kmer_and_ext.kmer] = kmer_counts;
