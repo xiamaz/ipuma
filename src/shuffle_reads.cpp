@@ -89,8 +89,8 @@ static dist_object<kmer_to_cid_map_t> compute_kmer_to_cid_map(Contigs &ctgs) {
     auto it = kmer_to_cid_map->find(kmer_cid_info.first);
     if (it == kmer_to_cid_map->end())
       kmer_to_cid_map->insert(kmer_cid_info);
-    else
-      WARN("Found duplicate kmer in cids - this shouldn't happen!");
+    //else
+    //  WARN("Found duplicate kmer in cids - this shouldn't happen!");
   });
   int est_update_size = sizeof(pair<uint64_t, int64_t>);
   int64_t mem_to_use = 0.1 * get_free_mem() / local_team().rank_n();
