@@ -38,7 +38,7 @@
 # works, incorporate into other computer software, distribute, and sublicense
 # such enhancements or derivative works thereof, in binary and source code form.
 
-cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
 if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13 AND DEFINED UPCXX_LIBRARIES)
   message(
@@ -143,12 +143,16 @@ endforeach()
 if(ENABLE_CUDA)
   set(tgt devices_gpu)
   add_library(${tgt} OBJECT ${tgt}.cpp)
-  target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12)
+    target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  endif()
   list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
 else()
   set(tgt devices_cpu)
   add_library(${tgt} OBJECT ${tgt}.cpp)
-  target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12)
+    target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  endif()
   list(APPEND MHM2_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
 endif()
 

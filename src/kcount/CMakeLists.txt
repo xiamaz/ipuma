@@ -14,14 +14,18 @@ set(KCOUNT_TARGET_OBJECTS)
 
 foreach(tgt kmer_dht)
   add_library(${tgt} OBJECT ${tgt}.cpp)
-  target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12)
+    target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  endif()
   list(APPEND KCOUNT_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
 endforeach()
 
 if(ENABLE_CUDA)
   set(tgt kcount_gpu)
   add_library(${tgt} OBJECT ${tgt}.cpp)
-  target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12)
+    target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  endif()
   list(APPEND KCOUNT_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
   set(KCOUNT_TARGET_OBJECTS
       ${KCOUNT_TARGET_OBJECTS}
@@ -29,7 +33,9 @@ if(ENABLE_CUDA)
 else()
   set(tgt kcount_cpu)
   add_library(${tgt} OBJECT ${tgt}.cpp)
-  target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12)
+    target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  endif()
   list(APPEND KCOUNT_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
   set(KCOUNT_TARGET_OBJECTS
       ${KCOUNT_TARGET_OBJECTS}
