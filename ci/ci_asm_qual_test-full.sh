@@ -42,7 +42,7 @@ then
 else
   echo "Restarting in $test_dir"
 fi
-$mhm2_install_dir/bin/mhm2.py $@ -r $reads -o $test_dir --force-bloom=yes --checkpoint=no --post-asm-align --post-asm-abd
+$mhm2_install_dir/bin/mhm2.py $@ -r $reads -o $test_dir --checkpoint=no --post-asm-align --post-asm-abd
 status=$?
 if [ $status -ne 0 ]
 then
