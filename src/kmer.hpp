@@ -102,6 +102,8 @@ class Kmer {
 
   bool operator==(const Kmer &o) const;
 
+  bool is_equal(const longs_t *other_longs) const;
+
   bool operator!=(const Kmer &o) const;
 
   void set_kmer(const char *s);

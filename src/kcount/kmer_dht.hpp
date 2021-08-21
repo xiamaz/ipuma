@@ -101,7 +101,7 @@ class HashTableInserter {
   HashTableInserter();
   ~HashTableInserter();
 
-  void init(int max_elems);
+  void init(int num_elems);
 
   void init_ctg_kmers(int max_elems);
 

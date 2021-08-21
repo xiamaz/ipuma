@@ -1,3 +1,5 @@
+#pragma once
+
 //---------------------------------------------------------------------------
 // Pre-computed list of prime numbers, approx. 5% apart, with cheap div/modulo
 // computation. Suitable for efficient hash tables
@@ -24,10 +26,13 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 //---------------------------------------------------------------------------
-#include "prime.hpp"
-
-using namespace std;
-using namespace primes;
+#include <cstdint>
+//---------------------------------------------------------------------------
+namespace primes {
+//---------------------------------------------------------------------------
+struct Number {
+  uint64_t value, magic, shift;
+};
 
 static constexpr unsigned primeCount = 814;
 static constexpr Number prime_nums[primeCount] = {{3ull, 12297829382473034411ull, 1},
@@ -845,37 +850,46 @@ static constexpr Number prime_nums[primeCount] = {{3ull, 12297829382473034411ull
                                                   {16778306499591715409ull, 10140545678111760581ull, 63},
                                                   {17617221824571301183ull, 9657662550582629123ull, 63}};
 
-/// Get the value of the prime number
-uint64_t Prime::get() { return number.value; }
+/// A pre-computed prime number, with efficient division and multiplication logic
+class Prime {
+ private:
+  Number number = {0, 0, 0};
 
-/// Divide the argument by the prime number
-uint64_t Prime::div(uint64_t x) {
-  return static_cast<uint64_t>((static_cast<unsigned __int128>(x) * number.magic) >> 64) >> number.shift;
-}
+ public:
+  /// Get the value of the prime number
+  uint64_t get() { return number.value; }
 
-/// Return the remainder after division
-uint64_t Prime::mod(uint64_t x) { return x - div(x) * number.value; }
-
-void Prime::set(uint64_t desiredSize, bool larger) {
-  // Sanity check, should never happen for practical usage as we are close to 2^64
-  if (desiredSize >= prime_nums[primeCount - 1].value) {
-    number = prime_nums[primeCount - 1];
-    return;
+  /// Divide the argument by the prime number
+  uint64_t div(uint64_t x) {
+    return static_cast<uint64_t>((static_cast<unsigned __int128>(x) * number.magic) >> 64) >> number.shift;
   }
-  if (larger) {
-    for (int i = 0; i < primeCount; i++) {
-      if (prime_nums[i].value >= desiredSize) {
-        number = prime_nums[i];
-        return;
+
+  /// Return the remainder after division
+  uint64_t mod(uint64_t x) { return x - div(x) * number.value; }
+
+  /// Pick a suitable prime number, larger or smaller
+  void set(uint64_t desiredSize, bool larger) {
+    // Sanity check, should never happen for practical usage as we are close to 2^64
+    if (desiredSize >= prime_nums[primeCount - 1].value) {
+      number = prime_nums[primeCount - 1];
+      return;
+    }
+    if (larger) {
+      for (unsigned i = 0; i < primeCount; i++) {
+        if (prime_nums[i].value >= desiredSize) {
+          number = prime_nums[i];
+          return;
+        }
+      }
+    } else {
+      for (int i = primeCount - 1; i >= 0; i--) {
+        if (prime_nums[i].value <= desiredSize) {
+          number = prime_nums[i];
+          return;
+        }
       }
     }
-  } else {
-    for (int i = primeCount - 1; i >= 0; i--) {
-      if (prime_nums[i].value <= desiredSize) {
-        number = prime_nums[i];
-        return;
-      }
-    }
   }
-}
-
+};
+//---------------------------------------------------------------------------
+}  // namespace primes

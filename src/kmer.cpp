@@ -282,6 +282,14 @@ bool Kmer<MAX_K>::operator==(const Kmer<MAX_K> &o) const {
 }
 
 template <int MAX_K>
+bool Kmer<MAX_K>::is_equal(const longs_t *other_longs) const {
+  for (int i = 0; i < N_LONGS; i++) {
+    if (longs[i] != other_longs[i]) return false;
+  }
+  return true;
+}
+
+template <int MAX_K>
 bool Kmer<MAX_K>::operator!=(const Kmer<MAX_K> &o) const {
   return !(*this == o);
 }
