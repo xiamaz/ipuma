@@ -363,6 +363,8 @@ static void insert_supermer_from_ctg(Supermer &supermer, dist_object<KmerMapExts
           // extension. In which case, all such kmers should not be counted again for each contig, because each
           // contig can use the same reads independently, and the depth will be oversampled.
           exts_counts->count = min(kmer_and_ext.count, exts_counts->count);
+          exts_counts->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
+          exts_counts->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
         }
       }
     }
@@ -393,12 +395,12 @@ void HashTableInserter<MAX_K>::init(int num_elems) {
   double free_mem = get_free_mem();
   SLOG_CPU_HT("There is ", get_size_str(free_mem), " free memory\n");
   // set aside 30% of free mem for everything else, including the final hash table we copy across to
-  double avail_mem = 0.7 * free_mem / local_team().rank_n();
+  double avail_mem = 0.8 * free_mem / local_team().rank_n();
   size_t elem_size = sizeof(Kmer<MAX_K>) + sizeof(KmerExtsCounts);
   size_t max_elems = avail_mem / elem_size;
   SLOG_CPU_HT("Request for ", num_elems, " elements and space available for ", max_elems, " elements of size ", elem_size, "\n");
   // don't make too many extra elems because that takes longer to initialize
-  if (max_elems > 3 * num_elems) max_elems = 3 * num_elems;
+  if (max_elems > 2 * num_elems) max_elems = 2 * num_elems;
   SLOG_CPU_HT("Allocating ", max_elems, " elements\n");
   state->kmers->reserve(max_elems);
   double used_mem = free_mem - get_free_mem();
