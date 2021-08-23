@@ -36,9 +36,16 @@ foreach my $module (@modules) {
 $stats{'CachedIO'} = 'Assembled>5kbp';
 $stats{'NumStages'} = 0;
 $stats{'StageTime'} = 0;
+$stats{'tmpMergedReads'} = 0; # 2021-08-06 15:06:19   merged 14255494 (15.44%) pairs
+$stats{'tmpLoadedReads'} = 0; # Loaded 126665730 tot_bases=18044017886 names=0B
+$stats{'tmpLoadedBases'} = 0; # Loaded 126665730 tot_bases=18044017886 names=0B
+
 
 
 sub printStats {
+   foreach my $field (@fields) {
+     if (not defined $stats{$field}) { print STDERR "No $field found\n"; }
+   }
    print join("\t", @fields) . "\n";
    print join("\t", @stats{@fields}) . "\n";
 }
@@ -161,6 +168,13 @@ while (<>) {
         if (/Processed a total of (\d+) reads/) {
             $stats{"NumReads"} = $1;
         }
+        if (/Loaded (\d+) tot_bases=(\d+) names=/) {
+            $stats{'tmpLoadedReads'} += $1;
+            $stats{'tmpLoadedBases'} += $2;
+        }
+        if (/merged (\d+) .* pairs/) {
+            $stats{'tmpMergedReads'} += $1;
+        }
 
         if (/Found (\d+) .* unique kmers/) {
             $stats{"DistinctKmersWithFP"} = $1;
@@ -170,6 +184,12 @@ while (<>) {
                 $stats{"DistinctKmersWithFP"} = $stats{"MinDepthKmers"}; # the previous one
             }
             $stats{"MinDepthKmers"} = $1; # the last one
+        }
+        if (not defined $stats{'MinDepthKmers'} && / hash table final size is (\d+) entries and final load factor/) {
+            $stats{'MinDepthKmers'} = $1;
+        }
+        if (not defined $stats{'DistinctKmersWithFP'} && /read kmers hash table: purged \d+ .* singleton kmers out of (\d+)/) {
+            $stats{'DistinctKmersWithFP'} = $1;
         }
         if (/Completed contig round k =/) {
             $firstUFX = 0;
@@ -202,6 +222,10 @@ foreach my $module (@modules) {
 }
 
 $stats{"GBofFASTQ"} =~ s/(\.\d)\d*/$1/;
+if (not defined $stats{'NumReads'}) {
+  if (not defined $stats{'tmpLoadedReads'} or not defined $stats{'tmpMergedReads'} or $stats{'tmpLoadedReads'} < $stats{'tmpMergedReads'}) { print STDERR "Wrong number of loaded vs merged reads  $stats{'tmpLoadedReads'} vs  $stats{'tmpMergedReads'}\n"; }
+  $stats{'NumReads'} = $stats{'tmpMergedReads'} + $stats{'tmpLoadedReads'} - $stats{'tmpMergedReads'}
+}
 
 printStats();
 
