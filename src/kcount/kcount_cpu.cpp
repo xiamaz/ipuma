@@ -363,8 +363,14 @@ static void insert_supermer_from_ctg(Supermer &supermer, dist_object<KmerMapExts
           // extension. In which case, all such kmers should not be counted again for each contig, because each
           // contig can use the same reads independently, and the depth will be oversampled.
           exts_counts->count = min(kmer_and_ext.count, exts_counts->count);
-          exts_counts->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
-          exts_counts->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
+
+          // FIXME: this is different from the GPU version, which is just an inc of the existing value
+          exts_counts->left_exts = exts_counts->right_exts = {0};
+          exts_counts->left_exts.inc(kmer_and_ext.left, exts_counts->count);
+          exts_counts->right_exts.inc(kmer_and_ext.right, exts_counts->count);
+
+          // exts_counts->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
+          // exts_counts->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
         }
       }
     }
@@ -394,8 +400,8 @@ void HashTableInserter<MAX_K>::init(int num_elems) {
   state->using_ctg_kmers = false;
   double free_mem = get_free_mem();
   SLOG_CPU_HT("There is ", get_size_str(free_mem), " free memory\n");
-  // set aside 30% of free mem for everything else, including the final hash table we copy across to
-  double avail_mem = 0.8 * free_mem / local_team().rank_n();
+  // set aside 40% of free mem for everything else, including the final hash table we copy across to
+  double avail_mem = 0.6 * free_mem / local_team().rank_n();
   size_t elem_size = sizeof(Kmer<MAX_K>) + sizeof(KmerExtsCounts);
   size_t max_elems = avail_mem / elem_size;
   SLOG_CPU_HT("Request for ", num_elems, " elements and space available for ", max_elems, " elements of size ", elem_size, "\n");
@@ -432,7 +438,8 @@ void HashTableInserter<MAX_K>::flush_inserts() {
   int64_t tot_num_kmers = reduce_one(state->kmers->size(), op_fast_add, 0).wait();
   SLOG_CPU_HT("Number of elements in hash table: ", tot_num_kmers, "\n");
   auto avg_load_factor = reduce_one(state->kmers->load_factor(), op_fast_add, 0).wait() / upcxx::rank_n();
-  SLOG_CPU_HT("kmer DHT load factor: ", avg_load_factor, "\n");
+  auto max_load_factor = reduce_one(state->kmers->load_factor(), op_fast_max, 0).wait();
+  SLOG_CPU_HT("kmer DHT load factor: ", avg_load_factor, " avg, ", max_load_factor, " max, load balance\n");
   auto tot_num_dropped = reduce_one(state->kmers->get_num_dropped(), op_fast_add, 0).wait();
   if (tot_num_dropped) SLOG_CPU_HT("Number dropped ", perc_str(tot_num_dropped, tot_num_kmers + tot_num_dropped), "\n");
   barrier();
