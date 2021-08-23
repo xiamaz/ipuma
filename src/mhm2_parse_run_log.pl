@@ -185,11 +185,15 @@ while (<>) {
             }
             $stats{"MinDepthKmers"} = $1; # the last one
         }
-        if (not defined $stats{'MinDepthKmers'} && / hash table final size is (\d+) entries and final load factor/) {
+        if (not defined $stats{'MinDepthKmers'}) {
+           if (/ hash table final size is (\d+) entries and final load factor/) {
             $stats{'MinDepthKmers'} = $1;
+           }
         }
-        if (not defined $stats{'DistinctKmersWithFP'} && /read kmers hash table: purged \d+ .* singleton kmers out of (\d+)/) {
+        if (not defined $stats{'DistinctKmersWithFP'}) {
+          if (/read kmers hash table: purged \d+ .* singleton kmers out of (\d+)/) {
             $stats{'DistinctKmersWithFP'} = $1;
+          }
         }
         if (/Completed contig round k =/) {
             $firstUFX = 0;
