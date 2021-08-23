@@ -312,9 +312,9 @@ static void insert_supermer_from_read(Supermer &supermer, dist_object<KmerMapExt
   kmers_and_exts.reserve(supermer.seq.length() - kmer_len);
   get_kmers_and_exts(supermer, kmers_and_exts);
   for (auto &kmer_and_ext : kmers_and_exts) {
-    // find it - if it isn't found then insert it, otherwise increment the counts
+    // find it - if it isn't found then insert it - this doen't set or change the value
     auto [exts_counts, is_new] = kmers->insert(kmer_and_ext.kmer);
-    // could not insert or find
+    // no space - had to drop it
     if (!exts_counts) continue;
     int count = exts_counts->count + kmer_and_ext.count;
     if (count > numeric_limits<kmer_count_t>::max()) count = numeric_limits<kmer_count_t>::max();
@@ -333,25 +333,22 @@ static void insert_supermer_from_ctg(Supermer &supermer, dist_object<KmerMapExts
   for (auto &kmer_and_ext : kmers_and_exts) {
     // insert a new kmer derived from the previous round's contigs
     auto [exts_counts, is_new] = kmers->insert(kmer_and_ext.kmer);
+    // no space - had to drop it
     if (!exts_counts) continue;
+    bool insert_it = false;
     if (is_new) {
-      *exts_counts = {.left_exts = {0}, .right_exts = {0}, .count = kmer_and_ext.count, .from_ctg = true};
-      exts_counts->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
-      exts_counts->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
+      insert_it = true;
     } else if (!exts_counts->from_ctg) {
       // existing entry is from a read, only replace with new contig kmer if the existing kmer is not UU
       char left_ext = exts_counts->get_left_ext();
       char right_ext = exts_counts->get_right_ext();
       // non-UU, replace
-      if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F') {
-        *exts_counts = {.left_exts = {0}, .right_exts = {0}, .count = kmer_and_ext.count, .from_ctg = true};
-        exts_counts->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
-        exts_counts->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
-      }
+      if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F') insert_it = true;
     } else {
       // existing entry from contig
       if (exts_counts->count) {
-        // previously set to zero for conflicts, and we will skip those
+        // will always insert, although it may get purged later for a conflict
+        insert_it = true;
         char left_ext = exts_counts->get_left_ext();
         char right_ext = exts_counts->get_right_ext();
         if (left_ext != kmer_and_ext.left || right_ext != kmer_and_ext.right) {
@@ -362,17 +359,14 @@ static void insert_supermer_from_ctg(Supermer &supermer, dist_object<KmerMapExts
           // The only way this kmer could have been already found in the contigs only is if it came from a localassm
           // extension. In which case, all such kmers should not be counted again for each contig, because each
           // contig can use the same reads independently, and the depth will be oversampled.
-          exts_counts->count = min(kmer_and_ext.count, exts_counts->count);
-
-          // FIXME: this is different from the GPU version, which is just an inc of the existing value
-          exts_counts->left_exts = exts_counts->right_exts = {0};
-          exts_counts->left_exts.inc(kmer_and_ext.left, exts_counts->count);
-          exts_counts->right_exts.inc(kmer_and_ext.right, exts_counts->count);
-
-          // exts_counts->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
-          // exts_counts->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
+          kmer_and_ext.count = min(kmer_and_ext.count, exts_counts->count);
         }
       }
+    }
+    if (insert_it) {
+      *exts_counts = {.left_exts = {0}, .right_exts = {0}, .count = kmer_and_ext.count, .from_ctg = true};
+      exts_counts->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
+      exts_counts->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
     }
   }
 }
