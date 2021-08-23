@@ -206,10 +206,10 @@ class KmerMapExts {
   size_t capacity = 0;
   size_t num_elems = 0;
   size_t num_dropped = 0;
+  size_t num_singleton_overrides = 0;
   // vector<Kmer<MAX_K>> keys;
   vector<uint64_t> keys;
   vector<KmerExtsCounts> counts;
-  const int MAX_PROBE = 100;
   // const Kmer<MAX_K> KEY_EMPTY = Kmer<MAX_K>::get_invalid();
   const uint64_t KEY_EMPTY = 0xffffffffffffffff;
   int iter_pos = 0;
@@ -228,9 +228,10 @@ class KmerMapExts {
     counts.resize(capacity, {0});
   }
 
-  pair<KmerExtsCounts *, bool> insert(const Kmer<MAX_K> &kmer) {
+  pair<KmerExtsCounts *, bool> insert(const Kmer<MAX_K> &kmer, bool override_singletons) {
     int slot = kmer.hash() % capacity;
     int start_slot = slot;
+    const int MAX_PROBE = (capacity < KCOUNT_HT_MAX_PROBE ? capacity : KCOUNT_HT_MAX_PROBE);
     for (int i = 0; i < MAX_PROBE; i++) {
       if (keys[slot * N_LONGS + N_LONGS - 1] == KEY_EMPTY) {
         memcpy(&(keys[slot * N_LONGS]), kmer.get_longs(), N_LONGS * sizeof(uint64_t));
@@ -241,6 +242,25 @@ class KmerMapExts {
       }
       slot = (start_slot + i * i) % capacity;
     }
+    // if we reach here we have not found the kmer and there is no space to insert it.
+    // if overriding singletons, we have to repeat the insertion, but this time replacing the first singleton
+    // this approach is more computationally expensive, but it allows us to reuse slots that would be purged for ctg kmers
+    if (override_singletons) {
+      // reset variables for search
+      slot = kmer.hash() % capacity;
+      start_slot = slot;
+      for (int i = 0; i < MAX_PROBE; i++) {
+        if (keys[slot * N_LONGS + N_LONGS - 1] == KEY_EMPTY || kmer.is_equal(&(keys[slot * N_LONGS]))) {
+          DIE("This should never happen");
+        }
+        if (counts[slot].count == 1) {
+          num_singleton_overrides++;
+          memcpy(&(keys[slot * N_LONGS]), kmer.get_longs(), N_LONGS * sizeof(uint64_t));
+          return {&(counts[slot]), true};
+        }
+        slot = (start_slot + i * i) % capacity;
+      }
+    }
     num_dropped++;
     return {nullptr, false};
   }
@@ -250,6 +270,8 @@ class KmerMapExts {
   double load_factor() { return (double)num_elems / capacity; }
 
   size_t get_num_dropped() { return num_dropped; }
+
+  size_t get_num_singleton_overrides() { return num_singleton_overrides; }
 
   void begin_iterate() { iter_pos = 0; }
 
@@ -313,7 +335,7 @@ static void insert_supermer_from_read(Supermer &supermer, dist_object<KmerMapExt
   get_kmers_and_exts(supermer, kmers_and_exts);
   for (auto &kmer_and_ext : kmers_and_exts) {
     // find it - if it isn't found then insert it - this doen't set or change the value
-    auto [exts_counts, is_new] = kmers->insert(kmer_and_ext.kmer);
+    auto [exts_counts, is_new] = kmers->insert(kmer_and_ext.kmer, false);
     // no space - had to drop it
     if (!exts_counts) continue;
     int count = exts_counts->count + kmer_and_ext.count;
@@ -332,18 +354,23 @@ static void insert_supermer_from_ctg(Supermer &supermer, dist_object<KmerMapExts
   get_kmers_and_exts(supermer, kmers_and_exts);
   for (auto &kmer_and_ext : kmers_and_exts) {
     // insert a new kmer derived from the previous round's contigs
-    auto [exts_counts, is_new] = kmers->insert(kmer_and_ext.kmer);
+    auto [exts_counts, is_new] = kmers->insert(kmer_and_ext.kmer, true);
     // no space - had to drop it
     if (!exts_counts) continue;
     bool insert_it = false;
     if (is_new) {
       insert_it = true;
     } else if (!exts_counts->from_ctg) {
-      // existing entry is from a read, only replace with new contig kmer if the existing kmer is not UU
-      char left_ext = exts_counts->get_left_ext();
-      char right_ext = exts_counts->get_right_ext();
-      // non-UU, replace
-      if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F') insert_it = true;
+      // existing entry is from a read
+      if (exts_counts->count == 1) {
+        // singleton read kmer, replace - this will just be purged anyway
+        insert_it = true;
+      } else {
+        char left_ext = exts_counts->get_left_ext();
+        char right_ext = exts_counts->get_right_ext();
+        // non-UU, replace
+        if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F') insert_it = true;
+      }
     } else {
       // existing entry from contig
       if (exts_counts->count) {
@@ -394,13 +421,13 @@ void HashTableInserter<MAX_K>::init(int num_elems) {
   state->using_ctg_kmers = false;
   double free_mem = get_free_mem();
   SLOG_CPU_HT("There is ", get_size_str(free_mem), " free memory\n");
-  // set aside 40% of free mem for everything else, including the final hash table we copy across to
-  double avail_mem = 0.6 * free_mem / local_team().rank_n();
+  // set aside a fraction of free mem for everything else, including the final hash table we copy across to
+  double avail_mem = KCOUNT_CPU_HT_MEM_FRACTION * free_mem / local_team().rank_n();
   size_t elem_size = sizeof(Kmer<MAX_K>) + sizeof(KmerExtsCounts);
   size_t max_elems = avail_mem / elem_size;
   SLOG_CPU_HT("Request for ", num_elems, " elements and space available for ", max_elems, " elements of size ", elem_size, "\n");
   // don't make too many extra elems because that takes longer to initialize
-  if (max_elems > 2 * num_elems) max_elems = 2 * num_elems;
+  if (max_elems > 3 * num_elems) max_elems = 3 * num_elems;
   SLOG_CPU_HT("Allocating ", max_elems, " elements\n");
   state->kmers->reserve(max_elems);
   double used_mem = free_mem - get_free_mem();
@@ -435,7 +462,13 @@ void HashTableInserter<MAX_K>::flush_inserts() {
   auto max_load_factor = reduce_one(state->kmers->load_factor(), op_fast_max, 0).wait();
   SLOG_CPU_HT("kmer DHT load factor: ", avg_load_factor, " avg, ", max_load_factor, " max, load balance\n");
   auto tot_num_dropped = reduce_one(state->kmers->get_num_dropped(), op_fast_add, 0).wait();
-  if (tot_num_dropped) SLOG_CPU_HT("Number dropped ", perc_str(tot_num_dropped, tot_num_kmers + tot_num_dropped), "\n");
+  auto tot_kmers = tot_num_kmers + tot_num_dropped;
+  if (tot_num_dropped) SLOG_CPU_HT("Number dropped ", perc_str(tot_num_dropped, tot_kmers), "\n");
+  auto tot_num_overrides = reduce_one(state->kmers->get_num_singleton_overrides(), op_fast_add, 0).wait();
+  if (tot_num_overrides) SLOG_CPU_HT("Number singleton overrides ", perc_str(tot_num_overrides, tot_kmers), "\n");
+  if (100.0 * tot_num_dropped / tot_kmers > 0.1)
+    SWARN("Lack of memory caused ", perc_str(tot_num_dropped, tot_kmers), " kmers to be dropped (singleton overrides ",
+          perc_str(tot_num_overrides, tot_kmers), ")\n");
   barrier();
   auto avg_kmers_processed = reduce_one(state->kmers->size(), op_fast_add, 0).wait() / rank_n();
   auto max_kmers_processed = reduce_one(state->kmers->size(), op_fast_max, 0).wait();
