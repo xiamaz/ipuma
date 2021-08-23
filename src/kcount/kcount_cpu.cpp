@@ -271,6 +271,8 @@ class KmerMapExts {
 
   size_t get_num_dropped() { return num_dropped; }
 
+  void clear_num_dropped() { num_dropped = 0; }
+
   size_t get_num_singleton_overrides() { return num_singleton_overrides; }
 
   void begin_iterate() { iter_pos = 0; }
@@ -462,6 +464,7 @@ void HashTableInserter<MAX_K>::flush_inserts() {
   auto max_load_factor = reduce_one(state->kmers->load_factor(), op_fast_max, 0).wait();
   SLOG_CPU_HT("kmer DHT load factor: ", avg_load_factor, " avg, ", max_load_factor, " max, load balance\n");
   auto tot_num_dropped = reduce_one(state->kmers->get_num_dropped(), op_fast_add, 0).wait();
+  state->kmers->clear_num_dropped();
   auto tot_kmers = tot_num_kmers + tot_num_dropped;
   if (tot_num_dropped) SLOG_CPU_HT("Number dropped ", perc_str(tot_num_dropped, tot_kmers), "\n");
   auto tot_num_overrides = reduce_one(state->kmers->get_num_singleton_overrides(), op_fast_add, 0).wait();
