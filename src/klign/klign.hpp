@@ -49,7 +49,7 @@
 template <int MAX_K>
 double find_alignments(unsigned kmer_len, std::vector<PackedReads *> &packed_reads_list, int max_store_size, int max_rpcs_in_flight,
                        Contigs &ctgs, Alns &alns, int seed_space, int rlen_limit, bool use_kmer_cache, bool compute_cigar = false,
-                       int min_ctg_len = 0, int ranks_per_gpu = 0);
+                       int min_ctg_len = 0);
 
 // Reduce compile time by instantiating templates of common types
 // extern template declarations are in kmer.hpp
@@ -57,7 +57,7 @@ double find_alignments(unsigned kmer_len, std::vector<PackedReads *> &packed_rea
 
 #define __MACRO_KLIGN__(KMER_LEN, MODIFIER)                                                                                      \
   MODIFIER double find_alignments<KMER_LEN>(unsigned, std::vector<PackedReads *> &, int, int, Contigs &, Alns &, int, int, bool, \
-                                            bool, int, int);
+                                            bool, int);
 
 __MACRO_KLIGN__(32, extern template);
 #if MAX_BUILD_KMER >= 64

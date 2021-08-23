@@ -105,18 +105,12 @@ static upcxx::future<> gpu_align_block(shared_ptr<AlignBlockData> aln_block_data
 }
 
 void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
-  int ranks_per_gpu = 0;
   gpu_devices = gpu_utils::get_num_node_gpus();
   if (gpu_devices <= 0) {
     // CPU only
     gpu_devices = 0;
   } else {
-    if (ranks_per_gpu == 0) {
-      // auto detect
-      gpu_mem_avail = gpu_utils::get_avail_gpu_mem_per_rank(local_team().rank_n(), gpu_devices);
-    } else {
-      gpu_mem_avail = gpu_utils::get_avail_gpu_mem_per_rank(ranks_per_gpu, 1);
-    }
+    gpu_mem_avail = gpu_utils::get_avail_gpu_mem_per_rank(local_team().rank_n(), gpu_devices);
     if (gpu_mem_avail) {
       SLOG_VERBOSE("GPU memory available: ", get_size_str(gpu_mem_avail), "\n");
       auto init_time =

@@ -696,7 +696,7 @@ static int align_kmers(KmerCtgDHT<MAX_K> &kmer_ctg_dht, Aligner &aligner,
 
 template <int MAX_K>
 static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads *> &packed_reads_list, Alns &alns, int rlen_limit,
-                            int seed_space, int64_t all_num_ctgs, int ranks_per_gpu, bool compute_cigar) {
+                            int seed_space, int64_t all_num_ctgs, bool compute_cigar) {
   BarrierTimer timer(__FILEFUNC__);
   SLOG_VERBOSE("Using a seed space of ", seed_space, "\n");
   int64_t tot_num_kmers = 0;
@@ -820,7 +820,7 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
 template <int MAX_K>
 double find_alignments(unsigned kmer_len, vector<PackedReads *> &packed_reads_list, int max_store_size, int max_rpcs_in_flight,
                        Contigs &ctgs, Alns &alns, int seed_space, int rlen_limit, bool use_kmer_cache, bool compute_cigar,
-                       int min_ctg_len, int ranks_per_gpu) {
+                       int min_ctg_len) {
   BarrierTimer timer(__FILEFUNC__);
   Kmer<MAX_K>::set_k(kmer_len);
   SLOG_VERBOSE("Aligning with seed size of ", kmer_len, "\n");
@@ -831,8 +831,7 @@ double find_alignments(unsigned kmer_len, vector<PackedReads *> &packed_reads_li
 #ifdef DEBUG
 // kmer_ctg_dht.dump_ctg_kmers();
 #endif
-  double kernel_elapsed =
-      do_alignments(kmer_ctg_dht, packed_reads_list, alns, rlen_limit, seed_space, all_num_ctgs, ranks_per_gpu, compute_cigar);
+  double kernel_elapsed = do_alignments(kmer_ctg_dht, packed_reads_list, alns, rlen_limit, seed_space, all_num_ctgs, compute_cigar);
   barrier();
   auto num_alns = alns.size();
   auto num_dups = alns.get_num_dups();

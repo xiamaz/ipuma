@@ -103,7 +103,6 @@ class Options {
   bool dump_gfa = false;
   bool show_progress = false;
   string pin_by = "numa";
-  int ranks_per_gpu = 0;  // autodetect
   int max_worker_threads = 3;
   string ctgs_fname;
   vector<int> insert_size = {0, 0};
