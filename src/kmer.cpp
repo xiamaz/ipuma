@@ -99,7 +99,7 @@ Kmer<MAX_K>::Kmer(const Kmer<MAX_K> &o) {
 }
 
 template <int MAX_K>
-Kmer<MAX_K>::Kmer(longs_t *other_longs) {
+Kmer<MAX_K>::Kmer(const longs_t *other_longs) {
   assert(Kmer::k > 0);
   memcpy(&(longs[0]), other_longs, N_LONGS * sizeof(longs_t));
 }
@@ -166,6 +166,7 @@ void Kmer<MAX_K>::get_kmers(unsigned kmer_len, const std::string_view &seq, std:
   // only need rank 0 to check
   assert(Kmer::k > 0);
   assert(kmer_len == Kmer::k);
+  // Note this converts Ns to Gs
   kmers.clear();
   if (seq.size() < Kmer::k) return;
   int bufsize = max((int)N_LONGS, (int)(seq.size() + 31) / 32) + N_LONGS;

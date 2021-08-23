@@ -52,7 +52,6 @@
 #include "upcxx_utils.hpp"
 #include "upcxx_utils/thread_pool.hpp"
 #include "utils.hpp"
-#include "gpu-utils/gpu_utils.hpp"
 
 #include "kmer.hpp"
 
@@ -61,8 +60,11 @@ using std::setprecision;
 
 using namespace upcxx_utils;
 
+void init_devices();
+void done_init_devices();
+
 void merge_reads(vector<string> reads_fname_list, int qual_offset, double &elapsed_write_io_t,
-                 vector<PackedReads *> &packed_reads_list, bool checkpoint);
+                 vector<PackedReads *> &packed_reads_list, bool checkpoint, const string &adapter_fname, int min_kmer_len);
 
 int main(int argc, char **argv) {
   BaseTimer init_timer("upcxx::init");
@@ -74,8 +76,11 @@ int main(int argc, char **argv) {
   auto init_timings_fut = init_timer.reduce_timings();
   upcxx::promise<> report_init_timings(1);
 
+  const char *gasnet_statsfile = getenv("GASNET_STATSFILE");
 #if defined(ENABLE_GASNET_STATS)
-  mhm2_gasnet_stats_start();
+  if (gasnet_statsfile) _gasnet_stats = true;
+#else
+  if (gasnet_statsfile) SWARN("No GASNet statistics will be collected - use Debug or RelWithDebInfo modes to enable collection.");
 #endif
 
   // we wish to have all ranks start at the same time to determine actual timing
@@ -161,24 +166,8 @@ int main(int argc, char **argv) {
             " nodes for this amount of data.\n\tTotal free memory is approx ", get_size_str(total_free_mem),
             " and should be at least 3x the data size of ", get_size_str(tot_file_size), "\n");
   }
-#ifdef ENABLE_GPUS
-  // initialize the GPU and first-touch memory and functions in a new thread as this can take many seconds to complete
-  double gpu_startup_duration = 0;
-  int num_gpus = -1;
-  size_t gpu_mem = 0;
-  bool init_gpu_thread = true;
-  auto detect_gpu_fut = execute_in_thread_pool(
-      [&gpu_startup_duration, &num_gpus, &gpu_mem]() { gpu_utils::initialize_gpu(gpu_startup_duration, num_gpus, gpu_mem); });
-  detect_gpu_fut = detect_gpu_fut.then([&gpu_startup_duration, &num_gpus, &gpu_mem]() {
-    if (num_gpus > 0) {
-      SLOG_VERBOSE(KLMAGENTA, "Rank 0 is using ", num_gpus, " GPU/s (", gpu_utils::get_gpu_device_name(), ") on node 0, with ",
-                   get_size_str(gpu_mem), " available memory. Detected in ", gpu_startup_duration, " s", KNORM, "\n");
-      SLOG_VERBOSE(gpu_utils::get_gpu_device_description());
-    } else {
-      SWARN("Compiled for GPUs but no GPUs available...");
-    }
-  });
-#endif
+
+  init_devices();
 
   Contigs ctgs;
   int max_kmer_len = 0;
@@ -192,12 +181,14 @@ int main(int argc, char **argv) {
       packed_reads_list.push_back(new PackedReads(options->qual_offset, get_merged_reads_fname(reads_fname)));
     }
     double elapsed_write_io_t = 0;
-    if (!options->restart | !options->checkpoint_merged) {
+    if (!options->restart || !options->checkpoint_merged) {
       // merge the reads and insert into the packed reads memory cache
+      begin_gasnet_stats("merge_reads");
       stage_timers.merge_reads->start();
-      merge_reads(options->reads_fnames, options->qual_offset, elapsed_write_io_t, packed_reads_list, options->checkpoint_merged);
+      merge_reads(options->reads_fnames, options->qual_offset, elapsed_write_io_t, packed_reads_list, options->checkpoint_merged,
+                  options->adapter_fname, options->kmer_lens[0]);
       stage_timers.merge_reads->stop();
-      mhm2_gasnet_stats_dump("merge reads\n");
+      end_gasnet_stats();
     } else {
       // since this is a restart with checkpoint_merged true, the merged reads should be on disk already
       // load the merged reads instead of merge the original ones again
@@ -228,15 +219,7 @@ int main(int argc, char **argv) {
     int ins_avg = 0;
     int ins_stddev = 0;
 
-#ifdef ENABLE_GPUS
-    if (init_gpu_thread) {
-      Timer t("Waiting for GPU to be initialized (should be noop)");
-      init_gpu_thread = false;
-      detect_gpu_fut.wait();
-    }
-    int max_dev_id = reduce_one(num_gpus > 0 ? gpu_utils::get_gpu_device_pci_id() : 0, op_fast_max, 0).wait();
-    SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", max_dev_id, KNORM, "\n");
-#endif
+    done_init_devices();
 
     // contigging loops
     if (options->kmer_lens.size()) {
@@ -348,6 +331,7 @@ int main(int argc, char **argv) {
     else
       SLOG("    ", stage_timers.cache_reads->get_final(), "\n");
     SLOG("    ", stage_timers.analyze_kmers->get_final(), "\n");
+    SLOG("      -> ", stage_timers.kernel_kmer_analysis->get_final(), "\n");
     SLOG("    ", stage_timers.dbjg_traversal->get_final(), "\n");
     SLOG("    ", stage_timers.alignments->get_final(), "\n");
     SLOG("      -> ", stage_timers.kernel_alns->get_final(), "\n");

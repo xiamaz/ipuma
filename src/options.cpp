@@ -347,6 +347,8 @@ bool Options::load(int argc, char **argv) {
   app.add_option("-u, --unpaired-reads", unpaired_fnames, "Unpaired or single reads in FASTQ format (comma or space separated).")
       ->delimiter(',')
       ->check(CLI::ExistingFile);
+  app.add_option("--adapter-refs", adapter_fname, "File containing adapter sequences for trimming in FASTA format.")
+      ->check(CLI::ExistingFile);
   app.add_option("-i, --insert", insert_size, "Insert size (average:stddev) (autodetected by default).")
       ->delimiter(':')
       ->expected(2)
@@ -405,18 +407,13 @@ bool Options::load(int argc, char **argv) {
       ->check(CLI::Range(1, 100));
   // performance trade-offs
   app.add_option("--max-kmer-store", max_kmer_store_mb, "Maximum size for kmer store in MB per rank (set to 0 for auto 1% memory).")
-      ->check(CLI::Range(0, 1000));
+      ->check(CLI::Range(0, 5000));
   app.add_option("--max-rpcs-in-flight", max_rpcs_in_flight,
                  "Maximum number of RPCs in flight, per process (set to 0 for unlimited).")
       ->check(CLI::Range(0, 10000));
   app.add_flag("--use-heavy-hitters", use_heavy_hitters, "Enable the Heavy Hitter Streaming Store (experimental).");
-  app.add_option("--ranks-per-gpu", ranks_per_gpu, "Number of processes multiplexed to each GPU (default depends on hardware).")
-      ->check(CLI::Range(0, (int)upcxx::local_team().rank_n() * 8));
   app.add_option("--max-worker-threads", max_worker_threads, "Number of threads in the worker ThreadPool (default 3)")
       ->check(CLI::Range(0, (int)4 * upcxx::local_team().rank_n()));
-  auto *bloom_opt = app.add_flag("--force-bloom", force_bloom, "Always use bloom filters.")
-                        //      ->default_val(force_bloom ? "true" : "false")
-                        ->multi_option_policy();
   app.add_flag("--pin", pin_by,
                "Restrict processes according to logical CPUs, cores (groups of hardware threads), "
                "or NUMA domains (cpu, core, numa, none).")

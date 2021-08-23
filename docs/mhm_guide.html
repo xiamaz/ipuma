@@ -510,13 +510,15 @@ mv reads.fastq data</code></pre>
 <p>Activate code for managing <em>heavy hitters</em>, which are <em>k</em>-mers that occur far more frequently than any others. This can improve performance for datasets that have a few <em>k</em>-mers with extremely high abundance. Defaults to false.</p>
 <p><strong><code>--ranks-per-gpu INT</code></strong></p>
 <p>When GPUs are used, this overrides the automatic detection of how many processes use each GPU. It can be used to explicitly to tune for specific configurations of CPU/GPUs. This defaults to 0 if there are no GPUs available; otherwise it is automatically calculated.</p>
-<p><strong><code>--force-bloom BOOL</code></strong></p>
-<p>Always use bloom filters when analyzing <em>k</em>-mers. Bloom filters reduce memory usage and MHM2 determines if they are necessary by computing the available memory before doing the <em>k</em>-mer analysis. However, it is possible to force MHM2 to always use as little memory as possible by setting this option to true. It defaults to false.</p>
 <p><strong><code>--pin STRING</code></strong></p>
 <p>Restrict the hardware contexts that processes can run on. There are 4 options: <code>cpu</code>, meaning restrict each process to a single logical CPU; <code>core</code>, meaning restrict each process to a core; <code>numa</code>, meaning restrict each process to a NUMA domain; and <code>none</code>, meaning don’t restrict the processes. By default, it restricts to <code>cpu</code>.</p>
 <p><strong><code>--shared-heap INT</code></strong></p>
 <p>Set the shared heap size used by the UPC++ runtime, as a percentage of the available memory. This is automatically set and should never need to be adjusted. However, there may be some rare cases on certain hardware where this needs to be adjusted to enable MHM2 to run without memory errors. This defaults to 10%.</p>
 <p><strong><code>--procs INT</code></strong></p>
 <p>Set the number of processes for MHM2 to run with. By default, MHM2 automatically detects the number of available processes and runs on all of them. This setting allows a user to run MHM2 on a subset of available processors, which may be desirable if running on a server that is running other applications.</p>
+<p><strong><code>--trace-dir STRING</code></strong></p>
+<p>Set the name of the directory for collecting communication traces of program execution. When run with a build of the form <code>Debug</code> or <code>RelWithDebInfo</code>, this will produce 2 files per node, each containing the trace for that process. For more about what data are collected, consult the <a href="https://gasnet.lbl.gov/dist-ex/README">GASNet documentation</a>, in particular, the section about GASNet tracing and statistical collection. The <code>--trace-dir</code> option sets the trace mask as a set of useful and sensible defaults, i.e. setting the GASNet environment variable: <code>GASNET_TRACEMASK="GPWBNIH"</code>. This can be overriden by explicitly setting that environment variable.</p>
+<p><strong><code>--stats-dir STRING</code></strong></p>
+<p>Set the name of the directory for collecting communication statistics of program execution. When run with a build of the form <code>Debug</code> or <code>RelWithDebInfo</code>, this will produce 2 files per node, each containing the trace for that process. For more about what data are collected, consult the <a href="https://gasnet.lbl.gov/dist-ex/README">GASNet documentation</a>, in particular, the section about GASNet tracing and statistical collection.</p>
 </body>
 </html>

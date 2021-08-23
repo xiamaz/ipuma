@@ -44,7 +44,7 @@
 
 #include "gasnet_stats.hpp"
 #include "histogrammer.hpp"
-#include "kcount.hpp"
+#include "kcount/kcount.hpp"
 #include "klign.hpp"
 #include "kmer_dht.hpp"
 #include "stage_timers.hpp"
@@ -63,7 +63,8 @@ template <int MAX_K>
 void traverse_debruijn_graph(unsigned kmer_len, dist_object<KmerDHT<MAX_K>> &kmer_dht, Contigs &my_uutigs);
 void localassm(int max_kmer_len, int kmer_len, vector<PackedReads *> &packed_reads_list, int insert_avg, int insert_stddev,
                int qual_offset, Contigs &ctgs, const Alns &alns);
-void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Alns &alns, size_t num_ctgs);
+// void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Alns &alns, Contigs &ctgs);
+void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Contigs &ctgs);
 
 static uint64_t estimate_num_kmers(unsigned kmer_len, vector<PackedReads *> &packed_reads_list) {
   BarrierTimer timer(__FILEFUNC__);
@@ -118,20 +119,22 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     stage_timers.analyze_kmers->start();
     int64_t my_num_kmers = estimate_num_kmers(kmer_len, packed_reads_list);
     // use the max among all ranks
-    my_num_kmers = upcxx::reduce_all(my_num_kmers, upcxx::op_fast_max).wait();
-    dist_object<KmerDHT<MAX_K>> kmer_dht(world(), my_num_kmers, max_kmer_store, options->max_rpcs_in_flight, options->force_bloom,
+    my_num_kmers = reduce_all(my_num_kmers, op_fast_max).wait();
+    dist_object<KmerDHT<MAX_K>> kmer_dht(world(), my_num_kmers, max_kmer_store, options->max_rpcs_in_flight,
                                          options->use_heavy_hitters);
     barrier();
+    begin_gasnet_stats("kmer_analysis k = " + to_string(kmer_len));
     analyze_kmers(kmer_len, prev_kmer_len, options->qual_offset, packed_reads_list, options->dmin_thres, ctgs, kmer_dht,
-                  options->ranks_per_gpu, options->dump_kmers);
-    mhm2_gasnet_stats_dump("kmer analylis\n");
+                  options->dump_kmers);
+    end_gasnet_stats();
     stage_timers.analyze_kmers->stop();
     barrier();
     stage_timers.dbjg_traversal->start();
+    begin_gasnet_stats("dbjg_traversal k = " + to_string(kmer_len));
     traverse_debruijn_graph(kmer_len, kmer_dht, ctgs);
-    mhm2_gasnet_stats_dump("dbjg traversal\n");
+    end_gasnet_stats();
     stage_timers.dbjg_traversal->stop();
-    if (is_debug || options->checkpoint) {
+    if (is_debug) {
       stage_timers.dump_ctgs->start();
       ctgs.dump_contigs(uutigs_fname, 0);
       stage_timers.dump_ctgs->stop();
@@ -139,15 +142,6 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
   }
 
   if (kmer_len < options->kmer_lens.back()) {
-    Alns alns;
-    stage_timers.alignments->start();
-    bool first_ctg_round = (kmer_len == options->kmer_lens[0]);
-    double kernel_elapsed = find_alignments<MAX_K>(
-        kmer_len, packed_reads_list, max_kmer_store, options->max_rpcs_in_flight, ctgs, alns, KLIGN_SEED_SPACE, rlen_limit,
-        (options->klign_kmer_cache & !first_ctg_round), false, 0, options->ranks_per_gpu);
-    stage_timers.kernel_alns->inc_elapsed(kernel_elapsed);
-    stage_timers.alignments->stop();
-    barrier();
     if (kmer_len == options->kmer_lens.front()) {
       size_t num_reads = 0;
       for (auto packed_reads : packed_reads_list) {
@@ -159,7 +153,7 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
                    (double)avg_num_reads / max_num_reads, ")\n");
       if (options->shuffle_reads) {
         stage_timers.shuffle_reads->start();
-        shuffle_reads(options->qual_offset, packed_reads_list, alns, ctgs.size());
+        shuffle_reads(options->qual_offset, packed_reads_list, ctgs);
         stage_timers.shuffle_reads->stop();
         num_reads = 0;
         for (auto packed_reads : packed_reads_list) {
@@ -171,6 +165,43 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
                      (double)avg_num_reads / max_num_reads, ")\n");
       }
     }
+    barrier();
+    Alns alns;
+    stage_timers.alignments->start();
+    begin_gasnet_stats("alignment k = " + to_string(kmer_len));
+    bool first_ctg_round = (kmer_len == options->kmer_lens[0]);
+    double kernel_elapsed =
+        find_alignments<MAX_K>(kmer_len, packed_reads_list, max_kmer_store, options->max_rpcs_in_flight, ctgs, alns,
+                               KLIGN_SEED_SPACE, rlen_limit, (options->klign_kmer_cache & !first_ctg_round), false, 0);
+    end_gasnet_stats();
+    stage_timers.kernel_alns->inc_elapsed(kernel_elapsed);
+    stage_timers.alignments->stop();
+    barrier();
+    /*
+    if (kmer_len == options->kmer_lens.front()) {
+      size_t num_reads = 0;
+      for (auto packed_reads : packed_reads_list) {
+        num_reads += packed_reads->get_local_num_reads();
+      }
+      auto avg_num_reads = reduce_one(num_reads, op_fast_add, 0).wait() / rank_n();
+      auto max_num_reads = reduce_one(num_reads, op_fast_max, 0).wait();
+      SLOG_VERBOSE("Avg reads per rank ", avg_num_reads, " max ", max_num_reads, " (balance ",
+                   (double)avg_num_reads / max_num_reads, ")\n");
+      if (options->shuffle_reads) {
+        stage_timers.shuffle_reads->start();
+        shuffle_reads(options->qual_offset, packed_reads_list, alns, ctgs);
+        stage_timers.shuffle_reads->stop();
+        num_reads = 0;
+        for (auto packed_reads : packed_reads_list) {
+          num_reads += packed_reads->get_local_num_reads();
+        }
+        avg_num_reads = reduce_one(num_reads, op_fast_add, 0).wait() / rank_n();
+        max_num_reads = reduce_one(num_reads, op_fast_max, 0).wait();
+        SLOG_VERBOSE("After shuffle: avg reads per rank ", avg_num_reads, " max ", max_num_reads, " (load balance ",
+                     (double)avg_num_reads / max_num_reads, ")\n");
+      }
+    }
+    */
 #ifdef DEBUG
     alns.dump_rank_file("ctg-" + to_string(kmer_len) + ".alns.gz");
 #endif
@@ -179,8 +210,9 @@ void contigging(int kmer_len, int prev_kmer_len, int rlen_limit, vector<PackedRe
     max_expected_ins_size = ins_avg + 8 * ins_stddev;
     barrier();
     stage_timers.localassm->start();
+    begin_gasnet_stats("local_assembly k = " + to_string(kmer_len));
     localassm(LASSM_MAX_KMER_LEN, kmer_len, packed_reads_list, ins_avg, ins_stddev, options->qual_offset, ctgs, alns);
-    mhm2_gasnet_stats_dump("local assembly\n");
+    end_gasnet_stats();
     stage_timers.localassm->stop();
   }
   barrier();

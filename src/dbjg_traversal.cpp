@@ -152,7 +152,6 @@ static string gptr_str(global_ptr<FragElem> gptr) {
   return to_string(gptr.where()) + ":" + s;
 }
 
-#ifdef DEBUG
 template <int MAX_K>
 static bool check_kmers(const string &seq, dist_object<KmerDHT<MAX_K>> &kmer_dht, int kmer_len) {
   vector<Kmer<MAX_K>> kmers;
@@ -163,7 +162,6 @@ static bool check_kmers(const string &seq, dist_object<KmerDHT<MAX_K>> &kmer_dht
   }
   return true;
 }
-#endif
 
 template <int MAX_K>
 StepInfo<MAX_K> get_next_step(dist_object<KmerDHT<MAX_K>> &kmer_dht, const Kmer<MAX_K> start_kmer, const Dirn dirn,

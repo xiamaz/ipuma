@@ -233,6 +233,8 @@ unsigned PackedReads::get_max_read_len() { return max_read_len; }
 
 int64_t PackedReads::get_local_num_reads() { return packed_reads.size(); }
 
+int PackedReads::get_qual_offset() { return qual_offset; }
+
 void PackedReads::add_read(const string &read_id, const string &seq, const string &quals) {
   packed_reads.emplace_back(read_id, seq, quals, qual_offset);
   if (str_ids) {
@@ -319,6 +321,8 @@ void PackedReads::report_size() {
   SLOG_VERBOSE("Estimated memory for PackedReads: ",
                get_size_str(all_num_records * sizeof(PackedRead) + all_num_bases + all_num_names), "\n");
 }
+
+int64_t PackedReads::get_bases() { return upcxx::reduce_one(bases, upcxx::op_fast_add, 0).wait(); }
 
 PackedRead &PackedReads::operator[](int index) {
   if (index >= packed_reads.size()) DIE("Array index out of bound ", index, " >= ", packed_reads.size());

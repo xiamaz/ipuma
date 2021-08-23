@@ -7,10 +7,10 @@ set(CMAKE_CUDA_STANDARD 14 CACHE STRING "")
 set(CMAKE_CUDA_STANDARD_REQUIRED ON CACHE BOOL "")
 set(CMAKE_CUDA_EXTENSIONS OFF CACHE BOOL "")
 
-find_package(OpenMP REQUIRED)
+find_package(CUDA REQUIRED)
 
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12)
-  cmake_policy(SET CMP0074 NEW) # use the CUDA_ROOT variable 
+  cmake_policy(SET CMP0074 NEW) # use the CUDA_ROOT variable
 endif()
 
 enable_language(CUDA)
@@ -24,7 +24,7 @@ if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.18)
     else()
       set(CMAKE_CUDA_ARCHITECTURES 30 35 50 60 70)
     endif()
-    
+
     message(STATUS "Setting CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES} -- override with specific target if this build fails")
   else()
     message(STATUS "Using specified CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}")
@@ -52,27 +52,27 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 set(CMAKE_CUDA_PTX_COMPILATION ON)
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-Wall,${OpenMP_CXX_FLAGS} ${ARCH_FLAGS}")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-Wall ${ARCH_FLAGS}")
 message(STATUS "CMAKE_CUDA_FLAGS=${CMAKE_CUDA_FLAGS}")
 
-add_library(GPU_UTILS_LIBRARY_obj OBJECT gpu_utils.cpp)
+add_library(GPU_UTILS_LIBRARY_obj OBJECT gpu_utils.cpp gpu_common.cpp)
 if (${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13)
-  target_link_libraries(GPU_UTILS_LIBRARY_obj INTERFACE OpenMP::OpenMP_CXX)
+  target_link_libraries(GPU_UTILS_LIBRARY_obj INTERFACE)
 endif()
 
-set_source_files_properties(gpu_utils.cpp PROPERTIES LANGUAGE CUDA LINKER_LANGUAGE CUDA)
+set_source_files_properties(gpu_utils.cpp gpu_common.cpp PROPERTIES LANGUAGE CUDA LINKER_LANGUAGE CUDA)
 option(GPU_UTILS_SHARED "GPU-utils shared library" OFF)
 option(GPU_UTILS_STATIC "GPU-utils static library" ON)
 
 if (GPU_UTILS_SHARED)
   add_library(GPU_UTILS_LIBRARY_shared SHARED $<TARGET_OBJECTS:GPU_UTILS_LIBRARY_obj>)
   set_property(TARGET GPU_UTILS_LIBRARY_shared PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-  target_link_libraries(GPU_UTILS_LIBRARY_shared INTERFACE OpenMP::OpenMP_CXX)
+  target_link_libraries(GPU_UTILS_LIBRARY_shared INTERFACE)
   install(TARGETS GPU_UTILS_LIBRARY_shared LIBRARY DESTINATION lib)
 endif()
 if (GPU_UTILS_STATIC)
   add_library(GPU_UTILS_LIBRARY_static STATIC $<TARGET_OBJECTS:GPU_UTILS_LIBRARY_obj>)
-  target_link_libraries(GPU_UTILS_LIBRARY_static INTERFACE OpenMP::OpenMP_CXX)
+  target_link_libraries(GPU_UTILS_LIBRARY_static INTERFACE)
   set_property(TARGET GPU_UTILS_LIBRARY_static PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
   install(TARGETS GPU_UTILS_LIBRARY_static ARCHIVE DESTINATION lib)
 endif()

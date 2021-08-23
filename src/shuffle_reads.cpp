@@ -54,6 +54,7 @@
 #include "upcxx_utils/mem_profile.hpp"
 #include "utils.hpp"
 #include "hash_funcs.h"
+#include "kmer.hpp"
 
 using namespace std;
 using namespace upcxx;
@@ -64,14 +65,149 @@ using namespace upcxx_utils;
 // determine location of every read using atomics and generate a read_id to location map
 // process reads and put in correct locations
 
-intrank_t get_target_rank(int64_t val) {
+using kmer_t = Kmer<32>;
+
+static intrank_t get_target_rank(int64_t val) {
   return MurmurHash3_x64_64(reinterpret_cast<const void *>(&val), sizeof(int64_t)) % rank_n();
 }
 
+static intrank_t get_kmer_target_rank(kmer_t &kmer) { return kmer.hash() % rank_n(); }
+// static intrank_t get_kmer_target_rank(kmer_t &kmer) { return kmer.minimizer_hash_fast(15) % rank_n(); }
+
 using cid_to_reads_map_t = HASH_TABLE<int64_t, vector<int64_t>>;
 using read_to_target_map_t = HASH_TABLE<int64_t, int>;
+using kmer_to_cid_map_t = HASH_TABLE<uint64_t, int64_t>;
 
-dist_object<cid_to_reads_map_t> process_alns(vector<PackedReads *> &packed_reads_list, Alns &alns, int64_t num_ctgs) {
+static dist_object<kmer_to_cid_map_t> compute_kmer_to_cid_map(Contigs &ctgs) {
+  BarrierTimer timer(__FILEFUNC__);
+  assert(SHUFFLE_KMER_LEN < 32);
+  kmer_t::set_k(SHUFFLE_KMER_LEN);
+  // create kmer-cid hash table - this will only be for k < 32
+  dist_object<kmer_to_cid_map_t> kmer_to_cid_map({});
+  ThreeTierAggrStore<pair<uint64_t, int64_t>> kmer_cid_store;
+  kmer_cid_store.set_update_func([&kmer_to_cid_map](pair<uint64_t, int64_t> &&kmer_cid_info) {
+    auto it = kmer_to_cid_map->find(kmer_cid_info.first);
+    if (it == kmer_to_cid_map->end())
+      kmer_to_cid_map->insert(kmer_cid_info);
+    //else
+    //  WARN("Found duplicate kmer in cids - this shouldn't happen!");
+  });
+  int est_update_size = sizeof(pair<uint64_t, int64_t>);
+  int64_t mem_to_use = 0.1 * get_free_mem() / local_team().rank_n();
+  auto max_store_bytes = max(mem_to_use, (int64_t)est_update_size * 100);
+  kmer_cid_store.set_size("kmer cid store", max_store_bytes);
+  for (auto &ctg : ctgs) {
+    vector<kmer_t> kmers;
+    kmer_t::get_kmers(SHUFFLE_KMER_LEN, ctg.seq, kmers);
+    // can skip kmers to make it more efficient
+    for (int i = 0; i < kmers.size(); i += 1) {
+      kmer_t kmer = kmers[i];
+      auto kmer_rc = kmer.revcomp();
+      if (kmer < kmer_rc) kmer = kmer_rc;
+      kmer_cid_store.update(get_kmer_target_rank(kmer), {kmer.get_longs()[0], ctg.id});
+    }
+  }
+  kmer_cid_store.flush_updates();
+  barrier();
+  return kmer_to_cid_map;
+}
+
+struct KmerReqBuf {
+  vector<uint64_t> kmers;
+  vector<int64_t> read_ids;
+  void add(uint64_t kmer, int64_t read_id) {
+    kmers.push_back(kmer);
+    read_ids.push_back(read_id);
+  }
+  void clear() {
+    kmers.clear();
+    read_ids.clear();
+  }
+};
+
+static future<> update_cid_reads(intrank_t target, KmerReqBuf &kmer_req_buf, dist_object<kmer_to_cid_map_t> &kmer_to_cid_map,
+                                 ThreeTierAggrStore<pair<int64_t, int64_t>> &cid_reads_store) {
+  auto fut = rpc(
+                 target,
+                 [](dist_object<kmer_to_cid_map_t> &kmer_to_cid_map, vector<uint64_t> kmers) -> vector<int64_t> {
+                   vector<int64_t> cids;
+                   cids.resize(kmers.size());
+                   for (int i = 0; i < kmers.size(); i++) {
+                     const auto it = kmer_to_cid_map->find(kmers[i]);
+                     cids[i] = (it == kmer_to_cid_map->end() ? -1 : it->second);
+                   }
+                   return cids;
+                 },
+                 kmer_to_cid_map, kmer_req_buf.kmers)
+                 .then([read_ids = kmer_req_buf.read_ids, &cid_reads_store](vector<int64_t> cids) {
+                   if (cids.size() != read_ids.size()) WARN("buff size is wrong, ", cids.size(), " != ", read_ids.size());
+                   for (int i = 0; i < cids.size(); i++) {
+                     if (cids[i] != -1) cid_reads_store.update(get_target_rank(cids[i]), {cids[i], read_ids[i]});
+                   }
+                 });
+  kmer_req_buf.clear();
+  return fut;
+}
+
+static dist_object<cid_to_reads_map_t> compute_cid_to_reads_map(vector<PackedReads *> &packed_reads_list,
+                                                                dist_object<kmer_to_cid_map_t> &kmer_to_cid_map, int64_t num_ctgs) {
+  BarrierTimer timer(__FILEFUNC__);
+  dist_object<cid_to_reads_map_t> cid_to_reads_map({});
+  cid_to_reads_map->reserve(num_ctgs);
+  ThreeTierAggrStore<pair<int64_t, int64_t>> cid_reads_store;
+  cid_reads_store.set_update_func([&cid_to_reads_map](pair<int64_t, int64_t> &&cid_reads_info) {
+    auto &[cid, read_id] = cid_reads_info;
+    auto it = cid_to_reads_map->find(cid);
+    if (it == cid_to_reads_map->end())
+      cid_to_reads_map->insert({cid, {read_id}});
+    else
+      it->second.push_back(read_id);
+  });
+  int est_update_size = sizeof(pair<int64_t, int64_t>);
+  int64_t mem_to_use = 0.1 * get_free_mem() / local_team().rank_n();
+  auto max_store_bytes = max(mem_to_use, (int64_t)est_update_size * 100);
+  cid_reads_store.set_size("Read cid store", max_store_bytes);
+  string read_id_str, read_seq, read_quals;
+  const int MAX_REQ_BUFF = 1000;
+  vector<KmerReqBuf> kmer_req_bufs;
+  kmer_req_bufs.resize(rank_n());
+  future<> fut_chain = make_future();
+  for (auto packed_reads : packed_reads_list) {
+    packed_reads->reset();
+    for (int i = 0; i < packed_reads->get_local_num_reads(); i += 2) {
+      progress();
+      auto &packed_read1 = (*packed_reads)[i];
+      auto &packed_read2 = (*packed_reads)[i + 1];
+      auto read_id = abs(packed_read1.get_id());
+      for (auto &packed_read : {packed_read1, packed_read2}) {
+        vector<kmer_t> kmers;
+        packed_read.unpack(read_id_str, read_seq, read_quals, packed_reads->get_qual_offset());
+        if (read_seq.length() < SHUFFLE_KMER_LEN) continue;
+        kmer_t::get_kmers(SHUFFLE_KMER_LEN, read_seq, kmers);
+        for (int j = 0; j < kmers.size(); j += 32) {
+          kmer_t kmer = kmers[j];
+          auto kmer_rc = kmer.revcomp();
+          if (kmer < kmer_rc) kmer = kmer_rc;
+          auto target = get_kmer_target_rank(kmer);
+          kmer_req_bufs[target].add(kmer.get_longs()[0], read_id);
+          if (kmer_req_bufs[target].kmers.size() == MAX_REQ_BUFF) {
+            fut_chain = when_all(fut_chain, update_cid_reads(target, kmer_req_bufs[target], kmer_to_cid_map, cid_reads_store));
+          }
+        }
+      }
+    }
+  }
+  for (auto target : upcxx_utils::foreach_rank_by_node()) {  // stagger by rank_me, round robin by node
+    if (!kmer_req_bufs[target].kmers.empty())
+      fut_chain = when_all(fut_chain, update_cid_reads(target, kmer_req_bufs[target], kmer_to_cid_map, cid_reads_store));
+  }
+  fut_chain.wait();
+  cid_reads_store.flush_updates();
+  barrier();
+  return cid_to_reads_map;
+}
+
+static dist_object<cid_to_reads_map_t> process_alns(vector<PackedReads *> &packed_reads_list, Alns &alns, int64_t num_ctgs) {
   BarrierTimer timer(__FILEFUNC__);
   using read_to_cid_map_t = HASH_TABLE<int64_t, pair<int64_t, int>>;
   dist_object<read_to_cid_map_t> read_to_cid_map({});
@@ -124,7 +260,8 @@ dist_object<cid_to_reads_map_t> process_alns(vector<PackedReads *> &packed_reads
   return cid_to_reads_map;
 }
 
-dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_to_reads_map_t> &cid_to_reads_map) {
+static dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_to_reads_map_t> &cid_to_reads_map,
+                                                                int64_t tot_num_reads) {
   BarrierTimer timer(__FILEFUNC__);
   int64_t num_mapped_reads = 0;
   for (auto &[cid, read_ids] : *cid_to_reads_map) num_mapped_reads += read_ids.size();
@@ -144,10 +281,14 @@ dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_to_read
   dist_object<read_to_target_map_t> read_to_target_map({});
   read_to_target_map->reserve(avg_num_mapped_reads);
   int block = ceil((double)all_num_mapped_reads / rank_n());
+  // int64_t num_reads_found = 0;
   for (auto &[cid, read_ids] : *cid_to_reads_map) {
     progress();
+    if (read_ids.empty()) continue;
     for (auto read_id : read_ids) {
-      rpc(get_target_rank(read_id),
+      // num_reads_found++;
+      rpc(
+          get_target_rank(read_id),
           [](dist_object<read_to_target_map_t> &read_to_target_map, int64_t read_id, int target) {
             read_to_target_map->insert({read_id, target});
           },
@@ -158,13 +299,15 @@ dist_object<read_to_target_map_t> compute_read_locations(dist_object<cid_to_read
     }
   }
   barrier();
+  auto tot_reads_found = reduce_one(read_to_target_map->size(), op_fast_add, 0).wait();
+  SLOG_VERBOSE("Number of read pairs mapping to contigs is ", perc_str(tot_reads_found, tot_num_reads / 2), "\n");
   fetch_add_domain.destroy();
   return read_to_target_map;
 }
 
-dist_object<vector<PackedRead>> move_reads_to_targets(vector<PackedReads *> &packed_reads_list,
-                                                      dist_object<read_to_target_map_t> &read_to_target_map,
-                                                      int64_t all_num_reads) {
+static dist_object<vector<PackedRead>> move_reads_to_targets(vector<PackedReads *> &packed_reads_list,
+                                                             dist_object<read_to_target_map_t> &read_to_target_map,
+                                                             int64_t all_num_reads) {
   BarrierTimer timer(__FILEFUNC__);
   int64_t num_not_found = 0;
   dist_object<vector<PackedRead>> new_packed_reads({});
@@ -186,7 +329,8 @@ dist_object<vector<PackedRead>> move_reads_to_targets(vector<PackedReads *> &pac
       auto &packed_read1 = (*packed_reads)[i];
       auto &packed_read2 = (*packed_reads)[i + 1];
       auto read_id = abs(packed_read1.get_id());
-      auto fut = rpc(get_target_rank(read_id),
+      auto fut = rpc(
+                     get_target_rank(read_id),
                      [](dist_object<read_to_target_map_t> &read_to_target_map, int64_t read_id) -> int {
                        const auto it = read_to_target_map->find(read_id);
                        if (it == read_to_target_map->end()) return -1;
@@ -213,15 +357,17 @@ dist_object<vector<PackedRead>> move_reads_to_targets(vector<PackedReads *> &pac
   return new_packed_reads;
 }
 
-void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Alns &alns, size_t num_ctgs) {
+// void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Alns &alns, Contigs &ctgs) {
+void shuffle_reads(int qual_offset, vector<PackedReads *> &packed_reads_list, Contigs &ctgs) {
   BarrierTimer timer(__FILEFUNC__);
 
   int64_t num_reads = 0;
   for (auto packed_reads : packed_reads_list) num_reads += packed_reads->get_local_num_reads();
   auto all_num_reads = reduce_all(num_reads, op_fast_add).wait();
 
-  auto cid_to_reads_map = process_alns(packed_reads_list, alns, num_ctgs);
-  auto read_to_target_map = compute_read_locations(cid_to_reads_map);
+  auto kmer_to_cid_map = compute_kmer_to_cid_map(ctgs);
+  auto cid_to_reads_map = compute_cid_to_reads_map(packed_reads_list, kmer_to_cid_map, ctgs.size());
+  auto read_to_target_map = compute_read_locations(cid_to_reads_map, all_num_reads);
   auto new_packed_reads = move_reads_to_targets(packed_reads_list, read_to_target_map, all_num_reads);
 
   // now copy the new packed reads to the old
