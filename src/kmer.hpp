@@ -124,8 +124,6 @@ class Kmer {
 
   static uint64_t revcomp_minimizer(uint64_t minimizer, int m);
 
-  uint64_t quick_hash(uint64_t v) const;
-
   uint64_t minimizer_hash(int m) const;
 
   uint64_t minimizer_hash_fast(int m, const Kmer *revcomp = nullptr) const;

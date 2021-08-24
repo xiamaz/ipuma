@@ -433,19 +433,6 @@ uint64_t Kmer<MAX_K>::revcomp_minimizer(uint64_t minimizer, int m) {
 }
 
 template <int MAX_K>
-uint64_t Kmer<MAX_K>::quick_hash(uint64_t v) const {
-  v = v * 3935559000370003845 + 2691343689449507681;
-  v ^= v >> 21;
-  v ^= v << 37;
-  v ^= v >> 4;
-  v *= 4768777513237032717;
-  v ^= v << 20;
-  v ^= v >> 41;
-  v ^= v << 5;
-  return v;
-}
-
-template <int MAX_K>
 uint64_t Kmer<MAX_K>::minimizer_hash(int m) const {
   uint64_t minimizer = 0;
   for (int i = 0; i <= Kmer::k - m; i++) {
