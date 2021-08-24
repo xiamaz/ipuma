@@ -207,11 +207,9 @@ class KmerMapExts {
   size_t num_elems = 0;
   size_t num_dropped = 0;
   size_t num_singleton_overrides = 0;
-  // vector<Kmer<MAX_K>> keys;
-  vector<uint64_t> keys;
+  vector<Kmer<MAX_K>> keys;
+  vector<uint8_t> probe_lens;
   vector<KmerExtsCounts> counts;
-  // const Kmer<MAX_K> KEY_EMPTY = Kmer<MAX_K>::get_invalid();
-  const uint64_t KEY_EMPTY = 0xffffffffffffffff;
   int iter_pos = 0;
   const int N_LONGS = Kmer<MAX_K>::get_N_LONGS();
 
@@ -222,9 +220,8 @@ class KmerMapExts {
     capacity = prime.get();
     SLOG_CPU_HT("Capacity is set to ", capacity, " for ", max_elems, " max elements\n");
     num_elems = 0;
-    // keys.resize(capacity, KEY_EMPTY);
-    keys.resize(capacity * N_LONGS);
-    memset(keys.data(), 0xff, capacity * sizeof(uint64_t) * N_LONGS);
+    keys.resize(capacity);
+    probe_lens.resize(capacity, 0);
     counts.resize(capacity, {0});
   }
 
@@ -233,11 +230,12 @@ class KmerMapExts {
     int start_slot = slot;
     const int MAX_PROBE = (capacity < KCOUNT_HT_MAX_PROBE ? capacity : KCOUNT_HT_MAX_PROBE);
     for (int i = 0; i < MAX_PROBE; i++) {
-      if (keys[slot * N_LONGS + N_LONGS - 1] == KEY_EMPTY) {
-        memcpy(&(keys[slot * N_LONGS]), kmer.get_longs(), N_LONGS * sizeof(uint64_t));
+      if (!probe_lens[slot]) {
+        keys[slot] = kmer;
+        probe_lens[slot] = i + 1;
         num_elems++;
         return {&(counts[slot]), true};
-      } else if (kmer.is_equal(&(keys[slot * N_LONGS]))) {
+      } else if (kmer == keys[slot]) {
         return {&(counts[slot]), false};
       }
       slot = (start_slot + i * i) % capacity;
@@ -250,12 +248,12 @@ class KmerMapExts {
       slot = kmer.hash() % capacity;
       start_slot = slot;
       for (int i = 0; i < MAX_PROBE; i++) {
-        if (keys[slot * N_LONGS + N_LONGS - 1] == KEY_EMPTY || kmer.is_equal(&(keys[slot * N_LONGS]))) {
-          DIE("This should never happen");
-        }
+        // FIXME: make an assert
+        if (probe_lens[slot] == 0 || kmer == keys[slot]) DIE("This should never happen");
         if (counts[slot].count == 1) {
           num_singleton_overrides++;
-          memcpy(&(keys[slot * N_LONGS]), kmer.get_longs(), N_LONGS * sizeof(uint64_t));
+          keys[slot] = kmer;
+          probe_lens[slot] = i + 1;
           return {&(counts[slot]), true};
         }
         slot = (start_slot + i * i) % capacity;
@@ -277,11 +275,11 @@ class KmerMapExts {
 
   void begin_iterate() { iter_pos = 0; }
 
-  pair<uint64_t *, KmerExtsCounts *> get_next() {
+  pair<Kmer<MAX_K> *, KmerExtsCounts *> get_next() {
     for (; iter_pos < capacity; iter_pos++) {
-      if (keys[iter_pos * N_LONGS + N_LONGS - 1] != KEY_EMPTY) {
+      if (probe_lens[iter_pos]) {
         iter_pos++;
-        return {&keys[(iter_pos - 1) * N_LONGS], &counts[iter_pos - 1]};
+        return {&keys[iter_pos - 1], &counts[iter_pos - 1]};
       }
     }
     return {nullptr, nullptr};
@@ -425,7 +423,7 @@ void HashTableInserter<MAX_K>::init(int num_elems) {
   SLOG_CPU_HT("There is ", get_size_str(free_mem), " free memory\n");
   // set aside a fraction of free mem for everything else, including the final hash table we copy across to
   double avail_mem = KCOUNT_CPU_HT_MEM_FRACTION * free_mem / local_team().rank_n();
-  size_t elem_size = sizeof(Kmer<MAX_K>) + sizeof(KmerExtsCounts);
+  size_t elem_size = sizeof(Kmer<MAX_K>) + sizeof(KmerExtsCounts) + 1;
   size_t max_elems = avail_mem / elem_size;
   SLOG_CPU_HT("Request for ", num_elems, " elements and space available for ", max_elems, " elements of size ", elem_size, "\n");
   // don't make too many extra elems because that takes longer to initialize
@@ -485,8 +483,8 @@ void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<M
   int64_t num_good_kmers = state->kmers->size();
   state->kmers->begin_iterate();
   while (true) {
-    auto [key, kmer_ext_counts] = state->kmers->get_next();
-    if (!key) break;
+    auto [kmer, kmer_ext_counts] = state->kmers->get_next();
+    if (!kmer) break;
     if ((kmer_ext_counts->count < 2) || (kmer_ext_counts->left_exts.is_zero() && kmer_ext_counts->right_exts.is_zero()))
       num_good_kmers--;
   }
@@ -494,8 +492,8 @@ void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<M
   int64_t num_purged = 0;
   state->kmers->begin_iterate();
   while (true) {
-    auto [key, kmer_ext_counts] = state->kmers->get_next();
-    if (!key) break;
+    auto [kmer, kmer_ext_counts] = state->kmers->get_next();
+    if (!kmer) break;
     if (kmer_ext_counts->count < 2) {
       num_purged++;
       continue;
@@ -508,12 +506,11 @@ void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<M
       num_purged++;
       continue;
     }
-    Kmer<MAX_K> kmer(key);
-    const auto it = local_kmers->find(kmer);
+    const auto it = local_kmers->find(*kmer);
     if (it != local_kmers->end())
-      WARN("Found a duplicate kmer ", kmer.to_string(), " - shouldn't happen: existing count ", it->second.count, " new count ",
+      WARN("Found a duplicate kmer ", kmer->to_string(), " - shouldn't happen: existing count ", it->second.count, " new count ",
            kmer_counts.count);
-    local_kmers->insert({kmer, kmer_counts});
+    local_kmers->insert({*kmer, kmer_counts});
   }
   barrier();
   auto tot_num_purged = reduce_one(num_purged, op_fast_add, 0).wait();

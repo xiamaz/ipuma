@@ -320,6 +320,11 @@ void Kmer<MAX_K>::set_kmer(const char *s) {
 }
 
 template <int MAX_K>
+void Kmer<MAX_K>::set_kmer(const longs_t *other_longs) {
+  memcpy(longs.data(), other_longs, sizeof(longs));
+}
+
+template <int MAX_K>
 string Kmer<MAX_K>::get_minimizer_slow(int m) {
   char s[200];
   to_string(s);

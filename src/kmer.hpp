@@ -108,6 +108,8 @@ class Kmer {
 
   void set_kmer(const char *s);
 
+  void set_kmer(const longs_t *other_longs);
+
   std::string get_minimizer_slow(int m);
 
   // returns the *greatest* least-complement m-mer of this k-mer
