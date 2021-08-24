@@ -207,6 +207,8 @@ class KmerMapExts {
   size_t num_elems = 0;
   size_t num_dropped = 0;
   size_t num_singleton_overrides = 0;
+  size_t sum_probe_lens = 0;
+  size_t max_probe_len = 0;
   vector<Kmer<MAX_K>> keys;
   vector<uint8_t> probe_lens;
   vector<KmerExtsCounts> counts;
@@ -228,17 +230,20 @@ class KmerMapExts {
   pair<KmerExtsCounts *, bool> insert(const Kmer<MAX_K> &kmer, bool override_singletons) {
     int slot = kmer.hash() % capacity;
     int start_slot = slot;
-    const int MAX_PROBE = (capacity < KCOUNT_HT_MAX_PROBE ? capacity : KCOUNT_HT_MAX_PROBE);
-    for (int i = 0; i < MAX_PROBE; i++) {
+    // const int MAX_PROBE = (capacity < KCOUNT_HT_MAX_PROBE ? capacity : KCOUNT_HT_MAX_PROBE);
+    const int MAX_PROBE = (capacity < 255 ? capacity : 255);
+    for (int i = 1; i <= MAX_PROBE; i++) {
       if (!probe_lens[slot]) {
         keys[slot] = kmer;
-        probe_lens[slot] = i + 1;
+        probe_lens[slot] = i;
+        sum_probe_lens += i;
+        if (i > max_probe_len) max_probe_len = i;
         num_elems++;
         return {&(counts[slot]), true};
       } else if (kmer == keys[slot]) {
         return {&(counts[slot]), false};
-      }
-      slot = (start_slot + i * i) % capacity;
+      } //else if (probe_lens[slot] <
+      slot = (slot + 1) % capacity;
     }
     // if we reach here we have not found the kmer and there is no space to insert it.
     // if overriding singletons, we have to repeat the insertion, but this time replacing the first singleton
@@ -247,16 +252,18 @@ class KmerMapExts {
       // reset variables for search
       slot = kmer.hash() % capacity;
       start_slot = slot;
-      for (int i = 0; i < MAX_PROBE; i++) {
+      for (int i = 1; i <= MAX_PROBE; i++) {
         // FIXME: make an assert
         if (probe_lens[slot] == 0 || kmer == keys[slot]) DIE("This should never happen");
         if (counts[slot].count == 1) {
           num_singleton_overrides++;
           keys[slot] = kmer;
-          probe_lens[slot] = i + 1;
+          probe_lens[slot] = i;
+          if (i > max_probe_len) max_probe_len = i;
+          sum_probe_lens += i;
           return {&(counts[slot]), true};
         }
-        slot = (start_slot + i * i) % capacity;
+        slot = (slot + 1) % capacity;
       }
     }
     num_dropped++;
@@ -272,6 +279,10 @@ class KmerMapExts {
   void clear_num_dropped() { num_dropped = 0; }
 
   size_t get_num_singleton_overrides() { return num_singleton_overrides; }
+
+  size_t get_sum_probe_lens() { return sum_probe_lens; }
+
+  size_t get_max_probe_len() { return max_probe_len; }
 
   void begin_iterate() { iter_pos = 0; }
 
@@ -423,6 +434,7 @@ void HashTableInserter<MAX_K>::init(int num_elems) {
   SLOG_CPU_HT("There is ", get_size_str(free_mem), " free memory\n");
   // set aside a fraction of free mem for everything else, including the final hash table we copy across to
   double avail_mem = KCOUNT_CPU_HT_MEM_FRACTION * free_mem / local_team().rank_n();
+  // double avail_mem = 0.05 * free_mem / local_team().rank_n();
   size_t elem_size = sizeof(Kmer<MAX_K>) + sizeof(KmerExtsCounts) + 1;
   size_t max_elems = avail_mem / elem_size;
   SLOG_CPU_HT("Request for ", num_elems, " elements and space available for ", max_elems, " elements of size ", elem_size, "\n");
@@ -461,6 +473,9 @@ void HashTableInserter<MAX_K>::flush_inserts() {
   auto avg_load_factor = reduce_one(state->kmers->load_factor(), op_fast_add, 0).wait() / upcxx::rank_n();
   auto max_load_factor = reduce_one(state->kmers->load_factor(), op_fast_max, 0).wait();
   SLOG_CPU_HT("kmer DHT load factor: ", avg_load_factor, " avg, ", max_load_factor, " max, load balance\n");
+  auto avg_probe_len = (double)reduce_one(state->kmers->get_sum_probe_lens(), op_fast_add, 0).wait() / tot_num_kmers;
+  auto max_probe_len = (double)reduce_one(state->kmers->get_max_probe_len(), op_fast_max, 0).wait();
+  SLOG_CPU_HT("kmer DHT probe lengths: ", avg_probe_len, " avg, ", max_probe_len, " max\n");
   auto tot_num_dropped = reduce_one(state->kmers->get_num_dropped(), op_fast_add, 0).wait();
   state->kmers->clear_num_dropped();
   auto tot_kmers = tot_num_kmers + tot_num_dropped;
@@ -473,8 +488,7 @@ void HashTableInserter<MAX_K>::flush_inserts() {
   barrier();
   auto avg_kmers_processed = reduce_one(state->kmers->size(), op_fast_add, 0).wait() / rank_n();
   auto max_kmers_processed = reduce_one(state->kmers->size(), op_fast_max, 0).wait();
-  SLOG_CPU_HT("Avg kmers processed per rank ", avg_kmers_processed, " (balance ", (double)avg_kmers_processed / max_kmers_processed,
-              ")\n");
+  SLOG_CPU_HT("Avg kmers per rank ", avg_kmers_processed, " (balance ", (double)avg_kmers_processed / max_kmers_processed, ")\n");
 }
 
 template <int MAX_K>
