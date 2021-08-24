@@ -428,8 +428,8 @@ void HashTableInserter<MAX_K>::init(int num_elems) {
   double free_mem = get_free_mem();
   SLOG_CPU_HT("There is ", get_size_str(free_mem), " free memory\n");
   // set aside a fraction of free mem for everything else, including the final hash table we copy across to
-  // double avail_mem = KCOUNT_CPU_HT_MEM_FRACTION * free_mem / local_team().rank_n();
-  double avail_mem = 0.05 * free_mem / local_team().rank_n();
+  double avail_mem = KCOUNT_CPU_HT_MEM_FRACTION * free_mem / local_team().rank_n();
+  // double avail_mem = 0.05 * free_mem / local_team().rank_n();
   size_t elem_size = sizeof(Kmer<MAX_K>) + sizeof(KmerExtsCounts);
   size_t max_elems = avail_mem / elem_size;
   SLOG_CPU_HT("Request for ", num_elems, " elements and space available for ", max_elems, " elements of size ", elem_size, "\n");
