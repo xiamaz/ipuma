@@ -207,13 +207,13 @@ class KmerMapExts {
   size_t num_elems = 0;
   size_t num_dropped = 0;
   size_t num_singleton_overrides = 0;
+  vector<Kmer<MAX_K>> keys;
   size_t sum_probe_lens = 0;
   size_t max_probe_len = 0;
-  vector<Kmer<MAX_K>> keys;
-  vector<uint8_t> probe_lens;
   vector<KmerExtsCounts> counts;
   int iter_pos = 0;
   const int N_LONGS = Kmer<MAX_K>::get_N_LONGS();
+  const uint64_t KEY_EMPTY = 0xffffffffffffffff;
 
  public:
   void reserve(size_t max_elems) {
@@ -223,26 +223,24 @@ class KmerMapExts {
     SLOG_CPU_HT("Capacity is set to ", capacity, " for ", max_elems, " max elements\n");
     num_elems = 0;
     keys.resize(capacity);
-    probe_lens.resize(capacity, 0);
+    memset((void *)keys.data(), 0xff, sizeof(Kmer<MAX_K>) * capacity);
     counts.resize(capacity, {0});
   }
 
   pair<KmerExtsCounts *, bool> insert(const Kmer<MAX_K> &kmer, bool override_singletons) {
     int slot = kmer.hash() % capacity;
     int start_slot = slot;
-    // const int MAX_PROBE = (capacity < KCOUNT_HT_MAX_PROBE ? capacity : KCOUNT_HT_MAX_PROBE);
-    const int MAX_PROBE = (capacity < 255 ? capacity : 255);
+    const int MAX_PROBE = (capacity < KCOUNT_HT_MAX_PROBE ? capacity : KCOUNT_HT_MAX_PROBE);
     for (int i = 1; i <= MAX_PROBE; i++) {
-      if (!probe_lens[slot]) {
+      if (keys[slot].get_longs()[N_LONGS - 1] == KEY_EMPTY) {
         keys[slot] = kmer;
-        probe_lens[slot] = i;
         sum_probe_lens += i;
         if (i > max_probe_len) max_probe_len = i;
         num_elems++;
         return {&(counts[slot]), true};
       } else if (kmer == keys[slot]) {
         return {&(counts[slot]), false};
-      } //else if (probe_lens[slot] <
+      }
       slot = (slot + 1) % capacity;
     }
     // if we reach here we have not found the kmer and there is no space to insert it.
@@ -253,12 +251,10 @@ class KmerMapExts {
       slot = kmer.hash() % capacity;
       start_slot = slot;
       for (int i = 1; i <= MAX_PROBE; i++) {
-        // FIXME: make an assert
-        if (probe_lens[slot] == 0 || kmer == keys[slot]) DIE("This should never happen");
+        assert(probe_lens[slot] != 0 && kmer != keys[slot]);
         if (counts[slot].count == 1) {
           num_singleton_overrides++;
           keys[slot] = kmer;
-          probe_lens[slot] = i;
           if (i > max_probe_len) max_probe_len = i;
           sum_probe_lens += i;
           return {&(counts[slot]), true};
@@ -288,7 +284,7 @@ class KmerMapExts {
 
   pair<Kmer<MAX_K> *, KmerExtsCounts *> get_next() {
     for (; iter_pos < capacity; iter_pos++) {
-      if (probe_lens[iter_pos]) {
+      if (keys[iter_pos].get_longs()[N_LONGS - 1] != KEY_EMPTY) {
         iter_pos++;
         return {&keys[iter_pos - 1], &counts[iter_pos - 1]};
       }
@@ -435,7 +431,7 @@ void HashTableInserter<MAX_K>::init(int num_elems) {
   // set aside a fraction of free mem for everything else, including the final hash table we copy across to
   double avail_mem = KCOUNT_CPU_HT_MEM_FRACTION * free_mem / local_team().rank_n();
   // double avail_mem = 0.05 * free_mem / local_team().rank_n();
-  size_t elem_size = sizeof(Kmer<MAX_K>) + sizeof(KmerExtsCounts) + 1;
+  size_t elem_size = sizeof(Kmer<MAX_K>) + sizeof(KmerExtsCounts);
   size_t max_elems = avail_mem / elem_size;
   SLOG_CPU_HT("Request for ", num_elems, " elements and space available for ", max_elems, " elements of size ", elem_size, "\n");
   // don't make too many extra elems because that takes longer to initialize
