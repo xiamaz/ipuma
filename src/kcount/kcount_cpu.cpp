@@ -49,7 +49,8 @@ using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
 
-#define SLOG_CPU_HT(...) SLOG(KLGREEN, __VA_ARGS__, KNORM)
+//#define SLOG_CPU_HT(...) SLOG(KLGREEN, __VA_ARGS__, KNORM)
+#define SLOG_CPU_HT(...) SLOG_VERBOSE(__VA_ARGS__)
 
 template <int MAX_K>
 struct SeqBlockInserter<MAX_K>::SeqBlockInserterState {
