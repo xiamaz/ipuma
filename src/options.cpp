@@ -412,8 +412,6 @@ bool Options::load(int argc, char **argv) {
                  "Maximum number of RPCs in flight, per process (set to 0 for unlimited).")
       ->check(CLI::Range(0, 10000));
   app.add_flag("--use-heavy-hitters", use_heavy_hitters, "Enable the Heavy Hitter Streaming Store (experimental).");
-  app.add_option("--ranks-per-gpu", ranks_per_gpu, "Number of processes multiplexed to each GPU (default depends on hardware).")
-      ->check(CLI::Range(0, (int)upcxx::local_team().rank_n() * 8));
   app.add_option("--max-worker-threads", max_worker_threads, "Number of threads in the worker ThreadPool (default 3)")
       ->check(CLI::Range(0, (int)4 * upcxx::local_team().rank_n()));
   app.add_flag("--pin", pin_by,
