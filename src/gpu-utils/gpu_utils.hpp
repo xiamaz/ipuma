@@ -44,17 +44,17 @@
 
 namespace gpu_utils {
 
-size_t get_tot_gpu_mem();
-size_t get_avail_gpu_mem_per_rank(int totRanks, int numDevices = 0);
-size_t get_free_gpu_mem();
+size_t get_gpu_avail_mem();
+size_t get_gpu_tot_mem();
 std::string get_gpu_device_name();
-int get_num_node_gpus();
 std::string get_gpu_device_description();
-int get_gpu_device_pci_id();
+int get_gpu_pci_bus_id();
+void set_gpu_device(int my_rank);
+bool gpus_present();
 
 // The first call to cudaMallocHost can take several seconds of real time but no cpu time
 // so start it asap (call this in a new thread)
 bool initialize_gpu();
-bool initialize_gpu(double &time_to_initialize, int &device_count, size_t &total_mem);
+bool initialize_gpu(double &time_to_initialize);
 
 }  // namespace gpu_utils

@@ -50,6 +50,7 @@
 
 #include "upcxx_utils/colors.h"
 #include "gpu-utils/gpu_common.hpp"
+#include "gpu-utils/gpu_utils.hpp"
 #include "parse_and_pack.hpp"
 
 using namespace std;
@@ -234,10 +235,7 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
     , t_kernel(0) {
   QuickTimer init_timer;
   init_timer.start();
-  int device_count = 0;
-  cudaErrchk(cudaGetDeviceCount(&device_count));
-  int my_gpu_id = upcxx_rank_me % device_count;
-  cudaErrchk(cudaSetDevice(my_gpu_id));
+  gpu_utils::set_gpu_device(upcxx_rank_me);
   max_kmers = KCOUNT_SEQ_BLOCK_SIZE - kmer_len + 1;
 
   cudaErrchk(cudaMalloc((void **)&dev_seqs, KCOUNT_SEQ_BLOCK_SIZE));

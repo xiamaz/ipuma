@@ -57,6 +57,7 @@
 #include "driver.hpp"
 #include "kernel.hpp"
 #include "gpu-utils/gpu_common.hpp"
+#include "gpu-utils/gpu_utils.hpp"
 
 struct gpu_alignments {
   short* ref_start_gpu;
@@ -162,8 +163,7 @@ int get_new_min_length(short* alAend, short* alBend, int blocksLaunched) {
 }
 
 struct adept_sw::DriverState {
-  int device_count;
-  int my_gpu_id;
+  int rank_me;
   cudaStream_t streams_cuda[NSTREAMS];
   unsigned* offsetA_h;
   unsigned* offsetB_h;
@@ -183,12 +183,12 @@ double adept_sw::GPUDriver::init(int upcxx_rank_me, int upcxx_rank_n, short matc
   timepoint_t t = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> elapsed;
   driver_state = new DriverState();
+  driver_state->rank_me = upcxx_rank_me;
   // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " new=" << elapsed.count();
   driver_state->matchScore = match_score;
   driver_state->misMatchScore = mismatch_score;
   driver_state->startGap = gap_opening_score;
   driver_state->extendGap = gap_extending_score;
-  cudaErrchk(cudaGetDeviceCount(&driver_state->device_count));
 
   // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " get_num_gpus=" << elapsed.count();
 
@@ -199,8 +199,7 @@ double adept_sw::GPUDriver::init(int upcxx_rank_me, int upcxx_rank_n, short matc
   cudaErrchk(cudaMallocHost(&(alignments.top_scores), sizeof(short) * KLIGN_GPU_BLOCK_SIZE));
   // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " mallocHost=" << elapsed.count();
 
-  driver_state->my_gpu_id = upcxx_rank_me % driver_state->device_count;
-  cudaErrchk(cudaSetDevice(driver_state->my_gpu_id));
+  gpu_utils::set_gpu_device(driver_state->rank_me);
   // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " set_device=" << elapsed.count();
 
   for (int stm = 0; stm < NSTREAMS; stm++) {
@@ -231,7 +230,7 @@ double adept_sw::GPUDriver::init(int upcxx_rank_me, int upcxx_rank_n, short matc
 adept_sw::GPUDriver::~GPUDriver() {
   // won't have been allocated if there was no GPU present
   if (!alignments.ref_begin) return;
-  cudaErrchk(cudaSetDevice(driver_state->my_gpu_id));  // setting device mapping again
+  gpu_utils::set_gpu_device(driver_state->rank_me);
   cudaErrchk(cudaFreeHost(alignments.ref_begin));
   cudaErrchk(cudaFreeHost(alignments.ref_end));
   cudaErrchk(cudaFreeHost(alignments.query_begin));
@@ -262,8 +261,8 @@ void adept_sw::GPUDriver::kernel_block() {
 
 void adept_sw::GPUDriver::run_kernel_forwards(std::vector<std::string>& reads, std::vector<std::string>& contigs,
                                               unsigned maxReadSize, unsigned maxContigSize) {
-  cudaErrchk(cudaSetDevice(driver_state->my_gpu_id));  // setting device mapping again
-  unsigned totalAlignments = contigs.size();           // assuming that read and contig vectors are same length
+  gpu_utils::set_gpu_device(driver_state->rank_me);
+  unsigned totalAlignments = contigs.size();  // assuming that read and contig vectors are same length
 
   short* alAend = alignments.ref_end;
   short* alBend = alignments.query_end;

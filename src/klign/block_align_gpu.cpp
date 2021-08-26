@@ -55,8 +55,6 @@ using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
 
-static int gpu_devices = 0;
-static size_t gpu_mem_avail;
 static adept_sw::GPUDriver gpu_driver;
 
 static upcxx::future<> gpu_align_block(shared_ptr<AlignBlockData> aln_block_data, adept_sw::GPUDriver &gpu_driver, Alns *alns,
@@ -105,25 +103,14 @@ static upcxx::future<> gpu_align_block(shared_ptr<AlignBlockData> aln_block_data
 }
 
 void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
-  gpu_devices = gpu_utils::get_num_node_gpus();
-  if (gpu_devices <= 0) {
+  if (!gpu_utils::gpus_present()) {
     // CPU only
-    gpu_devices = 0;
-  } else {
-    gpu_mem_avail = gpu_utils::get_avail_gpu_mem_per_rank(local_team().rank_n(), gpu_devices);
-    if (gpu_mem_avail) {
-      SLOG_VERBOSE("GPU memory available: ", get_size_str(gpu_mem_avail), "\n");
-      auto init_time =
-          gpu_driver.init(local_team().rank_me(), local_team().rank_n(), (short)aln_scoring.match, (short)-aln_scoring.mismatch,
-                          (short)-aln_scoring.gap_opening, (short)-aln_scoring.gap_extending, rlen_limit);
-      SLOG_VERBOSE("Initialized adept_sw driver in ", init_time, " s\n");
-    } else {
-      gpu_devices = 0;
-    }
-  }
-  if (gpu_devices == 0) {
     SWARN("No GPU will be used for alignments");
-    gpu_mem_avail = 32 * 1024 * 1024;  // cpu needs a block of memory
+  } else {
+    auto init_time =
+        gpu_driver.init(local_team().rank_me(), local_team().rank_n(), (short)aln_scoring.match, (short)-aln_scoring.mismatch,
+                        (short)-aln_scoring.gap_opening, (short)-aln_scoring.gap_extending, rlen_limit);
+    SLOG_VERBOSE("Initialized adept_sw driver in ", init_time, " s\n");
   }
 }
 
@@ -135,7 +122,7 @@ void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vecto
   auto num = kernel_alns.size();
   // steal work from this kernel block if the previous kernel is still active
   // if true, this balances the block size that will be sent to the kernel
-  while ((gpu_devices == 0 || !active_kernel_fut.ready()) && !kernel_alns.empty()) {
+  while ((!gpu_utils::gpus_present() || !active_kernel_fut.ready()) && !kernel_alns.empty()) {
     assert(!ctg_seqs.empty());
     assert(!read_seqs.empty());
 #ifndef NO_KLIGN_CPU_WORK_STEAL
@@ -164,7 +151,7 @@ void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vecto
         make_shared<AlignBlockData>(kernel_alns, ctg_seqs, read_seqs, max_clen, max_rlen, read_group_id, cpu_aligner.aln_scoring);
     assert(kernel_alns.empty());
     // for now, the GPU alignment doesn't support cigars
-    if (!cpu_aligner.ssw_filter.report_cigar && gpu_devices > 0) {
+    if (!cpu_aligner.ssw_filter.report_cigar && gpu_utils::gpus_present()) {
       active_kernel_fut = gpu_align_block(aln_block_data, gpu_driver, alns, cpu_aligner.ssw_filter.report_cigar, aln_kernel_timer);
     } else {
 #ifdef __PPC64__

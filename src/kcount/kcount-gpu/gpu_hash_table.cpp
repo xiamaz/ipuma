@@ -51,6 +51,7 @@
 
 #include "upcxx_utils/colors.h"
 #include "gpu-utils/gpu_common.hpp"
+#include "gpu-utils/gpu_utils.hpp"
 #include "gpu_hash_table.hpp"
 #include "prime.hpp"
 
@@ -437,10 +438,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   this->upcxx_rank_n = upcxx_rank_n;
   this->kmer_len = kmer_len;
   pass_type = READ_KMERS_PASS;
-  int device_count = 0;
-  cudaErrchk(cudaGetDeviceCount(&device_count));
-  int my_gpu_id = upcxx_rank_me % device_count;
-  cudaErrchk(cudaSetDevice(my_gpu_id));
+  gpu_utils::set_gpu_device(upcxx_rank_me);
   // now check that we have sufficient memory for the required capacity
   size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * (1 + sizeof(count_t)) * 1.5;
   size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(CountsArray);
@@ -476,7 +474,7 @@ void HashTableGPUDriver<MAX_K>::init_ctg_kmers(int max_elems, size_t gpu_avail_m
   pass_type = CTG_KMERS_PASS;
   size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * (1 + sizeof(count_t)) * 1.5;
   size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(CountsArray);
-  size_t max_slots = 0.9 * (gpu_avail_mem - elem_buff_size) / elem_size;
+  size_t max_slots = 0.8 * (gpu_avail_mem - elem_buff_size) / elem_size;
   primes::Prime prime;
   prime.set(min(max_slots, (size_t)(max_elems * 3)), false);
   auto ht_capacity = prime.get();
