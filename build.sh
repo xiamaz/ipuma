@@ -25,6 +25,8 @@ rootdir=`pwd`
 
 INSTALL_PATH=${MHM2_INSTALL_PATH:=$rootdir/install}
 
+echo "Installing to $INSTALL_PATH"
+
 BINARY="${MHM2_BINARY:=mhm2}"
 
 rm -rf $INSTALL_PATH/bin/mhm2
