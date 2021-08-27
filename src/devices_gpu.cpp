@@ -46,8 +46,12 @@
 #include "gpu-utils/gpu_utils.hpp"
 #include "devices_gpu.hpp"
 
+using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
+
+#define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
+//#define SLOG_GPU SLOG_VERBOSE
 
 static bool init_gpu_thread = true;
 static future<> detect_gpu_fut;
@@ -72,16 +76,29 @@ void done_init_devices() {
     init_gpu_thread = false;
     detect_gpu_fut.wait();
     if (gpu_utils::gpus_present()) {
-      num_gpus_on_node = reduce_all(gpu_utils::get_gpu_pci_bus_id(), op_fast_max, local_team()).wait();
-      SLOG_VERBOSE(KLMAGENTA, "Available number of GPUs on this node ", num_gpus_on_node, KNORM, "\n");
-      SLOG_VERBOSE(KLMAGENTA, "Rank 0 is using GPU ", gpu_utils::get_gpu_device_name(), " on node 0, with ",
-                   get_size_str(gpu_utils::get_gpu_avail_mem()), " available memory (", get_size_str(get_avail_gpu_mem_per_rank()),
-                   " per rank). Detected in ", gpu_startup_duration, " s ", KNORM, "\n");
-      SLOG_VERBOSE(gpu_utils::get_gpu_device_description());
+      barrier();
+      int num_bus_ids = 0;
+      unordered_set<int> unique_ids;
+      dist_object<vector<int>> gpu_bus_ids(gpu_utils::get_gpu_pci_bus_ids(), local_team());
+      barrier();
+      for (int i = 0; i < local_team().rank_n(); i++) {
+        auto gpu_bus_ids_i = gpu_bus_ids.fetch(i).wait();
+        num_bus_ids += gpu_bus_ids_i.size();
+        for (auto bus_id : gpu_bus_ids_i) {
+          unique_ids.insert(bus_id);
+        }
+      }
+      num_gpus_on_node = unique_ids.size();
+      SLOG_GPU(KLMAGENTA, "Available number of GPUs on this node ", num_gpus_on_node, KNORM, "\n");
+      SLOG_GPU(KLMAGENTA, "Rank 0 is using GPU ", gpu_utils::get_gpu_device_name(), " on node 0, with ",
+               get_size_str(gpu_utils::get_gpu_avail_mem()), " available memory (", get_size_str(get_avail_gpu_mem_per_rank()),
+               " per rank). Detected in ", gpu_startup_duration, " s ", KNORM, "\n");
+      SLOG_GPU(gpu_utils::get_gpu_device_description());
       if (rank_me() < local_team().rank_n())
         WARN("Num GPUs on node ", get_num_gpus_on_node(), " gpu avail mem is ", get_size_str(get_avail_gpu_mem_per_rank()));
     } else {
       SDIE("No GPUs available - this build requires GPUs");
     }
   }
+  exit(0);
 }

@@ -81,10 +81,15 @@ static int get_gpu_device_count() {
   return device_count;
 }
 
-int gpu_utils::get_gpu_pci_bus_id() {
-  cudaDeviceProp prop;
-  cudaErrchk(cudaGetDeviceProperties(&prop, 0));
-  return prop.pciBusID;
+vector<int> gpu_utils::get_gpu_pci_bus_ids() {
+  vector<int> bus_ids;
+  int num_devs = get_gpu_device_count();
+  for (int i = 0; i < num_devs; ++i) {
+    cudaDeviceProp prop;
+    cudaErrchk(cudaGetDeviceProperties(&prop, 0));
+    bus_ids.push_back(prop.pciBusID);
+  }
+  return bus_ids;
 }
 
 void gpu_utils::set_gpu_device(int my_rank) {
@@ -128,6 +133,7 @@ string gpu_utils::get_gpu_device_description() {
     os << KLMAGENTA << "GPU Device number: " << i << "\n";
     os << "  Device name: " << prop.name << "\n";
     os << "  PCI device ID: " << prop.pciDeviceID << "\n";
+    os << "  PCI bus ID: " << prop.pciBusID << "\n";
     os << "  Compute capability: " << prop.major << "." << prop.minor << "\n";
     os << "  Clock Rate: " << prop.clockRate << "kHz\n";
     os << "  Total SMs: " << prop.multiProcessorCount << "\n";
