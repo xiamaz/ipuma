@@ -56,7 +56,6 @@ bool gpus_present();
 
 // The first call to cudaMallocHost can take several seconds of real time but no cpu time
 // so start it asap (call this in a new thread)
-bool initialize_gpu();
-bool initialize_gpu(double &time_to_initialize);
+void initialize_gpu(double &time_to_initialize, int rank_me);
 
 }  // namespace gpu_utils

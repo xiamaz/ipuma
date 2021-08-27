@@ -89,7 +89,7 @@ static string get_uuid_str(char uuid_bytes[16]) {
   }
   return os.str();
 }
-  
+
 vector<string> gpu_utils::get_gpu_uuids() {
   vector<string> uuids;
   int num_devs = get_gpu_device_count();
@@ -110,26 +110,19 @@ void gpu_utils::set_gpu_device(int my_rank) {
 
 bool gpu_utils::gpus_present() { return get_gpu_device_count(); }
 
-bool gpu_utils::initialize_gpu(double& time_to_initialize) {
+void gpu_utils::initialize_gpu(double& time_to_initialize, int rank_me) {
   using timepoint_t = chrono::time_point<chrono::high_resolution_clock>;
   double* first_touch;
 
   timepoint_t t = chrono::high_resolution_clock::now();
   chrono::duration<double> elapsed;
 
-  auto device_count = get_gpu_device_count();
-  if (device_count) {
-    cudaErrchk(cudaMallocHost((void**)&first_touch, sizeof(double)));
-    cudaErrchk(cudaFreeHost(first_touch));
-  }
+  if (!gpus_present()) return;
+  set_gpu_device(rank_me);
+  cudaErrchk(cudaMallocHost((void**)&first_touch, sizeof(double)));
+  cudaErrchk(cudaFreeHost(first_touch));
   elapsed = chrono::high_resolution_clock::now() - t;
   time_to_initialize = elapsed.count();
-  return device_count;
-}
-
-bool gpu_utils::initialize_gpu() {
-  double t;
-  return initialize_gpu(t);
 }
 
 string gpu_utils::get_gpu_device_description() {
@@ -139,7 +132,7 @@ string gpu_utils::get_gpu_device_description() {
   os << "Number of GPU devices visible: " << num_devs << "\n";
   for (int i = 0; i < num_devs; ++i) {
     cudaErrchk(cudaGetDeviceProperties(&prop, i));
-    
+
     os << "GPU Device number: " << i << "\n";
     os << "  Device name: " << prop.name << "\n";
     os << "  PCI device ID: " << prop.pciDeviceID << "\n";

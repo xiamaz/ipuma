@@ -65,7 +65,7 @@ size_t get_avail_gpu_mem_per_rank() { return (gpu_utils::get_gpu_avail_mem() * n
 void init_devices() {
   init_gpu_thread = true;
   // initialize the GPU and first-touch memory and functions in a new thread as this can take many seconds to complete
-  detect_gpu_fut = execute_in_thread_pool([]() { gpu_utils::initialize_gpu(gpu_startup_duration); });
+  detect_gpu_fut = execute_in_thread_pool([]() { gpu_utils::initialize_gpu(gpu_startup_duration, rank_me()); });
 }
 
 void done_init_devices() {
@@ -84,7 +84,7 @@ void done_init_devices() {
           auto gpu_uuids_i = gpu_uuids.fetch(i).wait();
           num_uuids += gpu_uuids_i.size();
           for (auto uuid : gpu_uuids_i) {
-            //SLOG(KLGREEN, "from rank ", i , " inserting uuid ", uuid, KNORM, "\n");
+            // SLOG(KLGREEN, "from rank ", i , " inserting uuid ", uuid, KNORM, "\n");
             unique_ids.insert(uuid);
           }
         }
@@ -102,12 +102,12 @@ void done_init_devices() {
                get_size_str(gpu_utils::get_gpu_avail_mem()), " available memory (", get_size_str(get_avail_gpu_mem_per_rank()),
                " per rank). Detected in ", gpu_startup_duration, " s\n");
       SLOG_GPU(gpu_utils::get_gpu_device_description());
-      //if (rank_me() < local_team().rank_n())
-        WARN("Num GPUs on node ", get_num_gpus_on_node(), " gpu avail mem is ", get_size_str(get_avail_gpu_mem_per_rank()));
+      // if (rank_me() < local_team().rank_n())
+      WARN("Num GPUs on node ", get_num_gpus_on_node(), " gpu avail mem is ", get_size_str(get_avail_gpu_mem_per_rank()));
     } else {
       SDIE("No GPUs available - this build requires GPUs");
     }
   }
-//  barrier();
-//  exit(0);
+  //  barrier();
+  //  exit(0);
 }
