@@ -74,28 +74,40 @@ void done_init_devices() {
     init_gpu_thread = false;
     detect_gpu_fut.wait();
     if (gpu_utils::gpus_present()) {
-      barrier();
-      int num_bus_ids = 0;
-      unordered_set<int> unique_ids;
-      dist_object<vector<int>> gpu_bus_ids(gpu_utils::get_gpu_pci_bus_ids(), local_team());
-      barrier();
-      for (int i = 0; i < local_team().rank_n(); i++) {
-        auto gpu_bus_ids_i = gpu_bus_ids.fetch(i).wait();
-        num_bus_ids += gpu_bus_ids_i.size();
-        for (auto bus_id : gpu_bus_ids_i) {
-          unique_ids.insert(bus_id);
+      barrier(local_team());
+      int num_uuids = 0;
+      unordered_set<string> unique_ids;
+      dist_object<vector<string>> gpu_uuids(gpu_utils::get_gpu_uuids(), local_team());
+      for (auto uuid : *gpu_uuids) unique_ids.insert(uuid);
+      if (!local_team().rank_me()) {
+        for (int i = 1; i < local_team().rank_n(); i++) {
+          auto gpu_uuids_i = gpu_uuids.fetch(i).wait();
+          num_uuids += gpu_uuids_i.size();
+          for (auto uuid : gpu_uuids_i) {
+            //SLOG(KLGREEN, "from rank ", i , " inserting uuid ", uuid, KNORM, "\n");
+            unique_ids.insert(uuid);
+          }
+        }
+        num_gpus_on_node = unique_ids.size();
+        SLOG(KLGREEN, "Found UUIDs:\n");
+        for (auto uuid : unique_ids) {
+          SLOG(KLGREEN, uuid, "\n");
         }
       }
-      num_gpus_on_node = unique_ids.size();
+      barrier(local_team());
+      auto my_num_gpus = broadcast(num_gpus_on_node, 0, local_team()).wait();
+      num_gpus_on_node = my_num_gpus;
       SLOG_GPU("Available number of GPUs on this node ", num_gpus_on_node, "\n");
       SLOG_GPU("Rank 0 is using GPU ", gpu_utils::get_gpu_device_name(), " on node 0, with ",
                get_size_str(gpu_utils::get_gpu_avail_mem()), " available memory (", get_size_str(get_avail_gpu_mem_per_rank()),
                " per rank). Detected in ", gpu_startup_duration, " s\n");
       SLOG_GPU(gpu_utils::get_gpu_device_description());
-      if (rank_me() < local_team().rank_n())
+      //if (rank_me() < local_team().rank_n())
         WARN("Num GPUs on node ", get_num_gpus_on_node(), " gpu avail mem is ", get_size_str(get_avail_gpu_mem_per_rank()));
     } else {
       SDIE("No GPUs available - this build requires GPUs");
     }
   }
+//  barrier();
+//  exit(0);
 }

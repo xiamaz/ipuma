@@ -50,7 +50,7 @@ size_t get_gpu_avail_mem();
 size_t get_gpu_tot_mem();
 std::string get_gpu_device_name();
 std::string get_gpu_device_description();
-std::vector<int> get_gpu_pci_bus_ids();
+std::vector<std::string> get_gpu_uuids();
 void set_gpu_device(int my_rank);
 bool gpus_present();
 

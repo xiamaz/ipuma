@@ -43,15 +43,26 @@
 #include <iostream>
 #include <sstream>
 #include <chrono>
+#include <array>
+#include <iomanip>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
-#include <array>
 
 #include "gpu_utils.hpp"
 #include "upcxx_utils/colors.h"
 #include "gpu_common.hpp"
 
 using namespace std;
+
+static int device_count = 0;
+
+static int get_gpu_device_count() {
+  if (!device_count) {
+    auto res = cudaGetDeviceCount(&device_count);
+    if (res != cudaSuccess) return 0;
+  }
+  return device_count;
+}
 
 size_t gpu_utils::get_gpu_tot_mem() {
   cudaDeviceProp prop;
@@ -71,25 +82,23 @@ string gpu_utils::get_gpu_device_name() {
   return prop.name;
 }
 
-static int device_count = 0;
-
-static int get_gpu_device_count() {
-  if (!device_count) {
-    auto res = cudaGetDeviceCount(&device_count);
-    if (res != cudaSuccess) return 0;
+static string get_uuid_str(char uuid_bytes[16]) {
+  ostringstream os;
+  for (int i = 0; i < 16; i++) {
+    os << std::setfill('0') << std::setw(2) << std::hex << (0xff & (unsigned int)uuid_bytes[i]);
   }
-  return device_count;
+  return os.str();
 }
-
-vector<int> gpu_utils::get_gpu_pci_bus_ids() {
-  vector<int> bus_ids;
+  
+vector<string> gpu_utils::get_gpu_uuids() {
+  vector<string> uuids;
   int num_devs = get_gpu_device_count();
   for (int i = 0; i < num_devs; ++i) {
     cudaDeviceProp prop;
-    cudaErrchk(cudaGetDeviceProperties(&prop, 0));
-    bus_ids.push_back(prop.pciBusID);
+    cudaErrchk(cudaGetDeviceProperties(&prop, i));
+    uuids.push_back(get_uuid_str(prop.uuid.bytes));
   }
-  return bus_ids;
+  return uuids;
 }
 
 void gpu_utils::set_gpu_device(int my_rank) {
@@ -127,13 +136,15 @@ string gpu_utils::get_gpu_device_description() {
   cudaDeviceProp prop;
   int num_devs = get_gpu_device_count();
   ostringstream os;
+  os << "Number of GPU devices visible: " << num_devs << "\n";
   for (int i = 0; i < num_devs; ++i) {
     cudaErrchk(cudaGetDeviceProperties(&prop, i));
-
-    os << KLMAGENTA << "GPU Device number: " << i << "\n";
+    
+    os << "GPU Device number: " << i << "\n";
     os << "  Device name: " << prop.name << "\n";
     os << "  PCI device ID: " << prop.pciDeviceID << "\n";
     os << "  PCI bus ID: " << prop.pciBusID << "\n";
+    os << "  UUID: " << get_uuid_str(prop.uuid.bytes) << "\n";
     os << "  Compute capability: " << prop.major << "." << prop.minor << "\n";
     os << "  Clock Rate: " << prop.clockRate << "kHz\n";
     os << "  Total SMs: " << prop.multiProcessorCount << "\n";
@@ -155,7 +166,7 @@ string gpu_utils::get_gpu_device_description() {
 
     os << "  Shared Memory Per Block: " << prop.sharedMemPerBlock << " bytes\n";
     os << "  Registers Per Block: " << prop.regsPerBlock << " 32-bit\n";
-    os << "  Warp size: " << prop.warpSize << KNORM << "\n\n";
+    os << "  Warp size: " << prop.warpSize << "\n\n";
   }
   return os.str();
 }
