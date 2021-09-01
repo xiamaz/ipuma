@@ -96,7 +96,13 @@ vector<string> gpu_utils::get_gpu_uuids() {
   for (int i = 0; i < num_devs; ++i) {
     cudaDeviceProp prop;
     cudaErrchk(cudaGetDeviceProperties(&prop, i));
+#if (CUDA_VERSION >= 10000)
     uuids.push_back(get_uuid_str(prop.uuid.bytes));
+#else
+    ostringstream os;
+    os << prop.name << ':' << prop.pciDeviceID << ':' << prop.pciBusID << ':' << prop.pciDomainID << ':' << prop.multiGpuBoardGroupID;
+    uuids.push_back(os.str());
+#endif
   }
   return uuids;
 }
@@ -137,7 +143,11 @@ string gpu_utils::get_gpu_device_description() {
     os << "  Device name: " << prop.name << "\n";
     os << "  PCI device ID: " << prop.pciDeviceID << "\n";
     os << "  PCI bus ID: " << prop.pciBusID << "\n";
+    os << "  PCI domainID: " << prop.pciDomainID << "\n";
+    os << "  MultiGPUBoardGroupID: " << prop.multiGpuBoardGroupID << "\n";
+#if (CUDA_VERSION >= 10000)
     os << "  UUID: " << get_uuid_str(prop.uuid.bytes) << "\n";
+#endif
     os << "  Compute capability: " << prop.major << "." << prop.minor << "\n";
     os << "  Clock Rate: " << prop.clockRate << "kHz\n";
     os << "  Total SMs: " << prop.multiProcessorCount << "\n";
