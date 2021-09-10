@@ -43,15 +43,26 @@
 #include <iostream>
 #include <sstream>
 #include <chrono>
+#include <array>
+#include <iomanip>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
-#include <array>
 
 #include "gpu_utils.hpp"
 #include "upcxx_utils/colors.h"
 #include "gpu_common.hpp"
 
 using namespace std;
+
+static int device_count = 0;
+
+static int get_gpu_device_count() {
+  if (!device_count) {
+    auto res = cudaGetDeviceCount(&device_count);
+    if (res != cudaSuccess) return 0;
+  }
+  return device_count;
+}
 
 size_t gpu_utils::get_gpu_tot_mem() {
   cudaDeviceProp prop;
@@ -71,20 +82,29 @@ string gpu_utils::get_gpu_device_name() {
   return prop.name;
 }
 
-static int device_count = 0;
-
-static int get_gpu_device_count() {
-  if (!device_count) {
-    auto res = cudaGetDeviceCount(&device_count);
-    if (res != cudaSuccess) return 0;
+static string get_uuid_str(char uuid_bytes[16]) {
+  ostringstream os;
+  for (int i = 0; i < 16; i++) {
+    os << std::setfill('0') << std::setw(2) << std::hex << (0xff & (unsigned int)uuid_bytes[i]);
   }
-  return device_count;
+  return os.str();
 }
 
-int gpu_utils::get_gpu_pci_bus_id() {
-  cudaDeviceProp prop;
-  cudaErrchk(cudaGetDeviceProperties(&prop, 0));
-  return prop.pciBusID;
+vector<string> gpu_utils::get_gpu_uuids() {
+  vector<string> uuids;
+  int num_devs = get_gpu_device_count();
+  for (int i = 0; i < num_devs; ++i) {
+    cudaDeviceProp prop;
+    cudaErrchk(cudaGetDeviceProperties(&prop, i));
+#if (CUDA_VERSION >= 10000)
+    uuids.push_back(get_uuid_str(prop.uuid.bytes));
+#else
+    ostringstream os;
+    os << prop.name << ':' << prop.pciDeviceID << ':' << prop.pciBusID << ':' << prop.pciDomainID << ':' << prop.multiGpuBoardGroupID;
+    uuids.push_back(os.str());
+#endif
+  }
+  return uuids;
 }
 
 void gpu_utils::set_gpu_device(int my_rank) {
@@ -96,38 +116,38 @@ void gpu_utils::set_gpu_device(int my_rank) {
 
 bool gpu_utils::gpus_present() { return get_gpu_device_count(); }
 
-bool gpu_utils::initialize_gpu(double& time_to_initialize) {
+void gpu_utils::initialize_gpu(double& time_to_initialize, int rank_me) {
   using timepoint_t = chrono::time_point<chrono::high_resolution_clock>;
   double* first_touch;
 
   timepoint_t t = chrono::high_resolution_clock::now();
   chrono::duration<double> elapsed;
 
-  auto device_count = get_gpu_device_count();
-  if (device_count) {
-    cudaErrchk(cudaMallocHost((void**)&first_touch, sizeof(double)));
-    cudaErrchk(cudaFreeHost(first_touch));
-  }
+  if (!gpus_present()) return;
+  set_gpu_device(rank_me);
+  cudaErrchk(cudaMallocHost((void**)&first_touch, sizeof(double)));
+  cudaErrchk(cudaFreeHost(first_touch));
   elapsed = chrono::high_resolution_clock::now() - t;
   time_to_initialize = elapsed.count();
-  return device_count;
-}
-
-bool gpu_utils::initialize_gpu() {
-  double t;
-  return initialize_gpu(t);
 }
 
 string gpu_utils::get_gpu_device_description() {
   cudaDeviceProp prop;
   int num_devs = get_gpu_device_count();
   ostringstream os;
+  os << "Number of GPU devices visible: " << num_devs << "\n";
   for (int i = 0; i < num_devs; ++i) {
     cudaErrchk(cudaGetDeviceProperties(&prop, i));
 
-    os << KLMAGENTA << "GPU Device number: " << i << "\n";
+    os << "GPU Device number: " << i << "\n";
     os << "  Device name: " << prop.name << "\n";
     os << "  PCI device ID: " << prop.pciDeviceID << "\n";
+    os << "  PCI bus ID: " << prop.pciBusID << "\n";
+    os << "  PCI domainID: " << prop.pciDomainID << "\n";
+    os << "  MultiGPUBoardGroupID: " << prop.multiGpuBoardGroupID << "\n";
+#if (CUDA_VERSION >= 10000)
+    os << "  UUID: " << get_uuid_str(prop.uuid.bytes) << "\n";
+#endif
     os << "  Compute capability: " << prop.major << "." << prop.minor << "\n";
     os << "  Clock Rate: " << prop.clockRate << "kHz\n";
     os << "  Total SMs: " << prop.multiProcessorCount << "\n";
@@ -149,7 +169,7 @@ string gpu_utils::get_gpu_device_description() {
 
     os << "  Shared Memory Per Block: " << prop.sharedMemPerBlock << " bytes\n";
     os << "  Registers Per Block: " << prop.regsPerBlock << " 32-bit\n";
-    os << "  Warp size: " << prop.warpSize << KNORM << "\n\n";
+    os << "  Warp size: " << prop.warpSize << "\n\n";
   }
   return os.str();
 }

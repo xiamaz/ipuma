@@ -239,10 +239,10 @@ TEST(MHMTest, AdeptSW) {
   int device_count;
   size_t total_mem;
 #ifdef ENABLE_GPUS
-  gpu_utils::initialize_gpu(time_to_initialize, device_count, total_mem);
-  if (device_count > 0) {
-    EXPECT_TRUE(total_mem > 32 * 1024 * 1024);  // >32 MB
-  }
+  gpu_utils::initialize_gpu(time_to_initialize, 0);
+//  if (device_count > 0) {
+//    EXPECT_TRUE(total_mem > 32 * 1024 * 1024);  // >32 MB
+//  }
 
   adept_sw::GPUDriver gpu_driver;
   auto init_time = gpu_driver.init(0, 1, (short)aln_scoring.match, (short)-aln_scoring.mismatch, (short)-aln_scoring.gap_opening,

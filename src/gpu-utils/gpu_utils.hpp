@@ -1,3 +1,5 @@
+#pragma once
+
 /*
  HipMer v 2.0, Copyright (c) 2020, The Regents of the University of California,
  through Lawrence Berkeley National Laboratory (subject to receipt of any required
@@ -40,7 +42,7 @@
  form.
 */
 
-#pragma once
+#include <vector>
 
 namespace gpu_utils {
 
@@ -48,13 +50,12 @@ size_t get_gpu_avail_mem();
 size_t get_gpu_tot_mem();
 std::string get_gpu_device_name();
 std::string get_gpu_device_description();
-int get_gpu_pci_bus_id();
+std::vector<std::string> get_gpu_uuids();
 void set_gpu_device(int my_rank);
 bool gpus_present();
 
 // The first call to cudaMallocHost can take several seconds of real time but no cpu time
 // so start it asap (call this in a new thread)
-bool initialize_gpu();
-bool initialize_gpu(double &time_to_initialize);
+void initialize_gpu(double &time_to_initialize, int rank_me);
 
 }  // namespace gpu_utils
