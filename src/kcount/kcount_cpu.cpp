@@ -416,7 +416,7 @@ template <int MAX_K>
 void HashTableInserter<MAX_K>::get_elapsed_time(double &insert_time, double &kernel_time) {}
 
 #define SEQ_BLOCK_INSERTER_K(KMER_LEN) template struct SeqBlockInserter<KMER_LEN>;
-#define HASH_TABLE_INSERTER_K(KMER_LEN) template struct HashTableInserter<KMER_LEN>;
+#define HASH_TABLE_INSERTER_K(KMER_LEN) template class HashTableInserter<KMER_LEN>;
 
 SEQ_BLOCK_INSERTER_K(32);
 HASH_TABLE_INSERTER_K(32);

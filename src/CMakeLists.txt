@@ -59,6 +59,9 @@ message("Building ${CMAKE_BUILD_TYPE} version")
 
 set(CMAKE_CXX_FLAGS
     "${CMAKE_CXX_FLAGS} -Wall -Wno-reorder -Wno-sign-compare -Wno-unused-function -Wno-catch-value"
+    # "${CMAKE_CXX_FLAGS} -Wall -Wno-reorder -Wno-sign-compare
+    # -Wno-unused-function -Wno-deprecated-gpu-targets
+    # -Wno-unused-command-line-argument"
 )
 find_package(Threads REQUIRED)
 
@@ -69,8 +72,6 @@ link_directories(${ZLIB_BASEPATH}/lib64 ${ZLIB_BASEPATH}/lib)
 message(
   "Adding ZLIB for -I${ZLIB_INCLUDE_DIRS} and -L${ZLIB_BASEPATH}/lib64 -L${ZLIB_BASEPATH}/lib)"
 )
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 
 if(ENABLE_CUDA)
   message(STATUS "Building for GPUs with CUDA")

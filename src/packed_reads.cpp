@@ -112,15 +112,15 @@ PackedRead::PackedRead(const string &id_str, string_view seq, string_view quals,
 
 PackedRead::PackedRead(const PackedRead &copy)
     : read_id(copy.read_id)
-    , bytes(new unsigned char[read_len])
-    , read_len(copy.read_len) {
+    , read_len(copy.read_len)
+    , bytes(new unsigned char[read_len]) {
   memcpy(bytes, copy.bytes, read_len);
 }
 
 PackedRead::PackedRead(PackedRead &&move)
     : read_id(move.read_id)
-    , bytes(move.bytes)
-    , read_len(move.read_len) {
+    , read_len(move.read_len)
+    , bytes(move.bytes) {
   move.bytes = nullptr;
   move.clear();
 }

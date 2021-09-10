@@ -49,8 +49,8 @@
 #include "kcount-gpu/parse_and_pack.hpp"
 #include "kcount-gpu/gpu_hash_table.hpp"
 
-#define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
-//#define SLOG_GPU SLOG_VERBOSE
+//#define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
+#define SLOG_GPU SLOG_VERBOSE
 
 using namespace std;
 using namespace upcxx_utils;
@@ -357,7 +357,7 @@ void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<M
 }
 
 #define seq_block_inserter_K(KMER_LEN) template struct SeqBlockInserter<KMER_LEN>;
-#define HASH_TABLE_INSERTER_K(KMER_LEN) template struct HashTableInserter<KMER_LEN>;
+#define HASH_TABLE_INSERTER_K(KMER_LEN) template class HashTableInserter<KMER_LEN>;
 
 seq_block_inserter_K(32);
 HASH_TABLE_INSERTER_K(32);

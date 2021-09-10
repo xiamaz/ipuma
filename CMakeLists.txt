@@ -126,8 +126,9 @@ if(MHM2_VECTORS)
       power8-vector)
 
   if(NOT APPLE)
-    list(APPEND CpuArch_FEATURES vsx powerpc64 power8-fusion power8-vector
-    )# CpuArch sometimes does not find it
+    # this causes a lot of compilation warnings for clang list(APPEND
+    # CpuArch_FEATURES vsx powerpc64 power8-fusion power8-vector )# CpuArch
+    # sometimes does not find it
   endif()
 
   option(MHM2_DEBUG_VECTORS
