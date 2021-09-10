@@ -286,3 +286,21 @@ int32_t KmerDHT<MAX_K>::get_time_offset_us() {
   std::chrono::duration<double> t_elapsed = CLOCK_NOW() - start_t;
   return std::chrono::duration_cast<std::chrono::microseconds>(t_elapsed).count();
 }
+
+#define KMER_DHT_K(KMER_LEN) template class KmerDHT<KMER_LEN>
+
+KMER_DHT_K(32);
+#if MAX_BUILD_KMER >= 64
+KMER_DHT_K(64);
+#endif
+#if MAX_BUILD_KMER >= 96
+KMER_DHT_K(96);
+#endif
+#if MAX_BUILD_KMER >= 128
+KMER_DHT_K(128);
+#endif
+#if MAX_BUILD_KMER >= 160
+KMER_DHT_K(160);
+#endif
+
+#undef KMER_DHT_K

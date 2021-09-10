@@ -169,6 +169,7 @@ class KmerDHT {
   int32_t get_time_offset_us();
 };
 
+/*
 #define KMER_DHT_K(KMER_LEN) template class KmerDHT<KMER_LEN>
 
 KMER_DHT_K(32);
@@ -186,3 +187,4 @@ KMER_DHT_K(160);
 #endif
 
 #undef KMER_DHT_K
+*/
