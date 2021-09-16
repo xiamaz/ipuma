@@ -110,7 +110,11 @@ void ReadsToCtgsDHT::clear() {
 }
 
 void ReadsToCtgsDHT::add(const string &read_id, int64_t cid, char orient, char side) {
-  ReadCtgInfo read_ctg_info = {.read_id = read_id, .ctg_info = {.cid = cid, .orient = orient, .side = side}};
+  ReadCtgInfo read_ctg_info;
+  read_ctg_info.read_id = read_id;
+  read_ctg_info.ctg_info.cid = cid;
+  read_ctg_info.ctg_info.orient = orient;
+  read_ctg_info.ctg_info.side = side;
   rtc_store.update(get_target_rank(read_id), read_ctg_info);
 }
 

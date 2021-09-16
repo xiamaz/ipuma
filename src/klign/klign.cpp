@@ -144,8 +144,8 @@ class KmerCtgDHT {
 
   KmerCtgDHT(int max_store_size, int max_rpcs_in_flight)
       : kmer_map({})
-      , kmer_store()
       , global_ctg_seqs({})
+      , kmer_store()
       , num_dropped_seed_to_ctgs(0) {
     kmer_len = Kmer<MAX_K>::get_k();
     kmer_store.set_size("insert ctg seeds", max_store_size, max_rpcs_in_flight);
@@ -341,18 +341,19 @@ class Aligner {
 
  public:
   Aligner(int kmer_len, Alns &alns, int rlen_limit, bool compute_cigar, int all_num_ctgs)
-      : kmer_len(kmer_len)
-      , num_alns(0)
+      : num_alns(0)
       , num_perfect_alns(0)
       , num_overlaps(0)
+      , kmer_len(kmer_len)
       , kernel_alns({})
       , ctg_seqs({})
       , read_seqs({})
       , active_kernel_fut(make_future())
-      , alns(&alns)
-      , cpu_aligner(compute_cigar) {
+      , cpu_aligner(compute_cigar)
+      , alns(&alns) {
     // ctg_cache.set_invalid_key(std::numeric_limits<cid_t>::max());
     ctg_cache.reserve(2 * all_num_ctgs / rank_n());
+    init_aligner(cpu_aligner.aln_scoring, rlen_limit);
   }
 
   ~Aligner() { clear(); }

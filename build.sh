@@ -52,6 +52,7 @@ else
          -DMHM2_ENABLE_TESTING=0 $MHM2_CMAKE_EXTRAS #-DENABLE_CUDA=0
     fi
     make -j ${MHM2_BUILD_THREADS} all install
+    #make VERBOSE=1 -j ${MHM2_BUILD_THREADS} all install
     # make -j ${MHM2_BUILD_THREADS} check
     if [ "$BINARY" != "mhm2" ]; then
         mv -f $INSTALL_PATH/bin/mhm2 $INSTALL_PATH/bin/${BINARY}

@@ -251,7 +251,7 @@ class KmerMapExts {
       // reset variables for search
       slot = start_slot;
       for (int i = 1; i <= MAX_PROBE; i++) {
-        assert(probe_lens[slot] != 0 && kmer != keys[slot]);
+        assert(kmer != keys[slot]); // FIXME? probe_lens[slot] != 0
         if (counts[slot].count == 1) {
           num_singleton_overrides++;
           keys[slot] = kmer;
@@ -532,7 +532,7 @@ template <int MAX_K>
 void HashTableInserter<MAX_K>::get_elapsed_time(double &insert_time, double &kernel_time) {}
 
 #define SEQ_BLOCK_INSERTER_K(KMER_LEN) template struct SeqBlockInserter<KMER_LEN>;
-#define HASH_TABLE_INSERTER_K(KMER_LEN) template struct HashTableInserter<KMER_LEN>;
+#define HASH_TABLE_INSERTER_K(KMER_LEN) template class HashTableInserter<KMER_LEN>;
 
 SEQ_BLOCK_INSERTER_K(32);
 HASH_TABLE_INSERTER_K(32);

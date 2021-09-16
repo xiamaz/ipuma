@@ -107,12 +107,9 @@ static std::string revcomp(std::string instr) {
 
 void localassm_driver::localassm_driver(vector<CtgWithReads> &data_in, uint32_t max_ctg_size, uint32_t max_read_size,
                                         uint32_t max_r_count, uint32_t max_l_count, int mer_len, int max_kmer_len,
-                                        accum_data &sizes_vecs, int walk_len_limit, int qual_offset, int ranks, int my_rank,
-                                        int g_rank_me) {
-  int device_count = 0;
-  cudaErrchk(cudaGetDeviceCount(&device_count));
-  int my_gpu_id = my_rank % device_count;
-  cudaErrchk(cudaSetDevice(my_gpu_id));
+                                        accum_data &sizes_vecs, int walk_len_limit, int qual_offset, int my_rank,
+                                        size_t gpu_mem_avail) {
+  gpu_utils::set_gpu_device(my_rank);
   int max_mer_len = max_kmer_len;  // mer_len;// max_mer_len needs to come from macro (121) and mer_len is the mer_len for current
                                    // go
   unsigned tot_extensions = data_in.size();
@@ -133,13 +130,10 @@ void localassm_driver::localassm_driver(vector<CtgWithReads> &data_in, uint32_t 
                        (max_mer_len + max_walk_len) * sizeof(char) * tot_extensions +
                        sizeof(loc_ht_bool) * tot_extensions * max_walk_len;
 
-  size_t gpu_mem_avail = gpu_utils::get_avail_gpu_mem_per_rank(ranks, device_count);
-
-  float factor = 0.80;
   assert(gpu_mem_avail > 0);
-  unsigned iterations = ceil(
-      ((double)gpu_mem_req) /
-      ((double)gpu_mem_avail * factor));  // 0.8 is to buffer for the extra mem that is used when allocating once and using again
+  // factor is to buffer for the extra mem that is used when allocating once and using again
+  float factor = 0.80;
+  unsigned iterations = ceil(((double)gpu_mem_req) / ((double)gpu_mem_avail * factor));
   assert(iterations > 0);
   unsigned slice_size = tot_extensions / iterations;
   assert(slice_size > 0);

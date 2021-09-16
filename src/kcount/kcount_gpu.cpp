@@ -43,6 +43,7 @@
 #include "upcxx_utils.hpp"
 #include "kcount.hpp"
 #include "kmer_dht.hpp"
+#include "devices_gpu.hpp"
 
 #include "gpu-utils/gpu_utils.hpp"
 #include "kcount-gpu/parse_and_pack.hpp"
@@ -76,7 +77,6 @@ struct SeqBlockInserter<MAX_K>::SeqBlockInserterState {
 
 template <int MAX_K>
 SeqBlockInserter<MAX_K>::SeqBlockInserter(int qual_offset, int minimizer_len) {
-  if (gpu_utils::get_num_node_gpus() <= 0) DIE("GPUs are enabled but no GPU could be configured for kmer counting");
   double init_time;
   state = new SeqBlockInserterState();
   state->pnp_gpu_driver = new ParseAndPackGPUDriver(rank_me(), rank_n(), qual_offset, Kmer<MAX_K>::get_k(),
@@ -181,38 +181,37 @@ void HashTableInserter<MAX_K>::init(int max_elems) {
   // calculate total slots for hash table. Reserve space for parse and pack
   int bytes_for_pnp = KCOUNT_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
   size_t gpu_bytes_reqd;
-  int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
-  auto gpu_avail_mem = (gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp) * 0.95;
-  auto gpu_tot_mem = gpu_utils::get_tot_gpu_mem() * max_dev_id / upcxx::local_team().rank_n() - bytes_for_pnp;
-  SLOG_GPU("Available GPU memory per rank for kmers hash table is ", get_size_str(gpu_avail_mem), " out of a max of ",
-           get_size_str(gpu_tot_mem), "\n");
+  auto init_gpu_mem = gpu_utils::get_gpu_avail_mem();
+  auto gpu_avail_mem_per_rank = (get_avail_gpu_mem_per_rank() - bytes_for_pnp) * 0.95;
+  SLOG_GPU("Available GPU memory per rank for kmers hash table is ", get_size_str(gpu_avail_mem_per_rank), "\n");
   assert(state != nullptr);
-  state->ht_gpu_driver.init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), max_elems, gpu_avail_mem, init_time, gpu_bytes_reqd);
+  state->ht_gpu_driver.init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), max_elems, gpu_avail_mem_per_rank, init_time,
+                            gpu_bytes_reqd);
   auto capacity = state->ht_gpu_driver.get_capacity();
   SLOG_GPU("GPU read kmers hash table has capacity per rank of ", capacity, " for ", (int64_t)max_elems, " elements\n");
   if (capacity < max_elems * 0.8)
     SLOG_VERBOSE("GPU read kmers hash table has less than requested capacity: ", perc_str(capacity, max_elems),
                  "; full capacity requires ", get_size_str(gpu_bytes_reqd), " memory on GPU but only have ",
-                 get_size_str(gpu_avail_mem));
+                 get_size_str(gpu_avail_mem_per_rank));
   SLOG_GPU("Initialized hash table GPU driver in ", fixed, setprecision(3), init_time, " s\n");
-  auto gpu_free_mem = gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n();
-  SLOG_GPU("After initializing GPU hash table, there is ", get_size_str(gpu_free_mem), " memory available per rank, with ",
-           get_size_str(bytes_for_pnp), " reserved for PnP and ", get_size_str(gpu_bytes_reqd),
-           " reserved for the kmer hash table\n");
+  auto gpu_used_mem = init_gpu_mem - gpu_utils::get_gpu_avail_mem();
+  SLOG_GPU("GPU read kmers hash table used ", get_size_str(gpu_used_mem), " memory on GPU out of ",
+           get_size_str(gpu_utils::get_gpu_tot_mem()), "\n");
 }
 
 template <int MAX_K>
 void HashTableInserter<MAX_K>::init_ctg_kmers(int max_elems) {
   assert(state != nullptr);
-  int max_dev_id = reduce_one(gpu_utils::get_gpu_device_pci_id(), op_fast_max, 0).wait();
+  auto init_gpu_mem = gpu_utils::get_gpu_avail_mem();
   // we don't need to reserve space for either pnp or the read kmers because those have already reduced the gpu_avail_mem
-  auto gpu_avail_mem = (gpu_utils::get_free_gpu_mem() * max_dev_id / upcxx::local_team().rank_n()) * 0.95;
-  auto gpu_tot_mem = gpu_utils::get_tot_gpu_mem() * max_dev_id / upcxx::local_team().rank_n();
-  SLOG_GPU("Available GPU memory per rank for ctg kmers hash table is ", get_size_str(gpu_avail_mem), " out of a max of ",
-           get_size_str(gpu_tot_mem), "\n");
-  state->ht_gpu_driver.init_ctg_kmers(max_elems, gpu_avail_mem);
+  auto gpu_avail_mem_per_rank = get_avail_gpu_mem_per_rank();
+  SLOG_GPU("Available GPU memory per rank for ctg kmers hash table is ", get_size_str(gpu_avail_mem_per_rank), "\n");
+  state->ht_gpu_driver.init_ctg_kmers(max_elems, gpu_avail_mem_per_rank);
   SLOG_GPU("GPU ctg kmers hash table has capacity per rank of ", state->ht_gpu_driver.get_capacity(), " for ", fixed, max_elems,
            " elements\n");
+  auto gpu_used_mem = init_gpu_mem - gpu_utils::get_gpu_avail_mem();
+  SLOG_GPU("GPU ctg kmers hash table used ", get_size_str(gpu_used_mem), " memory on GPU out of ",
+           get_size_str(gpu_utils::get_gpu_tot_mem()), "\n");
 }
 
 template <int MAX_K>
@@ -358,7 +357,7 @@ void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<M
 }
 
 #define seq_block_inserter_K(KMER_LEN) template struct SeqBlockInserter<KMER_LEN>;
-#define HASH_TABLE_INSERTER_K(KMER_LEN) template struct HashTableInserter<KMER_LEN>;
+#define HASH_TABLE_INSERTER_K(KMER_LEN) template class HashTableInserter<KMER_LEN>;
 
 seq_block_inserter_K(32);
 HASH_TABLE_INSERTER_K(32);

@@ -53,6 +53,7 @@
 #include "upcxx_utils.hpp"
 #include "utils.hpp"
 #include "localassm_core.hpp"
+#include "devices_gpu.hpp"
 
 #include "localassm-gpu/driver.hpp"
 
@@ -149,7 +150,7 @@ void extend_ctgs(CtgsWithReadsDHT &ctgs_dht, Contigs &ctgs, int insert_avg, int 
         if (outlier_slice.ctg_vec.size() > 0)
           localassm_driver::localassm_driver(outlier_slice.ctg_vec, outlier_slice.max_contig_sz, max_read_size, outlier_slice.r_max,
                                              outlier_slice.l_max, kmer_len, max_kmer_len, outlier_slice.sizes_vec, walk_len_limit,
-                                             qual_offset, local_team().rank_n(), local_team().rank_me(), rank_me());
+                                             qual_offset, local_team().rank_me(), get_avail_gpu_mem_per_rank());
       });
   auto tot_mids{mid_slice.ctg_vec.size()};
   while ((!fut_outlier.ready() && mid_slice.ctg_vec.size() > 0) ||
@@ -167,7 +168,7 @@ void extend_ctgs(CtgsWithReadsDHT &ctgs_dht, Contigs &ctgs, int insert_avg, int 
   if (mid_slice.ctg_vec.size() > 0) {
     localassm_driver::localassm_driver(mid_slice.ctg_vec, mid_slice.max_contig_sz, max_read_size, mid_slice.r_max, mid_slice.l_max,
                                        kmer_len, max_kmer_len, mid_slice.sizes_vec, walk_len_limit, qual_offset,
-                                       local_team().rank_n(), local_team().rank_me(), rank_me());
+                                       local_team().rank_me(), get_avail_gpu_mem_per_rank());
   }
 
   loc_assem_kernel_timer.stop();

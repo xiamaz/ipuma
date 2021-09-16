@@ -50,7 +50,9 @@ endif()
 
 message(STATUS "ARCH_FLAGS=${ARCH_FLAGS}")
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-Wall ${ARCH_FLAGS}")
+set(CMAKE_CUDA_FLAGS
+    "${CMAKE_CUDA_FLAGS} -Xcompiler=-Wall ${ARCH_FLAGS} -Wno-deprecated-gpu-targets"
+)
 message(STATUS "CMAKE_CUDA_FLAGS=${CMAKE_CUDA_FLAGS}")
 
 add_library(GPU_LOC_obj OBJECT kernel.cpp driver.cpp)
