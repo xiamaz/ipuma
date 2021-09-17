@@ -282,6 +282,14 @@ bool Kmer<MAX_K>::operator==(const Kmer<MAX_K> &o) const {
 }
 
 template <int MAX_K>
+bool Kmer<MAX_K>::is_equal(const longs_t *other_longs) const {
+  for (int i = 0; i < N_LONGS; i++) {
+    if (longs[i] != other_longs[i]) return false;
+  }
+  return true;
+}
+
+template <int MAX_K>
 bool Kmer<MAX_K>::operator!=(const Kmer<MAX_K> &o) const {
   return !(*this == o);
 }
@@ -309,6 +317,11 @@ void Kmer<MAX_K>::set_kmer(const char *s) {
 #endif
     s++;
   }
+}
+
+template <int MAX_K>
+void Kmer<MAX_K>::set_kmer(const longs_t *other_longs) {
+  memcpy(longs.data(), other_longs, sizeof(longs));
 }
 
 template <int MAX_K>
@@ -417,19 +430,6 @@ uint64_t Kmer<MAX_K>::revcomp_minimizer(uint64_t minimizer, int m) {
             (TWIN_TABLE[(v >> 24) & 0xFF] << 32) | (TWIN_TABLE[(v >> 32) & 0xFF] << 24) | (TWIN_TABLE[(v >> 40) & 0xFF] << 16) |
             (TWIN_TABLE[(v >> 48) & 0xFF] << 8) | (TWIN_TABLE[(v >> 56)]);
   return rc_minz << (2 * (32 - m));
-}
-
-template <int MAX_K>
-uint64_t Kmer<MAX_K>::quick_hash(uint64_t v) const {
-  v = v * 3935559000370003845 + 2691343689449507681;
-  v ^= v >> 21;
-  v ^= v << 37;
-  v ^= v >> 4;
-  v *= 4768777513237032717;
-  v ^= v << 20;
-  v ^= v >> 41;
-  v ^= v << 5;
-  return v;
 }
 
 template <int MAX_K>

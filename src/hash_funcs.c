@@ -328,3 +328,16 @@ uint32_t SuperFastHash(const char *data, int len) {
 
   return hash;
 }
+
+uint64_t quick_hash(uint64_t v) {
+  v = v * 3935559000370003845 + 2691343689449507681;
+  v ^= v >> 21;
+  v ^= v << 37;
+  v ^= v >> 4;
+  v *= 4768777513237032717;
+  v ^= v << 20;
+  v ^= v >> 41;
+  v ^= v << 5;
+  return v;
+}
+

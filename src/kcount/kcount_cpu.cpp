@@ -43,10 +43,14 @@
 #include "upcxx_utils.hpp"
 #include "kcount.hpp"
 #include "kmer_dht.hpp"
+#include "prime.hpp"
 
 using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
+
+//#define SLOG_CPU_HT(...) SLOG(KLGREEN, __VA_ARGS__, KNORM)
+#define SLOG_CPU_HT(...) SLOG_VERBOSE(__VA_ARGS__)
 
 template <int MAX_K>
 struct SeqBlockInserter<MAX_K>::SeqBlockInserterState {
@@ -102,10 +106,10 @@ template <int MAX_K>
 void SeqBlockInserter<MAX_K>::done_processing(dist_object<KmerDHT<MAX_K>> &kmer_dht) {
   auto tot_supermers_bytes_sent = reduce_one(state->bytes_supermers_sent, op_fast_add, 0).wait();
   auto tot_kmers_bytes_sent = reduce_one(state->bytes_kmers_sent, op_fast_add, 0).wait();
-  SLOG_VERBOSE("Total bytes sent in compressed supermers ", get_size_str(tot_supermers_bytes_sent), " (compression is ", fixed,
-               setprecision(3), (double)tot_kmers_bytes_sent / tot_supermers_bytes_sent, " over kmers)\n");
+  SLOG_CPU_HT("Total bytes sent in compressed supermers ", get_size_str(tot_supermers_bytes_sent), " (compression is ", fixed,
+              setprecision(3), (double)tot_kmers_bytes_sent / tot_supermers_bytes_sent, " over kmers)\n");
   auto all_num_kmers = reduce_one(state->num_kmers, op_fast_add, 0).wait();
-  SLOG_VERBOSE("Processed a total of ", all_num_kmers, " kmers\n");
+  SLOG_CPU_HT("Processed a total of ", all_num_kmers, " kmers\n");
 }
 
 struct ExtCounts {
@@ -195,8 +199,110 @@ struct KmerExtsCounts {
   char get_right_ext() { return right_exts.get_ext(count); }
 };
 
+// template <int MAX_K>
+// using KmerMapExts = HASH_TABLE<Kmer<MAX_K>, KmerExtsCounts>;
+
 template <int MAX_K>
-using KmerMapExts = HASH_TABLE<Kmer<MAX_K>, KmerExtsCounts>;
+class KmerMapExts {
+  size_t capacity = 0;
+  size_t num_elems = 0;
+  size_t num_dropped = 0;
+  size_t num_singleton_overrides = 0;
+  vector<Kmer<MAX_K>> keys;
+  size_t sum_probe_lens = 0;
+  size_t max_probe_len = 0;
+  vector<KmerExtsCounts> counts;
+  int iter_pos = 0;
+  const int N_LONGS = Kmer<MAX_K>::get_N_LONGS();
+  const uint64_t KEY_EMPTY = 0xffffffffffffffff;
+
+ public:
+  void reserve(size_t max_elems) {
+    primes::Prime prime;
+    prime.set(max_elems, true);
+    capacity = prime.get();
+    SLOG_CPU_HT("Capacity is set to ", capacity, " for ", max_elems, " max elements\n");
+    num_elems = 0;
+    keys.resize(capacity);
+    memset((void *)keys.data(), 0xff, sizeof(Kmer<MAX_K>) * capacity);
+    counts.resize(capacity, {0});
+  }
+
+  pair<KmerExtsCounts *, bool> insert(const Kmer<MAX_K> &kmer, bool override_singletons) {
+    int slot = kmer.hash() % capacity;
+    int start_slot = slot;
+    const int MAX_PROBE = (capacity < KCOUNT_HT_MAX_PROBE ? capacity : KCOUNT_HT_MAX_PROBE);
+    for (int i = 1; i <= MAX_PROBE; i++) {
+      if (keys[slot].get_longs()[N_LONGS - 1] == KEY_EMPTY) {
+        keys[slot] = kmer;
+        sum_probe_lens += i;
+        if (i > max_probe_len) max_probe_len = i;
+        num_elems++;
+        return {&(counts[slot]), true};
+      } else if (kmer == keys[slot]) {
+        return {&(counts[slot]), false};
+      }
+      slot = (slot + 1) % capacity;
+    }
+    // if we reach here we have not found the kmer and there is no space to insert it.
+    // if overriding singletons, we have to repeat the insertion, but this time replacing the first singleton
+    // this approach is more computationally expensive, but it allows us to reuse slots that would be purged for ctg kmers
+    if (override_singletons) {
+      // reset variables for search
+      slot = start_slot;
+      for (int i = 1; i <= MAX_PROBE; i++) {
+        assert(kmer != keys[slot]); // FIXME? probe_lens[slot] != 0
+        if (counts[slot].count == 1) {
+          num_singleton_overrides++;
+          keys[slot] = kmer;
+          if (i > max_probe_len) max_probe_len = i;
+          sum_probe_lens += i;
+          return {&(counts[slot]), true};
+        }
+        slot = (slot + 1) % capacity;
+      }
+    }
+    num_dropped++;
+    return {nullptr, false};
+  }
+
+  size_t size() { return num_elems; }
+
+  double load_factor() { return (double)num_elems / capacity; }
+
+  size_t get_num_dropped() { return num_dropped; }
+
+  void clear_num_dropped() { num_dropped = 0; }
+
+  size_t get_num_singleton_overrides() { return num_singleton_overrides; }
+
+  size_t get_sum_probe_lens() { return sum_probe_lens; }
+
+  size_t get_max_probe_len() { return max_probe_len; }
+
+  void begin_iterate() { iter_pos = 0; }
+
+  pair<Kmer<MAX_K> *, KmerExtsCounts *> get_next() {
+    for (; iter_pos < capacity; iter_pos++) {
+      if (keys[iter_pos].get_longs()[N_LONGS - 1] != KEY_EMPTY) {
+        iter_pos++;
+        return {&keys[iter_pos - 1], &counts[iter_pos - 1]};
+      }
+    }
+    return {nullptr, nullptr};
+  }
+};
+
+// Another idea is that we basically have two arrays, one which contains keys + one ext each side (packed into 1 byte), and the
+// other which contains the full KmerExtCounts. Also, make the keys array say 2x bigger than the values array. Then when we
+// insert for the first time, don't insert a full kmerextcounts, but rather just the kmer and its packed exts byte. On the
+// subsequent inserts of the same kmer, then we insert the full extcounts. And given that at least 50% of all kmers are
+// singletons, we should save a lot of space, e.g. for k=21, the kmer is 8 bytes, so the first array will require 9 bytes, whereas
+// the second array will require 19 bytes. So for singletons, we use 9 bytes and others we use 9+19=28 bytes. Thus our memory
+// requirement for 50% singletons is now 0.5*9+0.5*28=19, instead of 28, so a savings of ~44%. For kmer of length 2, we'd have
+// 0.5*(17+36)=27 compared to 36, so a savings of 25%. Still pretty worthwhile. The only catch is that if we size the arrays so
+// that the keys is 2x the non-keys, then we cannot save more than those fractions, even for higher singleton counts. eg if we
+// have 80% singletons we'll still get 44% and 25% savings.
 
 template <int MAX_K>
 static void get_kmers_and_exts(Supermer &supermer, vector<KmerAndExt<MAX_K>> &kmers_and_exts) {
@@ -235,25 +341,15 @@ static void insert_supermer_from_read(Supermer &supermer, dist_object<KmerMapExt
   kmers_and_exts.reserve(supermer.seq.length() - kmer_len);
   get_kmers_and_exts(supermer, kmers_and_exts);
   for (auto &kmer_and_ext : kmers_and_exts) {
-    // find it - if it isn't found then insert it, otherwise increment the counts
-    const auto it = kmers->find(kmer_and_ext.kmer);
-    if (it == kmers->end()) {
-      KmerExtsCounts kmer_counts = {.left_exts = {0}, .right_exts = {0}, .count = kmer_and_ext.count, .from_ctg = false};
-      kmer_counts.left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
-      kmer_counts.right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
-      auto prev_bucket_count = kmers->bucket_count();
-      kmers->insert({kmer_and_ext.kmer, kmer_counts});
-      // since sizes are an estimate this could happen, but it will impact performance
-      if (prev_bucket_count < kmers->bucket_count())
-        SWARN("Hash table on rank 0 was resized from ", prev_bucket_count, " to ", kmers->bucket_count());
-    } else {
-      auto kmer_count = &it->second;
-      int count = kmer_count->count + kmer_and_ext.count;
-      if (count > numeric_limits<kmer_count_t>::max()) count = numeric_limits<kmer_count_t>::max();
-      kmer_count->count = count;
-      kmer_count->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
-      kmer_count->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
-    }
+    // find it - if it isn't found then insert it - this doen't set or change the value
+    auto [exts_counts, is_new] = kmers->insert(kmer_and_ext.kmer, false);
+    // no space - had to drop it
+    if (!exts_counts) continue;
+    int count = exts_counts->count + kmer_and_ext.count;
+    if (count > numeric_limits<kmer_count_t>::max()) count = numeric_limits<kmer_count_t>::max();
+    exts_counts->count = count;
+    exts_counts->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
+    exts_counts->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
   }
 }
 
@@ -265,58 +361,52 @@ static void insert_supermer_from_ctg(Supermer &supermer, dist_object<KmerMapExts
   get_kmers_and_exts(supermer, kmers_and_exts);
   for (auto &kmer_and_ext : kmers_and_exts) {
     // insert a new kmer derived from the previous round's contigs
-    const auto it = kmers->find(kmer_and_ext.kmer);
-    bool insert = false;
-    if (it == kmers->end()) {
-      // if it isn't found then insert it
-      insert = true;
-    } else {
-      auto kmer_counts = &it->second;
-      if (!kmer_counts->from_ctg) {
-        // existing kmer is from a read, only replace with new contig kmer if the existing kmer is not UU
-        char left_ext = kmer_counts->get_left_ext();
-        char right_ext = kmer_counts->get_right_ext();
-        if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F') {
-          // non-UU, replace
-          insert = true;
-        }
+    auto [exts_counts, is_new] = kmers->insert(kmer_and_ext.kmer, true);
+    // no space - had to drop it
+    if (!exts_counts) continue;
+    bool insert_it = false;
+    if (is_new) {
+      insert_it = true;
+    } else if (!exts_counts->from_ctg) {
+      // existing entry is from a read
+      if (exts_counts->count == 1) {
+        // singleton read kmer, replace - this will just be purged anyway
+        insert_it = true;
       } else {
-        // existing kmer from previous round's contigs
-        // update kmer counts
-        if (!kmer_counts->count) {
-          // previously must have been a conflict and set to zero, so don't do anything
+        char left_ext = exts_counts->get_left_ext();
+        char right_ext = exts_counts->get_right_ext();
+        // non-UU, replace
+        if (left_ext == 'X' || left_ext == 'F' || right_ext == 'X' || right_ext == 'F') insert_it = true;
+      }
+    } else {
+      // existing entry from contig
+      if (exts_counts->count) {
+        // will always insert, although it may get purged later for a conflict
+        insert_it = true;
+        char left_ext = exts_counts->get_left_ext();
+        char right_ext = exts_counts->get_right_ext();
+        if (left_ext != kmer_and_ext.left || right_ext != kmer_and_ext.right) {
+          // if the two contig kmers disagree on extensions, set up to purge by setting the count to 0
+          kmer_and_ext.count = 0;
         } else {
-          // will always insert, although it may get purged later for a conflict
-          insert = true;
-          char left_ext = kmer_counts->get_left_ext();
-          char right_ext = kmer_counts->get_right_ext();
-          if (left_ext != kmer_and_ext.left || right_ext != kmer_and_ext.right) {
-            // if the two contig kmers disagree on extensions, set up to purge by setting the count to 0
-            kmer_and_ext.count = 0;
-          } else {
-            // multiple occurrences of the same kmer derived from different contigs or parts of contigs
-            // The only way this kmer could have been already found in the contigs only is if it came from a localassm
-            // extension. In which case, all such kmers should not be counted again for each contig, because each
-            // contig can use the same reads independently, and the depth will be oversampled.
-            kmer_and_ext.count = min(kmer_and_ext.count, kmer_counts->count);
-            // kmer_and_ext.count += kmer_counts->count;
-          }
+          // multiple occurrences of the same kmer derived from different contigs or parts of contigs
+          // The only way this kmer could have been already found in the contigs only is if it came from a localassm
+          // extension. In which case, all such kmers should not be counted again for each contig, because each
+          // contig can use the same reads independently, and the depth will be oversampled.
+          kmer_and_ext.count = min(kmer_and_ext.count, exts_counts->count);
         }
       }
     }
-    if (insert) {
-      kmer_count_t count = kmer_and_ext.count;
-      KmerExtsCounts kmer_counts = {.left_exts = {0}, .right_exts = {0}, .count = count, .from_ctg = true};
-      kmer_counts.left_exts.inc(kmer_and_ext.left, count);
-      kmer_counts.right_exts.inc(kmer_and_ext.right, count);
-      (*kmers)[kmer_and_ext.kmer] = kmer_counts;
+    if (insert_it) {
+      *exts_counts = {.left_exts = {0}, .right_exts = {0}, .count = kmer_and_ext.count, .from_ctg = true};
+      exts_counts->left_exts.inc(kmer_and_ext.left, kmer_and_ext.count);
+      exts_counts->right_exts.inc(kmer_and_ext.right, kmer_and_ext.count);
     }
   }
 }
 
 template <int MAX_K>
 struct HashTableInserter<MAX_K>::HashTableInserterState {
-  int64_t initial_max_kmers = 0;
   bool using_ctg_kmers = false;
   dist_object<KmerMapExts<MAX_K>> kmers;
 
@@ -333,11 +423,23 @@ HashTableInserter<MAX_K>::~HashTableInserter() {
 }
 
 template <int MAX_K>
-void HashTableInserter<MAX_K>::init(int max_elems) {
+void HashTableInserter<MAX_K>::init(int num_elems) {
   state = new HashTableInserterState();
   state->using_ctg_kmers = false;
+  double free_mem = get_free_mem();
+  SLOG_CPU_HT("There is ", get_size_str(free_mem), " free memory\n");
+  // set aside a fraction of free mem for everything else, including the final hash table we copy across to
+  double avail_mem = KCOUNT_CPU_HT_MEM_FRACTION * free_mem / local_team().rank_n();
+  // double avail_mem = 0.05 * free_mem / local_team().rank_n();
+  size_t elem_size = sizeof(Kmer<MAX_K>) + sizeof(KmerExtsCounts);
+  size_t max_elems = avail_mem / elem_size;
+  SLOG_CPU_HT("Request for ", num_elems, " elements and space available for ", max_elems, " elements of size ", elem_size, "\n");
+  // don't make too many extra elems because that takes longer to initialize
+  if (max_elems > 3 * num_elems) max_elems = 3 * num_elems;
+  SLOG_CPU_HT("Allocating ", max_elems, " elements\n");
   state->kmers->reserve(max_elems);
-  state->initial_max_kmers = max_elems;
+  double used_mem = free_mem - get_free_mem();
+  SLOG_CPU_HT("Memory available: ", get_size_str(get_free_mem()), ", used ", get_size_str(used_mem), "\n");
 }
 
 template <int MAX_K>
@@ -362,54 +464,68 @@ void HashTableInserter<MAX_K>::insert_supermer(const std::string &supermer_seq, 
 
 template <int MAX_K>
 void HashTableInserter<MAX_K>::flush_inserts() {
-  int64_t tot_num_kmers_est = state->initial_max_kmers * rank_n();
   int64_t tot_num_kmers = reduce_one(state->kmers->size(), op_fast_add, 0).wait();
-  SLOG_VERBOSE("Originally reserved ", tot_num_kmers_est, " and now have ", tot_num_kmers, " elements\n");
+  SLOG_CPU_HT("Number of elements in hash table: ", tot_num_kmers, "\n");
   auto avg_load_factor = reduce_one(state->kmers->load_factor(), op_fast_add, 0).wait() / upcxx::rank_n();
-  SLOG_VERBOSE("kmer DHT load factor: ", avg_load_factor, "\n");
+  auto max_load_factor = reduce_one(state->kmers->load_factor(), op_fast_max, 0).wait();
+  SLOG_CPU_HT("kmer DHT load factor: ", avg_load_factor, " avg, ", max_load_factor, " max, load balance\n");
+  auto avg_probe_len = (double)reduce_one(state->kmers->get_sum_probe_lens(), op_fast_add, 0).wait() / tot_num_kmers;
+  auto max_probe_len = (double)reduce_one(state->kmers->get_max_probe_len(), op_fast_max, 0).wait();
+  SLOG_CPU_HT("kmer DHT probe lengths: ", avg_probe_len, " avg, ", max_probe_len, " max\n");
+  auto tot_num_dropped = reduce_one(state->kmers->get_num_dropped(), op_fast_add, 0).wait();
+  state->kmers->clear_num_dropped();
+  auto tot_kmers = tot_num_kmers + tot_num_dropped;
+  if (tot_num_dropped) SLOG_CPU_HT("Number dropped ", perc_str(tot_num_dropped, tot_kmers), "\n");
+  auto tot_num_overrides = reduce_one(state->kmers->get_num_singleton_overrides(), op_fast_add, 0).wait();
+  if (tot_num_overrides) SLOG_CPU_HT("Number singleton overrides ", perc_str(tot_num_overrides, tot_kmers), "\n");
+  if (100.0 * tot_num_dropped / tot_kmers > 0.1)
+    SWARN("Lack of memory caused ", perc_str(tot_num_dropped, tot_kmers), " kmers to be dropped (singleton overrides ",
+          perc_str(tot_num_overrides, tot_kmers), ")\n");
   barrier();
   auto avg_kmers_processed = reduce_one(state->kmers->size(), op_fast_add, 0).wait() / rank_n();
   auto max_kmers_processed = reduce_one(state->kmers->size(), op_fast_max, 0).wait();
-  SLOG_VERBOSE("Avg kmers processed per rank ", avg_kmers_processed, " (balance ",
-               (double)avg_kmers_processed / max_kmers_processed, ")\n");
+  SLOG_CPU_HT("Avg kmers per rank ", avg_kmers_processed, " (balance ", (double)avg_kmers_processed / max_kmers_processed, ")\n");
 }
 
 template <int MAX_K>
 void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<MAX_K>> &local_kmers) {
   BarrierTimer timer(__FILEFUNC__);
   int64_t num_good_kmers = state->kmers->size();
-  for (auto &elem : *(state->kmers)) {
-    auto &kmer_ext_counts = elem.second;
-    if ((kmer_ext_counts.count < 2) || (kmer_ext_counts.left_exts.is_zero() && kmer_ext_counts.right_exts.is_zero()))
+  state->kmers->begin_iterate();
+  while (true) {
+    auto [kmer, kmer_ext_counts] = state->kmers->get_next();
+    if (!kmer) break;
+    if ((kmer_ext_counts->count < 2) || (kmer_ext_counts->left_exts.is_zero() && kmer_ext_counts->right_exts.is_zero()))
       num_good_kmers--;
   }
   local_kmers->reserve(num_good_kmers);
   int64_t num_purged = 0;
-  for (auto &elem : *(state->kmers)) {
-    auto &kmer = elem.first;
-    auto &kmer_ext_counts = elem.second;
-    if (kmer_ext_counts.count < 2) {
+  state->kmers->begin_iterate();
+  while (true) {
+    auto [kmer, kmer_ext_counts] = state->kmers->get_next();
+    if (!kmer) break;
+    if (kmer_ext_counts->count < 2) {
       num_purged++;
       continue;
     }
     KmerCounts kmer_counts = {.uutig_frag = nullptr,
-                              .count = kmer_ext_counts.count,
-                              .left = kmer_ext_counts.get_left_ext(),
-                              .right = kmer_ext_counts.get_right_ext()};
+                              .count = kmer_ext_counts->count,
+                              .left = kmer_ext_counts->get_left_ext(),
+                              .right = kmer_ext_counts->get_right_ext()};
     if (kmer_counts.left == 'X' && kmer_counts.right == 'X') {
       num_purged++;
       continue;
     }
-    const auto it = local_kmers->find(kmer);
+    const auto it = local_kmers->find(*kmer);
     if (it != local_kmers->end())
-      WARN("Found a duplicate kmer ", kmer.to_string(), " - shouldn't happen: existing count ", it->second.count, " new count ",
+      WARN("Found a duplicate kmer ", kmer->to_string(), " - shouldn't happen: existing count ", it->second.count, " new count ",
            kmer_counts.count);
-    local_kmers->insert({kmer, kmer_counts});
+    local_kmers->insert({*kmer, kmer_counts});
   }
   barrier();
   auto tot_num_purged = reduce_one(num_purged, op_fast_add, 0).wait();
   auto tot_num_kmers = reduce_one(state->kmers->size(), op_fast_add, 0).wait();
-  SLOG_VERBOSE("Purged ", tot_num_purged, " kmers ( ", perc_str(tot_num_purged, tot_num_kmers), ")\n");
+  SLOG_CPU_HT("Purged ", tot_num_purged, " kmers ( ", perc_str(tot_num_purged, tot_num_kmers), ")\n");
 }
 
 template <int MAX_K>
