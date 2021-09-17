@@ -64,6 +64,7 @@ void init_devices() {
   init_gpu_thread = true;
   // initialize the GPU and first-touch memory and functions in a new thread as this can take many seconds to complete
   detect_gpu_fut = execute_in_thread_pool([]() { gpu_utils::initialize_gpu(gpu_startup_duration, rank_me()); });
+  //gpu_utils::initialize_gpu(gpu_startup_duration, rank_me());
 }
 
 void done_init_devices() {

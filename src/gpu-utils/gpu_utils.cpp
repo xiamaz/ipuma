@@ -118,15 +118,16 @@ bool gpu_utils::gpus_present() { return get_gpu_device_count(); }
 
 void gpu_utils::initialize_gpu(double& time_to_initialize, int rank_me) {
   using timepoint_t = chrono::time_point<chrono::high_resolution_clock>;
-  double* first_touch;
+  //double* first_touch;
 
   timepoint_t t = chrono::high_resolution_clock::now();
   chrono::duration<double> elapsed;
 
   if (!gpus_present()) return;
   set_gpu_device(rank_me);
-  cudaErrchk(cudaMallocHost((void**)&first_touch, sizeof(double)));
-  cudaErrchk(cudaFreeHost(first_touch));
+  //cudaErrchk(cudaMallocHost((void**)&first_touch, sizeof(double)));
+  //cudaErrchk(cudaFreeHost(first_touch));
+  cudaErrchk(cudaDeviceReset());
   elapsed = chrono::high_resolution_clock::now() - t;
   time_to_initialize = elapsed.count();
 }
