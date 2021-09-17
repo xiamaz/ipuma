@@ -234,7 +234,7 @@ void CtgsWithReadsDHT::flush_ctg_updates() {
   ctg_store.clear();
   // read seq + qual sequences
   int est_update_size = sizeof(CtgReadData) + 500;
-  int64_t mem_to_use = 0.05 * get_free_mem() / local_team().rank_n();
+  int64_t mem_to_use = 0.075 * get_free_mem() / local_team().rank_n();
   auto max_store_bytes = max(mem_to_use, (int64_t)est_update_size * 150);
   ctg_read_store.set_size("CtgsWithReads add read", max_store_bytes);
 }
