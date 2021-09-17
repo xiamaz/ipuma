@@ -102,9 +102,13 @@ class Kmer {
 
   bool operator==(const Kmer &o) const;
 
+  bool is_equal(const longs_t *other_longs) const;
+
   bool operator!=(const Kmer &o) const;
 
   void set_kmer(const char *s);
+
+  void set_kmer(const longs_t *other_longs);
 
   std::string get_minimizer_slow(int m);
 
@@ -119,8 +123,6 @@ class Kmer {
   uint64_t get_minimizer(int m) const;
 
   static uint64_t revcomp_minimizer(uint64_t minimizer, int m);
-
-  uint64_t quick_hash(uint64_t v) const;
 
   uint64_t minimizer_hash(int m) const;
 

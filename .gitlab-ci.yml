@@ -392,6 +392,9 @@ HULK:accuracy:
     - ${REL}/ci_asm_qual_test.sh || FAILED="${FAILED} Could not run ci_asm_qual_test"
     - if [ ! -f ./test-arctic-sample0/final_assembly.fasta ] ; then FAILED="${FAILED} Did not find final_assembly.fasta on rel" ; fi
     - mv test-arctic-sample0 ${RUN_PREFIX}/rel-test-arctic-sample0
+    - ${REL}/ci_asm_qual_test-full.sh || FAILED="${FAILED} Could not run ci_asm_qual_test-full"
+    - if [ ! -f ./test-arctic-samples/final_assembly.fasta ] ; then FAILED="${FAILED} Did not find final_assembly.fasta on rel" ; fi
+    - mv test-arctic-samples ${RUN_PREFIX}/rel-test-arctic-samples
     - if [ -z "$FAILED" ] ; then  true ; else echo "Something failed somehow - ${FAILED}"; false ; fi
     - echo "Completed"
 
