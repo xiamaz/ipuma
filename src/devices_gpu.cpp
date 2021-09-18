@@ -50,8 +50,8 @@ using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
 
-//#define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
-#define SLOG_GPU SLOG_VERBOSE
+#define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
+//#define SLOG_GPU SLOG_VERBOSE
 
 static bool init_gpu_thread = true;
 static future<> detect_gpu_fut;
@@ -64,7 +64,6 @@ void init_devices() {
   init_gpu_thread = true;
   // initialize the GPU and first-touch memory and functions in a new thread as this can take many seconds to complete
   detect_gpu_fut = execute_in_thread_pool([]() { gpu_utils::initialize_gpu(gpu_startup_duration, rank_me()); });
-  //gpu_utils::initialize_gpu(gpu_startup_duration, rank_me());
 }
 
 void done_init_devices() {
@@ -87,9 +86,9 @@ void done_init_devices() {
           }
         }
         num_gpus_on_node = unique_ids.size();
-        SLOG_VERBOSE(KLGREEN, "Found UUIDs:\n");
+        SLOG_GPU("Found UUIDs:\n");
         for (auto uuid : unique_ids) {
-          SLOG_VERBOSE(KLGREEN, uuid, "\n");
+          SLOG_GPU(uuid, "\n");
         }
       }
       // barrier(local_team());
@@ -97,7 +96,7 @@ void done_init_devices() {
       // barrier(local_team());
       gpu_utils::set_gpu_device(local_team().rank_me());
       WARN("Num GPUs on node ", num_gpus_on_node, " gpu avail mem per rank is ", get_size_str(get_avail_gpu_mem_per_rank()),
-           " memory for gpu ", gpu_utils::get_gpu_device_name(), " is ", gpu_utils::get_gpu_avail_mem());
+           " memory for gpu ", gpu_utils::get_gpu_uuid(rank_me()), " is ", gpu_utils::get_gpu_avail_mem());
       // barrier(local_team());
       SLOG_GPU("Available number of GPUs on this node ", num_gpus_on_node, "\n");
       SLOG_GPU("Rank 0 is using GPU ", gpu_utils::get_gpu_device_name(), " on node 0, with ",

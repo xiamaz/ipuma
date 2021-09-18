@@ -100,11 +100,17 @@ vector<string> gpu_utils::get_gpu_uuids() {
     uuids.push_back(get_uuid_str(prop.uuid.bytes));
 #else
     ostringstream os;
-    os << prop.name << ':' << prop.pciDeviceID << ':' << prop.pciBusID << ':' << prop.pciDomainID << ':' << prop.multiGpuBoardGroupID;
+    os << prop.name << ':' << prop.pciDeviceID << ':' << prop.pciBusID << ':' << prop.pciDomainID << ':'
+       << prop.multiGpuBoardGroupID;
     uuids.push_back(os.str());
 #endif
   }
   return uuids;
+}
+
+string gpu_utils::get_gpu_uuid(int my_rank) {
+  auto uuids = get_gpu_uuids();
+  return uuids[my_rank % uuids.size()];
 }
 
 void gpu_utils::set_gpu_device(int my_rank) {
@@ -118,15 +124,11 @@ bool gpu_utils::gpus_present() { return get_gpu_device_count(); }
 
 void gpu_utils::initialize_gpu(double& time_to_initialize, int rank_me) {
   using timepoint_t = chrono::time_point<chrono::high_resolution_clock>;
-  //double* first_touch;
-
   timepoint_t t = chrono::high_resolution_clock::now();
   chrono::duration<double> elapsed;
 
   if (!gpus_present()) return;
   set_gpu_device(rank_me);
-  //cudaErrchk(cudaMallocHost((void**)&first_touch, sizeof(double)));
-  //cudaErrchk(cudaFreeHost(first_touch));
   cudaErrchk(cudaDeviceReset());
   elapsed = chrono::high_resolution_clock::now() - t;
   time_to_initialize = elapsed.count();
