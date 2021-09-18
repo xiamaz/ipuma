@@ -54,38 +54,42 @@
 
 using namespace std;
 
-static int device_count = 0;
+static int _device_count = 0;
+static int _rank_me = -1;
 
 static int get_gpu_device_count() {
-  if (!device_count) {
-    auto res = cudaGetDeviceCount(&device_count);
+  if (!_device_count) {
+    auto res = cudaGetDeviceCount(&_device_count);
     if (res != cudaSuccess) return 0;
   }
-  return device_count;
+  return _device_count;
 }
 
 void gpu_utils::set_gpu_device(int rank_me) {
-  int device_count = 0;
-  cudaErrchk(cudaGetDeviceCount(&device_count));
-  cudaErrchk(cudaSetDevice(rank_me % device_count));
+  if (rank_me == -1) {
+    std::cerr << KLRED "Cannot set GPU device for rank -1; device is not yet initialized\n" KNORM;
+    exit(1);
+  }
+  int num_devs = get_gpu_device_count();
+  cudaErrchk(cudaSetDevice(rank_me % num_devs));
 }
 
-size_t gpu_utils::get_gpu_tot_mem(int rank_me) {
-  set_gpu_device(rank_me);
+size_t gpu_utils::get_gpu_tot_mem() {
+  set_gpu_device(_rank_me);
   cudaDeviceProp prop;
   cudaErrchk(cudaGetDeviceProperties(&prop, 0));
   return prop.totalGlobalMem;
 }
 
-size_t gpu_utils::get_gpu_avail_mem(int rank_me) {
-  set_gpu_device(rank_me);
+size_t gpu_utils::get_gpu_avail_mem() {
+  set_gpu_device(_rank_me);
   size_t free_mem, tot_mem;
   cudaErrchk(cudaMemGetInfo(&free_mem, &tot_mem));
   return free_mem;
 }
 
-string gpu_utils::get_gpu_device_name(int rank_me) {
-  set_gpu_device(rank_me);
+string gpu_utils::get_gpu_device_name() {
+  set_gpu_device(_rank_me);
   cudaDeviceProp prop;
   cudaErrchk(cudaGetDeviceProperties(&prop, 0));
   return prop.name;
@@ -117,9 +121,9 @@ vector<string> gpu_utils::get_gpu_uuids() {
   return uuids;
 }
 
-string gpu_utils::get_gpu_uuid(int rank_me) {
+string gpu_utils::get_gpu_uuid() {
   auto uuids = get_gpu_uuids();
-  return uuids[rank_me % uuids.size()];
+  return uuids[_rank_me % uuids.size()];
 }
 
 bool gpu_utils::gpus_present() { return get_gpu_device_count(); }
@@ -130,7 +134,8 @@ void gpu_utils::initialize_gpu(double& time_to_initialize, int rank_me) {
   chrono::duration<double> elapsed;
 
   if (!gpus_present()) return;
-  set_gpu_device(rank_me);
+  _rank_me = rank_me;
+  set_gpu_device(_rank_me);
   cudaErrchk(cudaDeviceReset());
   elapsed = chrono::high_resolution_clock::now() - t;
   time_to_initialize = elapsed.count();

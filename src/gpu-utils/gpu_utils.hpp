@@ -47,15 +47,15 @@
 namespace gpu_utils {
 
 void set_gpu_device(int rank_me);
-size_t get_gpu_avail_mem(int rank_me);
-size_t get_gpu_tot_mem(int rank_me);
-std::string get_gpu_device_name(int rank_me);
+size_t get_gpu_avail_mem();
+size_t get_gpu_tot_mem();
+std::string get_gpu_device_name();
 std::string get_gpu_device_descriptions();
 std::vector<std::string> get_gpu_uuids();
-std::string get_gpu_uuid(int rank_me);
+std::string get_gpu_uuid();
 bool gpus_present();
 
-// The first call to cudaMallocHost can take several seconds of real time but no cpu time
+// The first call to create the context on the GPU can take several seconds of real time but no cpu time
 // so start it asap (call this in a new thread)
 void initialize_gpu(double &time_to_initialize, int rank_me);
 
