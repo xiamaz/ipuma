@@ -181,7 +181,7 @@ void HashTableInserter<MAX_K>::init(int max_elems) {
   // calculate total slots for hash table. Reserve space for parse and pack
   int bytes_for_pnp = KCOUNT_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
   size_t gpu_bytes_reqd;
-  auto init_gpu_mem = gpu_utils::get_gpu_avail_mem();
+  auto init_gpu_mem = gpu_utils::get_gpu_avail_mem(rank_me());
   auto gpu_avail_mem_per_rank = (get_avail_gpu_mem_per_rank() - bytes_for_pnp) * 0.95;
   SLOG_GPU("Available GPU memory per rank for kmers hash table is ", get_size_str(gpu_avail_mem_per_rank), "\n");
   WARN("GPU memory avail per rank is ", get_size_str(gpu_avail_mem_per_rank));
@@ -195,24 +195,24 @@ void HashTableInserter<MAX_K>::init(int max_elems) {
                  "; full capacity requires ", get_size_str(gpu_bytes_reqd), " memory on GPU but only have ",
                  get_size_str(gpu_avail_mem_per_rank));
   SLOG_GPU("Initialized hash table GPU driver in ", fixed, setprecision(3), init_time, " s\n");
-  auto gpu_used_mem = init_gpu_mem - gpu_utils::get_gpu_avail_mem();
+  auto gpu_used_mem = init_gpu_mem - gpu_utils::get_gpu_avail_mem(rank_me());
   SLOG_GPU("GPU read kmers hash table used ", get_size_str(gpu_used_mem), " memory on GPU out of ",
-           get_size_str(gpu_utils::get_gpu_tot_mem()), "\n");
+           get_size_str(gpu_utils::get_gpu_tot_mem(rank_me())), "\n");
 }
 
 template <int MAX_K>
 void HashTableInserter<MAX_K>::init_ctg_kmers(int max_elems) {
   assert(state != nullptr);
-  auto init_gpu_mem = gpu_utils::get_gpu_avail_mem();
+  auto init_gpu_mem = gpu_utils::get_gpu_avail_mem(rank_me());
   // we don't need to reserve space for either pnp or the read kmers because those have already reduced the gpu_avail_mem
   auto gpu_avail_mem_per_rank = get_avail_gpu_mem_per_rank();
   SLOG_GPU("Available GPU memory per rank for ctg kmers hash table is ", get_size_str(gpu_avail_mem_per_rank), "\n");
   state->ht_gpu_driver.init_ctg_kmers(max_elems, gpu_avail_mem_per_rank);
   SLOG_GPU("GPU ctg kmers hash table has capacity per rank of ", state->ht_gpu_driver.get_capacity(), " for ", fixed, max_elems,
            " elements\n");
-  auto gpu_used_mem = init_gpu_mem - gpu_utils::get_gpu_avail_mem();
+  auto gpu_used_mem = init_gpu_mem - gpu_utils::get_gpu_avail_mem(rank_me());
   SLOG_GPU("GPU ctg kmers hash table used ", get_size_str(gpu_used_mem), " memory on GPU out of ",
-           get_size_str(gpu_utils::get_gpu_tot_mem()), "\n");
+           get_size_str(gpu_utils::get_gpu_tot_mem(rank_me())), "\n");
 }
 
 template <int MAX_K>
