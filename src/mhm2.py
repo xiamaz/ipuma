@@ -309,10 +309,10 @@ def capture_err(err_msgs):
     global _stop_thread
     for line in iter(_proc.stderr.readline, b''):
         try:
-            line = line.decode()
+            line = line.decode('ascii', 'namereplace')
         except:
-            print("WARNING could not decode binary output: ", line)
-            pass
+            print("WARNING: mhm2.py could not decode binary output:\n", line)
+            continue
         # filter out all but warnings
         # errors causing crashes will come to light later
         if 'WARNING' in line:
@@ -547,6 +547,8 @@ def main():
                     completed_round = True
 
             _err_thread.join()
+            if not _proc.returncode:
+                _proc.returncode = 1
             if _proc.returncode < 0:
                 _proc.returncode *= -1
             if _proc.returncode not in [0, 15] or not status:
