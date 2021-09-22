@@ -50,8 +50,8 @@ using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
 
-#define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
-//#define SLOG_GPU SLOG_VERBOSE
+//#define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
+#define SLOG_GPU SLOG_VERBOSE
 
 static bool init_gpu_thread = true;
 static future<> detect_gpu_fut;
@@ -93,7 +93,7 @@ void done_init_devices() {
       }
       num_gpus_on_node = broadcast(num_gpus_on_node, 0, local_team()).wait();
       // gpu_utils::set_gpu_device(rank_me());
-      //WARN("Num GPUs on node ", num_gpus_on_node, " gpu avail mem per rank is ", get_size_str(get_avail_gpu_mem_per_rank()),
+      // WARN("Num GPUs on node ", num_gpus_on_node, " gpu avail mem per rank is ", get_size_str(get_avail_gpu_mem_per_rank()),
       //     " memory for gpu ", gpu_utils::get_gpu_uuid(), " is ", gpu_utils::get_gpu_avail_mem());
       SLOG_GPU("Available number of GPUs on this node ", num_gpus_on_node, "\n");
       SLOG_GPU("Rank 0 is using GPU ", gpu_utils::get_gpu_device_name(), " on node 0, with ",
