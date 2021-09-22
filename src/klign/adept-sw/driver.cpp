@@ -244,7 +244,6 @@ adept_sw::GPUDriver::~GPUDriver() {
   cudaErrchk(cudaFreeHost(driver_state->strA));
   cudaErrchk(cudaFreeHost(driver_state->strB));
   for (int i = 0; i < NSTREAMS; i++) cudaErrchk(cudaStreamDestroy(driver_state->streams_cuda[i]));
-  std::cerr << "\n******\nFinished with gpu driver for rank " + std::to_string(driver_state->rank_me) + "\n********\n";
   delete driver_state->gpu_data;
   delete driver_state;
 }
