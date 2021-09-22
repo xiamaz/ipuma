@@ -184,7 +184,6 @@ void HashTableInserter<MAX_K>::init(int max_elems) {
   auto init_gpu_mem = gpu_utils::get_gpu_avail_mem();
   auto gpu_avail_mem_per_rank = (get_avail_gpu_mem_per_rank() - bytes_for_pnp) * 0.95;
   SLOG_GPU("Available GPU memory per rank for kmers hash table is ", get_size_str(gpu_avail_mem_per_rank), "\n");
-  WARN("GPU memory avail per rank is ", get_size_str(gpu_avail_mem_per_rank));
   assert(state != nullptr);
   state->ht_gpu_driver.init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), max_elems, gpu_avail_mem_per_rank, init_time,
                             gpu_bytes_reqd);
