@@ -99,14 +99,21 @@ static void process_block(SeqBlockInserter<MAX_K> *seq_block_inserter, dist_obje
   auto state = seq_block_inserter->state;
   bool from_ctgs = !state->depth_block.empty();
   state->num_block_calls++;
-  if (!state->pnp_gpu_driver->process_seq_block(state->seq_block, num_valid_kmers))
-    DIE("seq length is too high, ", state->seq_block.length(), " >= ", KCOUNT_SEQ_BLOCK_SIZE);
-  state->bytes_kmers_sent += sizeof(KmerAndExt<MAX_K>) * num_valid_kmers;
-  while (!state->pnp_gpu_driver->kernel_is_done()) {
+  future<bool> fut = execute_in_thread_pool(
+      [&state, &num_valid_kmers] { return state->pnp_gpu_driver->process_seq_block(state->seq_block, num_valid_kmers); });
+  while (!fut.ready()) {
     state->num_pnp_gpu_waits++;
     progress();
   }
-  state->pnp_gpu_driver->pack_seq_block(state->seq_block);
+  bool success = fut.wait();
+  if (!success) DIE("seq length is too high, ", state->seq_block.length(), " >= ", KCOUNT_SEQ_BLOCK_SIZE);
+  state->bytes_kmers_sent += sizeof(KmerAndExt<MAX_K>) * num_valid_kmers;
+  future<> fut_pnp = execute_in_thread_pool([&state] { state->pnp_gpu_driver->pack_seq_block(state->seq_block); });
+  while (!fut_pnp.ready()) {
+    state->num_pnp_gpu_waits++;
+    progress();
+  }
+  fut_pnp.wait();
   int num_targets = (int)state->pnp_gpu_driver->supermers.size();
   for (int i = 0; i < num_targets; i++) {
     auto target = state->pnp_gpu_driver->supermers[i].target;
