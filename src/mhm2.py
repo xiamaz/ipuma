@@ -547,7 +547,7 @@ def main():
                     completed_round = True
 
             _err_thread.join()
-            if not _proc.returncode:
+            if _proc.returncode == None:
                 _proc.returncode = 1
             if _proc.returncode < 0:
                 _proc.returncode *= -1
