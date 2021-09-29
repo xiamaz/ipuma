@@ -151,6 +151,7 @@ void SeqBlockInserter<MAX_K>::process_seq(string &seq, kmer_count_t depth, dist_
 template <int MAX_K>
 void SeqBlockInserter<MAX_K>::done_processing(dist_object<KmerDHT<MAX_K>> &kmer_dht) {
   if (!state->seq_block.empty()) process_block(this, kmer_dht);
+  barrier();
   SLOG_GPU("GPU Parse-N-Pack stats:\n");
   SLOG_GPU("  number of calls to progress (on rank 0): ", state->num_pnp_gpu_waits, "\n");
   SLOG_GPU("  number of calls to PnP GPU kernel (on rank 0): ", state->num_block_calls, "\n");
