@@ -124,8 +124,6 @@ static void process_block(SeqBlockInserter<MAX_K> *seq_block_inserter, dist_obje
     state->num_kmers += (2 * supermer.seq.length() - Kmer<MAX_K>::get_k());
     progress();
   }
-  state->seq_block.clear();
-  state->depth_block.clear();
 }
 
 template <int MAX_K>
@@ -135,11 +133,12 @@ void SeqBlockInserter<MAX_K>::process_seq(string &seq, kmer_count_t depth, dist_
         KCOUNT_SEQ_BLOCK_SIZE);
   if (state->seq_block.length() + 1 + seq.length() >= KCOUNT_SEQ_BLOCK_SIZE) {
     process_block(this, kmer_dht);
-  } else {
-    state->seq_block += seq;
-    state->seq_block += "_";
-    if (depth) state->depth_block.insert(state->depth_block.end(), seq.length() + 1, depth);
+    state->seq_block.clear();
+    state->depth_block.clear();
   }
+  state->seq_block += seq;
+  state->seq_block += "_";
+  if (depth) state->depth_block.insert(state->depth_block.end(), seq.length() + 1, depth);
 }
 
 template <int MAX_K>
@@ -156,6 +155,7 @@ void SeqBlockInserter<MAX_K>::done_processing(dist_object<KmerDHT<MAX_K>> &kmer_
                setprecision(3), (double)tot_kmers_bytes_sent / tot_supermers_bytes_sent, " over kmers)\n");
   auto all_num_kmers = reduce_one(state->num_kmers, op_fast_add, 0).wait();
   SLOG_VERBOSE("Processed a total of ", all_num_kmers, " kmers\n");
+  barrier();
 }
 
 template <int MAX_K>
