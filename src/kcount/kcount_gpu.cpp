@@ -152,12 +152,12 @@ template <int MAX_K>
 void SeqBlockInserter<MAX_K>::done_processing(dist_object<KmerDHT<MAX_K>> &kmer_dht) {
   if (kmer_dht->using_ctg_kmers) {
     DBG("in done_processing with seq_block empty? ", state->seq_block.empty(), "\n");
-    //WARN("in done_processing with seq_block empty? ", state->seq_block.empty(), "\n");
+    // WARN("in done_processing with seq_block empty? ", state->seq_block.empty(), "\n");
   }
   if (!state->seq_block.empty()) process_block(this, kmer_dht);
   if (kmer_dht->using_ctg_kmers) {
     DBG("done_processing\n");
-    //WARN("done_processing\n");
+    // WARN("done_processing\n");
   }
   barrier();
   SLOG_GPU("GPU Parse-N-Pack stats:\n");
@@ -198,7 +198,7 @@ void HashTableInserter<MAX_K>::init(int max_elems) {
   int bytes_for_pnp = KCOUNT_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
   size_t gpu_bytes_reqd;
   auto init_gpu_mem = gpu_utils::get_gpu_avail_mem();
-  auto gpu_avail_mem_per_rank = (get_avail_gpu_mem_per_rank() - bytes_for_pnp) * 0.95;
+  auto gpu_avail_mem_per_rank = (get_avail_gpu_mem_per_rank() - bytes_for_pnp) * 0.8;
   SLOG_GPU("Available GPU memory per rank for kmers hash table is ", get_size_str(gpu_avail_mem_per_rank), "\n");
   assert(state != nullptr);
   state->ht_gpu_driver.init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), max_elems, gpu_avail_mem_per_rank, init_time,
@@ -208,7 +208,7 @@ void HashTableInserter<MAX_K>::init(int max_elems) {
   if (capacity < max_elems * 0.8)
     SLOG_VERBOSE("GPU read kmers hash table has less than requested capacity: ", perc_str(capacity, max_elems),
                  "; full capacity requires ", get_size_str(gpu_bytes_reqd), " memory on GPU but only have ",
-                 get_size_str(gpu_avail_mem_per_rank));
+                 get_size_str(gpu_avail_mem_per_rank), "\n");
   SLOG_GPU("Initialized hash table GPU driver in ", fixed, setprecision(3), init_time, " s\n");
   auto gpu_used_mem = init_gpu_mem - gpu_utils::get_gpu_avail_mem();
   SLOG_GPU("GPU read kmers hash table used ", get_size_str(gpu_used_mem), " memory on GPU out of ",

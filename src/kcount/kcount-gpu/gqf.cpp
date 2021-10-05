@@ -2054,6 +2054,9 @@ __host__ __device__ void decode_chars(uint8_t stored, char &fwd, char &back) {
 
   fwd = kmer_vals[upper];
   back = kmer_vals[lower];
+
+  if (fwd == 'F') fwd = '0';
+  if (back == 'F') back = '0';
 }
 
 __host__ __device__ void decode_kmer_counter(uint8_t *counter, uint8_t stored) {
@@ -2090,6 +2093,7 @@ __device__ bool insert_kmer(QF *qf, uint64_t hash, char forward, char backward, 
   uint64_t bigquery;
 
   // bool boolFound;
+  hash = hash % qf->metadata->range;
 
   uint64_t hash_bucket_index = hash >> qf->metadata->key_remainder_bits;
   uint64_t lock_index = hash_bucket_index / NUM_SLOTS_TO_LOCK;

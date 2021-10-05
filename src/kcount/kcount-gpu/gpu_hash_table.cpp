@@ -334,9 +334,20 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
       auto hash_val = kmer_hash(kmer);
       char prev_left_ext, prev_right_ext;
       if (quotient_filter::insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext)) {
+        // kmer was found in qf
         num_in_qf++;
       } else {
+        // kmer was not found in qf
+        /*
+          if (!quotient_filter::insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext)) {
+            printf("******** WARNING: couldn't find it!\n");
+          }
+          if (prev_left_ext != left_ext || prev_right_ext != right_ext) {
+            printf("******** WARNING: extensions differ %c %c %c %c\n", prev_left_ext, left_ext, prev_right_ext, right_ext);
+          }
+          */
       }
+      // printf("************ WARNING got past the insert_kmer function **********\n");
       uint64_t slot = hash_val % elems.capacity;
       auto start_slot = slot;
       const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
@@ -457,7 +468,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   gpu_bytes_reqd = (max_elems * elem_size) / 0.8 + elem_buff_size;
   // save 1/5 of avail gpu memory for possible ctg kmers and compact hash table
   // set capacity to max avail remaining from gpu memory - more slots means lower load
-  auto max_slots = 0.3 * (gpu_avail_mem - elem_buff_size) / elem_size;
+  auto max_slots = 0.8 * (gpu_avail_mem - elem_buff_size) / elem_size;
   // find the first prime number lower than this value
   primes::Prime prime;
   prime.set(min((size_t)max_slots, (size_t)(max_elems * 3)), false);
@@ -477,7 +488,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   cudaErrchk(cudaMemset(gpu_insert_stats, 0, sizeof(InsertStats)));
 
   dstate = new HashTableDriverState();
-  quotient_filter::qf_malloc_device(&(dstate->qf), log2(max_elems));
+  quotient_filter::qf_malloc_device(&(dstate->qf), ceil(log2(max_elems)));
 
   init_timer.stop();
   init_time = init_timer.get_elapsed();
