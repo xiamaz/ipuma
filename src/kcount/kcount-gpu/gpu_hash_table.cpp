@@ -332,8 +332,8 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
       if (kmer.longs[N_LONGS - 1] == KEY_EMPTY) printf("ERROR: block equal to KEY_EMPTY\n");
       if (kmer.longs[N_LONGS - 1] == KEY_TRANSITION) printf("ERROR: block equal to KEY_TRANSITION\n");
       auto hash_val = kmer_hash(kmer);
-      char prev_left_ext, prev_right_ext;
-      /*if (insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext)) {
+      /*char prev_left_ext, prev_right_ext;
+      if (insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext)) {
         num_in_qf++;
       } else {
       }*/
