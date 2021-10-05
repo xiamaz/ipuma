@@ -334,20 +334,17 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
       auto hash_val = kmer_hash(kmer);
       char prev_left_ext, prev_right_ext;
       if (quotient_filter::insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext)) {
-        // kmer was found in qf
-        num_in_qf++;
+        // kmer was not found in qf - successfully inserted
+        if (quotient_filter::insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext)) {
+          printf("******** WARNING: managed to insert which means we can't find it!\n");
+        }
+        if (prev_left_ext != left_ext || prev_right_ext != right_ext) {
+          printf("******** WARNING: extensions differ %c %c %c %c\n", prev_left_ext, left_ext, prev_right_ext, right_ext);
+        }
       } else {
         // kmer was not found in qf
-        /*
-          if (!quotient_filter::insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext)) {
-            printf("******** WARNING: couldn't find it!\n");
-          }
-          if (prev_left_ext != left_ext || prev_right_ext != right_ext) {
-            printf("******** WARNING: extensions differ %c %c %c %c\n", prev_left_ext, left_ext, prev_right_ext, right_ext);
-          }
-          */
+        num_in_qf++;
       }
-      // printf("************ WARNING got past the insert_kmer function **********\n");
       uint64_t slot = hash_val % elems.capacity;
       auto start_slot = slot;
       const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);

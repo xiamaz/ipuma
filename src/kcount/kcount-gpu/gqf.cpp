@@ -2119,7 +2119,7 @@ __device__ bool insert_kmer(QF *qf, uint64_t hash, char forward, char backward, 
   unlock_16(qf->runtimedata->locks, lock_index);
 
   // obvious cast for clarity
-  return (found == 1);
+  return (found == 0);
 }
 
 // given a kmer we want to look for, and an encoded char, insert it and retreive a copy if it exists
