@@ -318,7 +318,7 @@ __device__ bool get_kmer_from_supermer(SupermerBuff supermer_buff, uint32_t buff
 
 template <int MAX_K>
 __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBuff supermer_buff, uint32_t buff_len, int kmer_len,
-                                          bool ctg_kmers, InsertStats *insert_stats, QF *qf) {
+                                          bool ctg_kmers, InsertStats *insert_stats, quotient_filter::QF *qf) {
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
   const int N_LONGS = KmerArray<MAX_K>::N_LONGS;
   int attempted_inserts = 0, dropped_inserts = 0, new_inserts = 0;
@@ -332,11 +332,11 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
       if (kmer.longs[N_LONGS - 1] == KEY_EMPTY) printf("ERROR: block equal to KEY_EMPTY\n");
       if (kmer.longs[N_LONGS - 1] == KEY_TRANSITION) printf("ERROR: block equal to KEY_TRANSITION\n");
       auto hash_val = kmer_hash(kmer);
-      /*char prev_left_ext, prev_right_ext;
-      if (insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext)) {
+      char prev_left_ext, prev_right_ext;
+      if (quotient_filter::insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext)) {
         num_in_qf++;
       } else {
-      }*/
+      }
       uint64_t slot = hash_val % elems.capacity;
       auto start_slot = slot;
       const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
@@ -400,7 +400,7 @@ template <int MAX_K>
 struct HashTableGPUDriver<MAX_K>::HashTableDriverState {
   cudaEvent_t event;
   QuickTimer insert_timer, kernel_timer;
-  QF *qf = nullptr;
+  quotient_filter::QF *qf = nullptr;
 };
 
 template <int MAX_K>
@@ -457,7 +457,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   gpu_bytes_reqd = (max_elems * elem_size) / 0.8 + elem_buff_size;
   // save 1/5 of avail gpu memory for possible ctg kmers and compact hash table
   // set capacity to max avail remaining from gpu memory - more slots means lower load
-  auto max_slots = 0.8 * (gpu_avail_mem - elem_buff_size) / elem_size;
+  auto max_slots = 0.3 * (gpu_avail_mem - elem_buff_size) / elem_size;
   // find the first prime number lower than this value
   primes::Prime prime;
   prime.set(min((size_t)max_slots, (size_t)(max_elems * 3)), false);
@@ -477,7 +477,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   cudaErrchk(cudaMemset(gpu_insert_stats, 0, sizeof(InsertStats)));
 
   dstate = new HashTableDriverState();
-  qf_malloc_device(&(dstate->qf), log2(max_elems));
+  quotient_filter::qf_malloc_device(&(dstate->qf), log2(max_elems));
 
   init_timer.stop();
   init_time = init_timer.get_elapsed();
@@ -502,7 +502,7 @@ void HashTableGPUDriver<MAX_K>::init_ctg_kmers(int max_elems, size_t gpu_avail_m
 template <int MAX_K>
 HashTableGPUDriver<MAX_K>::~HashTableGPUDriver() {
   if (dstate) {
-    qf_destroy_device(dstate->qf);
+    quotient_filter::qf_destroy_device(dstate->qf);
     delete dstate;
   }
 }

@@ -41,6 +41,8 @@
  * the content of the slots.
  ******************************************************************/
 
+namespace quotient_filter {
+
 #define MAX_VALUE(nbits) ((1ULL << (nbits)) - 1)
 #define BITMASK(nbits) ((nbits) == 64 ? 0xffffffffffffffff : MAX_VALUE(nbits))
 #define NUM_SLOTS_TO_LOCK (1ULL << 13)
@@ -2743,3 +2745,5 @@ void qf_intersect(const QF *qfa, const QF *qfb, QF *qfr) {
     if (qf_count_key_value(qf_mem, key, 0, QF_KEY_IS_HASH) > 0) qf_insert(qfr, key, value, count, QF_NO_LOCK | QF_KEY_IS_HASH);
   } while (!qfi_next(&qfi));
 }
+
+}  // namespace quotient_filter

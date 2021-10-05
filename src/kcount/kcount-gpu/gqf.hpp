@@ -9,16 +9,11 @@
  * ============================================================================
  */
 
-#ifndef _GQF_CUH_
-#define _GQF_CUH_
-
 #include <cuda.h>
 #include <inttypes.h>
 #include <stdbool.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace quotient_filter {
 
 typedef struct quotient_filter quotient_filter;
 typedef quotient_filter QF;
@@ -378,8 +373,4 @@ __host__ uint64_t qf_estimate_memory(int nbits);
 
 //__host__ uint64_t get_current_usage(QF* qf);
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* _GQF_H_ */
+}  // namespace quotient_filter

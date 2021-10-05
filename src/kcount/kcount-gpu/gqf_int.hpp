@@ -9,18 +9,13 @@
  * ============================================================================
  */
 
-#ifndef _GQF_INT_CUH_
-#define _GQF_INT_CUH_
-
 #include <inttypes.h>
 #include <stdbool.h>
 
 #include "gqf.hpp"
 #include "partitioned_counter.hpp"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace quotient_filter {
 
 #define MAGIC_NUMBER 1018874902021329732
 
@@ -140,8 +135,4 @@ typedef struct quotient_filter_iterator {
   cluster_data *c_info;
 } quotient_filter_iterator;
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* _GQF_INT_CUH_ */
+}  // namespace quotient_filter
