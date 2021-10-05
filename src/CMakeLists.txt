@@ -96,25 +96,21 @@ if(ENABLE_CUDA)
 
   if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.18)
     if(NOT CMAKE_CUDA_ARCHITECTURES)
-
-      if(CUDA_VERSION VERSION_GREATER_EQUAL 11.0)
-        set(CMAKE_CUDA_ARCHITECTURES 35 50 60 70 80)
-      elseif(CUDA_VERSION VERSION_GREATER_EQUAL 10.0)
-        set(CMAKE_CUDA_ARCHITECTURES 30 35 50 60 70)
-      else()
-        set(CMAKE_CUDA_ARCHITECTURES 30 35 50 60 70)
-      endif()
-
+      include(FindCUDA/select_compute_arch)
+      cuda_detect_installed_gpus(INSTALLED_GPU_CCS_1)
+      string(STRIP "${INSTALLED_GPU_CCS_1}" INSTALLED_GPU_CCS_2)
+      string(REPLACE " " ";" INSTALLED_GPU_CCS_3 "${INSTALLED_GPU_CCS_2}")
+      string(REPLACE "." "" CUDA_ARCH_LIST "${INSTALLED_GPU_CCS_3}")
+      set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
       message(
-        STATUS
-          "Setting CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES} -- override with specific target if this build fails"
+        STATUS "Autodetect CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}"
       )
-    else()
-      message(
-        STATUS
-          "Using specified CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}"
-      )
+      # if(CUDA_VERSION VERSION_GREATER_EQUAL 11.0) set(CMAKE_CUDA_ARCHITECTURES
+      # 35 50 60 70 80) elseif(CUDA_VERSION VERSION_GREATER_EQUAL 10.0)
+      # set(CMAKE_CUDA_ARCHITECTURES 30 35 50 60 70) else()
+      # set(CMAKE_CUDA_ARCHITECTURES 30 35 50 60 70) endif()
     endif()
+    message(STATUS "Using CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}")
   else()
     find_package(CUDA REQUIRED)
     cuda_select_nvcc_arch_flags(ARCH_FLAGS_LIST)
