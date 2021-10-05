@@ -49,6 +49,7 @@ using namespace upcxx;
 using namespace upcxx_utils;
 
 void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {}
+void cleanup_aligner() {}
 
 void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vector<string> &ctg_seqs, vector<string> &read_seqs,
                         Alns *alns, future<> &active_kernel_fut, int read_group_id, int max_clen, int max_rlen,

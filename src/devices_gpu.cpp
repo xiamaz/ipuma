@@ -86,21 +86,20 @@ void done_init_devices() {
           }
         }
         num_gpus_on_node = unique_ids.size();
-        SLOG_VERBOSE(KLGREEN, "Found UUIDs:\n");
+        SLOG_GPU("Found UUIDs:\n");
         for (auto uuid : unique_ids) {
-          SLOG_VERBOSE(KLGREEN, uuid, "\n");
+          SLOG_GPU(uuid, "\n");
         }
       }
-      // barrier(local_team());
       num_gpus_on_node = broadcast(num_gpus_on_node, 0, local_team()).wait();
-      // barrier(local_team());
-      // WARN("Num GPUs on node ", num_gpus_on_node, " gpu avail mem per rank is ", get_size_str(get_avail_gpu_mem_per_rank()));
-      // barrier(local_team());
+      // gpu_utils::set_gpu_device(rank_me());
+      // WARN("Num GPUs on node ", num_gpus_on_node, " gpu avail mem per rank is ", get_size_str(get_avail_gpu_mem_per_rank()),
+      //     " memory for gpu ", gpu_utils::get_gpu_uuid(), " is ", gpu_utils::get_gpu_avail_mem());
       SLOG_GPU("Available number of GPUs on this node ", num_gpus_on_node, "\n");
       SLOG_GPU("Rank 0 is using GPU ", gpu_utils::get_gpu_device_name(), " on node 0, with ",
                get_size_str(gpu_utils::get_gpu_avail_mem()), " available memory (", get_size_str(get_avail_gpu_mem_per_rank()),
                " per rank). Detected in ", gpu_startup_duration, " s\n");
-      SLOG_GPU(gpu_utils::get_gpu_device_description());
+      SLOG_GPU(gpu_utils::get_gpu_device_descriptions());
       barrier(local_team());
     } else {
       SDIE("No GPUs available - this build requires GPUs");

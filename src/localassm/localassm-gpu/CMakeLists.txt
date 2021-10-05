@@ -11,21 +11,42 @@ set(CMAKE_CUDA_STANDARD_REQUIRED
 set(CMAKE_CUDA_EXTENSIONS
     OFF
     CACHE BOOL "")
-enable_language(CUDA)
 
 find_package(CUDA REQUIRED)
 
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12)
+  cmake_policy(SET CMP0074 NEW) # use the CUDA_ROOT variable
+endif()
+
+enable_language(CUDA)
 
 if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.18)
-  set(CMAKE_CUDA_ARCHITECTURES 70)
+  if(NOT CMAKE_CUDA_ARCHITECTURES)
+
+    if(CUDA_VERSION VERSION_GREATER_EQUAL 11.0)
+      set(CMAKE_CUDA_ARCHITECTURES 35 50 60 70 80)
+    elseif(CUDA_VERSION VERSION_GREATER_EQUAL 10.0)
+      set(CMAKE_CUDA_ARCHITECTURES 30 35 50 60 70)
+    else()
+      set(CMAKE_CUDA_ARCHITECTURES 30 35 50 60 70)
+    endif()
+
+    message(
+      STATUS
+        "Setting CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES} -- override with specific target if this build fails"
+    )
+  else()
+    message(
+      STATUS
+        "Using specified CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}")
+  endif()
 else()
-  # CUDA_SELECT_NVCC_ARCH_FLAGS(ARCH_FLAGS_LIST)
+  find_package(CUDA REQUIRED)
+  cuda_select_nvcc_arch_flags(ARCH_FLAGS_LIST)
   if(ARCH_FLAGS_LIST)
     string(REPLACE ";" " " ARCH_FLAGS "${ARCH_FLAGS_LIST}")
   else()
-    foreach(_CMAKE_CUDA_COMPUTE_CAPABILITY 70)
+    foreach(_CMAKE_CUDA_COMPUTE_CAPABILITY 35 50 60 70 80)
       set(ARCH_FLAGS
           "${ARCH_FLAGS} -gencode arch=compute_${_CMAKE_CUDA_COMPUTE_CAPABILITY},code=sm_${_CMAKE_CUDA_COMPUTE_CAPABILITY}"
       )
@@ -46,13 +67,17 @@ else()
         "${ARCH_FLAGS} -gencode arch=compute_${CMAKE_CUDA_COMPUTE_CAPABILITY},code=compute_${CMAKE_CUDA_COMPUTE_CAPABILITY}"
     )
   endif()
+  message(STATUS "ARCH_FLAGS=${ARCH_FLAGS}")
 endif()
 
-message(STATUS "ARCH_FLAGS=${ARCH_FLAGS}")
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+set(CMAKE_CUDA_PTX_COMPILATION ON)
 
 set(CMAKE_CUDA_FLAGS
     "${CMAKE_CUDA_FLAGS} -Xcompiler=-Wall ${ARCH_FLAGS} -Wno-deprecated-gpu-targets"
 )
+
 message(STATUS "CMAKE_CUDA_FLAGS=${CMAKE_CUDA_FLAGS}")
 
 add_library(GPU_LOC_obj OBJECT kernel.cpp driver.cpp)

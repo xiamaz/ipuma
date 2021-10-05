@@ -77,6 +77,7 @@ static IntermittentTimer get_ctgs_timer(__FILENAME__ + string(":Get ctgs with km
 static IntermittentTimer aln_kernel_timer(__FILENAME__ + string(":GPU_BSW"));
 
 void init_aligner(AlnScoring &aln_scoring, int rlen_limit);
+void cleanup_aligner();
 void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vector<string> &ctg_seqs, vector<string> &read_seqs,
                         Alns *alns, future<> &active_kernel_fut, int read_group_id, int max_clen, int max_rlen,
                         IntermittentTimer &aln_kernel_timer);
@@ -356,7 +357,10 @@ class Aligner {
     init_aligner(cpu_aligner.aln_scoring, rlen_limit);
   }
 
-  ~Aligner() { clear(); }
+  ~Aligner() {
+    clear();
+    cleanup_aligner();
+  }
 
   int64_t get_num_perfect_alns(bool all = false) {
     if (!all) return reduce_one(num_perfect_alns, op_fast_add, 0).wait();

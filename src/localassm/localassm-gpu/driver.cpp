@@ -241,8 +241,6 @@ void localassm_driver::localassm_driver(vector<CtgWithReads> &data_in, uint32_t 
     else
       left_over = 0;
     assert(slice_size > 0);
-    assert(left_over >= 0);
-    assert(slice >= 0);
 
     vector<CtgWithReads>::const_iterator slice_iter = data_in.begin() + slice * slice_size;
     auto this_slice_size = slice_size + left_over;

@@ -244,9 +244,9 @@ TEST(MHMTest, AdeptSW) {
 //    EXPECT_TRUE(total_mem > 32 * 1024 * 1024);  // >32 MB
 //  }
 
-  adept_sw::GPUDriver gpu_driver;
-  auto init_time = gpu_driver.init(0, 1, (short)aln_scoring.match, (short)-aln_scoring.mismatch, (short)-aln_scoring.gap_opening,
-                                   (short)-aln_scoring.gap_extending, 300);
+  double init_time = 0;
+  adept_sw::GPUDriver gpu_driver(0, 1, (short)aln_scoring.match, (short)-aln_scoring.mismatch, (short)-aln_scoring.gap_opening,
+                                   (short)-aln_scoring.gap_extending, 300, init_time);
   std::cout << "Initialized gpu in " << time_to_initialize << "s and " << init_time << "s\n";
 #endif
 

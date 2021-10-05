@@ -66,6 +66,7 @@ __constant__ uint64_t GPU_0_MASK[32] = {
 
 struct kcount_gpu::ParseAndPackDriverState {
   cudaEvent_t event;
+  int rank_me;
 };
 
 inline __device__ uint64_t quick_hash(uint64_t v) {
@@ -248,6 +249,7 @@ kcount_gpu::ParseAndPackGPUDriver::ParseAndPackGPUDriver(int upcxx_rank_me, int 
 
   // total storage required is approx KCOUNT_SEQ_BLOCK_SIZE * (1 + num_kmers_longs * sizeof(uint64_t) + sizeof(int) + 1)
   dstate = new ParseAndPackDriverState();
+  dstate->rank_me = upcxx_rank_me;
   init_timer.stop();
   init_time = init_timer.get_elapsed();
 }
@@ -272,6 +274,7 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, un
   if (seqs.length() < (unsigned int)kmer_len) return false;
 
   func_timer.start();
+  gpu_utils::set_gpu_device(dstate->rank_me);
   cudaErrchk(cudaEventCreateWithFlags(&dstate->event, cudaEventDisableTiming | cudaEventBlockingSync));
 
   int num_kmers = seqs.length() - kmer_len + 1;
@@ -293,17 +296,17 @@ bool kcount_gpu::ParseAndPackGPUDriver::process_seq_block(const string &seqs, un
   cudaErrchk(cudaMemcpy(&num_supermers, dev_num_supermers, sizeof(unsigned int), cudaMemcpyDeviceToHost));
   supermers.resize(num_supermers);
   cudaErrchk(cudaMemcpy(&(supermers[0]), dev_supermers, num_supermers * sizeof(SupermerInfo), cudaMemcpyDeviceToHost));
-
+  cudaErrchk(cudaEventSynchronize(dstate->event));
+  cudaErrchk(cudaEventDestroy(dstate->event));
   kernel_timer.stop();
   t_kernel += kernel_timer.get_elapsed();
-  // this is used to signal completion
-  cudaErrchk(cudaEventRecord(dstate->event));
   func_timer.stop();
   t_func += func_timer.get_elapsed();
   return true;
 }
 
 void kcount_gpu::ParseAndPackGPUDriver::pack_seq_block(const string &seqs) {
+  gpu_utils::set_gpu_device(dstate->rank_me);
   int packed_seqs_len = halve_up(seqs.length());
   cudaErrchk(cudaMemcpy(dev_seqs, &seqs[0], seqs.length(), cudaMemcpyHostToDevice));
   cudaErrchk(cudaMemset(dev_packed_seqs, 0, packed_seqs_len));
@@ -312,6 +315,7 @@ void kcount_gpu::ParseAndPackGPUDriver::pack_seq_block(const string &seqs) {
   GPUTimer t;
   t.start();
   pack_seqs<<<gridsize, threadblocksize>>>(dev_seqs, dev_packed_seqs, seqs.length());
+  // this GPUTimer forces a wait for the GPU kernel to complete
   t.stop();
   t_kernel += t.get_elapsed();
   packed_seqs.resize(packed_seqs_len);
@@ -319,9 +323,3 @@ void kcount_gpu::ParseAndPackGPUDriver::pack_seq_block(const string &seqs) {
 }
 
 tuple<double, double> kcount_gpu::ParseAndPackGPUDriver::get_elapsed_times() { return {t_func, t_kernel}; }
-
-bool kcount_gpu::ParseAndPackGPUDriver::kernel_is_done() {
-  if (cudaEventQuery(dstate->event) != cudaSuccess) return false;
-  cudaErrchk(cudaEventDestroy(dstate->event));
-  return true;
-}
