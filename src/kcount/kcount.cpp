@@ -108,6 +108,9 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   auto start_local_num_kmers = kmer_dht->get_local_num_kmers();
 
   SeqBlockInserter<MAX_K> seq_block_inserter(0, kmer_dht->get_minimizer_len());
+  barrier();
+  DBG("After seq_block_inserter constructor, with ", ctgs.size(), " ctgs\n");
+  //WARN("After seq_block_inserter constructor, with ", ctgs.size(), " ctgs\n");
   // estimate number of kmers from ctgs
   int64_t max_kmers = 0;
   for (auto &ctg : ctgs) {
@@ -115,13 +118,19 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
   }
   int64_t all_max_kmers = reduce_all(max_kmers, op_fast_add).wait();
   kmer_dht->init_ctg_kmers(all_max_kmers / rank_n());
-
+  barrier();
+  DBG("after kmer_dht->init_ctg_kmers\n");
+  DBG("looping over ", ctgs.size(), " ctgs\n");
+  //WARN("after kmer_dht->init_ctg_kmers\n");
+  //WARN("looping over ", ctgs.size(), " ctgs\n");
   for (auto it = ctgs.begin(); it != ctgs.end(); ++it) {
     auto ctg = it;
     progbar.update();
     if (ctg->seq.length() < kmer_len + 2) continue;
     seq_block_inserter.process_seq(ctg->seq, ctg->get_uint16_t_depth(), kmer_dht);
   }
+  DBG("after ctgs loop\n");
+  //WARN("after ctgs loop\n");
   seq_block_inserter.done_processing(kmer_dht);
   progbar.done();
   kmer_dht->flush_updates();
