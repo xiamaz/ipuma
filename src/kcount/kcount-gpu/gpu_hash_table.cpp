@@ -54,6 +54,7 @@
 #include "gpu-utils/gpu_utils.hpp"
 #include "gpu_hash_table.hpp"
 #include "prime.hpp"
+#include "gqf.hpp"
 
 #include "gpu_hash_funcs.cpp"
 
@@ -317,10 +318,11 @@ __device__ bool get_kmer_from_supermer(SupermerBuff supermer_buff, uint32_t buff
 
 template <int MAX_K>
 __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBuff supermer_buff, uint32_t buff_len, int kmer_len,
-                                          bool ctg_kmers, InsertStats *insert_stats) {
+                                          bool ctg_kmers, InsertStats *insert_stats, QF *qf) {
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
   const int N_LONGS = KmerArray<MAX_K>::N_LONGS;
-  int attempted_inserts = 0, dropped_inserts = 0, new_inserts = 0, key_empty_overlaps = 0;
+  int attempted_inserts = 0, dropped_inserts = 0, new_inserts = 0;
+  int num_in_qf = 0;
   if (threadid > 0 && threadid < buff_len) {
     attempted_inserts++;
     KmerArray<MAX_K> kmer;
@@ -329,7 +331,13 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
     if (get_kmer_from_supermer<MAX_K>(supermer_buff, buff_len, kmer_len, kmer.longs, left_ext, right_ext, kmer_count)) {
       if (kmer.longs[N_LONGS - 1] == KEY_EMPTY) printf("ERROR: block equal to KEY_EMPTY\n");
       if (kmer.longs[N_LONGS - 1] == KEY_TRANSITION) printf("ERROR: block equal to KEY_TRANSITION\n");
-      uint64_t slot = kmer_hash(kmer) % elems.capacity;
+      auto hash_val = kmer_hash(kmer);
+      char prev_left_ext, prev_right_ext;
+      /*if (insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext)) {
+        num_in_qf++;
+      } else {
+      }*/
+      uint64_t slot = hash_val % elems.capacity;
       auto start_slot = slot;
       const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
       bool found_slot = false;
@@ -385,13 +393,14 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
   reduce(attempted_inserts, buff_len, &insert_stats->attempted);
   reduce(dropped_inserts, buff_len, &insert_stats->dropped);
   reduce(new_inserts, buff_len, &insert_stats->new_inserts);
-  reduce(key_empty_overlaps, buff_len, &insert_stats->key_empty_overlaps);
+  reduce(num_in_qf, buff_len, &insert_stats->num_in_qf);
 }
 
 template <int MAX_K>
 struct HashTableGPUDriver<MAX_K>::HashTableDriverState {
   cudaEvent_t event;
   QuickTimer insert_timer, kernel_timer;
+  QF *qf = nullptr;
 };
 
 template <int MAX_K>
@@ -468,6 +477,8 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   cudaErrchk(cudaMemset(gpu_insert_stats, 0, sizeof(InsertStats)));
 
   dstate = new HashTableDriverState();
+  qf_malloc_device(&(dstate->qf), log2(max_elems));
+
   init_timer.stop();
   init_time = init_timer.get_elapsed();
 }
@@ -490,7 +501,10 @@ void HashTableGPUDriver<MAX_K>::init_ctg_kmers(int max_elems, size_t gpu_avail_m
 
 template <int MAX_K>
 HashTableGPUDriver<MAX_K>::~HashTableGPUDriver() {
-  if (dstate) delete dstate;
+  if (dstate) {
+    qf_destroy_device(dstate->qf);
+    delete dstate;
+  }
 }
 
 template <int MAX_K>
@@ -508,7 +522,7 @@ void HashTableGPUDriver<MAX_K>::insert_supermer_block() {
   gpu_unpack_supermer_block<<<gridsize, threadblocksize>>>(unpacked_elem_buff_dev, packed_elem_buff_dev, buff_len);
   get_kernel_config(buff_len * 2, gpu_insert_supermer_block<MAX_K>, gridsize, threadblocksize);
   gpu_insert_supermer_block<<<gridsize, threadblocksize>>>(is_ctg_kmers ? ctg_kmers_dev : read_kmers_dev, unpacked_elem_buff_dev,
-                                                           buff_len * 2, kmer_len, is_ctg_kmers, gpu_insert_stats);
+                                                           buff_len * 2, kmer_len, is_ctg_kmers, gpu_insert_stats, dstate->qf);
   // the kernel time is not going to be accurate, because we are not waiting for the kernel to complete
   // need to uncomment the line below, which will decrease performance by preventing the overlap of GPU and CPU execution
   // cudaDeviceSynchronize();

@@ -244,14 +244,6 @@ void HashTableInserter<MAX_K>::flush_inserts() {
       SLOG_GPU("  failed to insert ", perc_str(num_dropped_elems, num_attempted_inserts), " elements; capacity ", all_capacity,
                "\n");
   }
-  uint64_t key_empty_overlaps = reduce_one((uint64_t)insert_stats.key_empty_overlaps, op_fast_add, 0).wait();
-  if (key_empty_overlaps) {
-    if (key_empty_overlaps > num_attempted_inserts / 10000)
-      SWARN("GPU hash table: dropped ", perc_str(key_empty_overlaps, num_attempted_inserts),
-            " kmers with longs equal to KEY_EMPTY");
-    else
-      SLOG_GPU("  dropped ", perc_str(key_empty_overlaps, num_attempted_inserts), " kmers with longs equal to KEY_EMPTY\n");
-  }
   double load = (double)(insert_stats.new_inserts) / capacity;
   double avg_load_factor = reduce_one(load, op_fast_add, 0).wait() / rank_n();
   double max_load_factor = reduce_one(load, op_fast_max, 0).wait();
