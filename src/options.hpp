@@ -113,6 +113,7 @@ class Options {
   bool restart = false;
   bool shuffle_reads = true;
   bool dump_kmers = false;
+  bool use_qf = true;
 
   Options();
   ~Options();

@@ -104,7 +104,7 @@ void Supermer::unpack() {
 int Supermer::get_bytes() { return seq.length() + sizeof(kmer_count_t); }
 
 template <int MAX_K>
-KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS)
+KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS, bool use_qf)
     : local_kmers({})
     , ht_inserter({})
     , kmer_store()
@@ -150,7 +150,7 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     ht_inserter->insert_supermer(supermer.seq, supermer.count);
   });
   my_adjusted_num_kmers *= 4;
-  ht_inserter->init(my_adjusted_num_kmers);
+  ht_inserter->init(my_adjusted_num_kmers, use_qf);
   barrier();
 }
 

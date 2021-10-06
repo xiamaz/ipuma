@@ -418,6 +418,7 @@ bool Options::load(int argc, char **argv) {
                "Restrict processes according to logical CPUs, cores (groups of hardware threads), "
                "or NUMA domains (cpu, core, numa, none).")
       ->check(CLI::IsMember({"cpu", "core", "numa", "none"}));
+  app.add_flag("--use-qf", use_qf, "Use quotient filter to reduce memory at the cost of slower processing.")->capture_default_str();
   try {
     app.parse(argc, argv);
   } catch (const CLI::ParseError &e) {

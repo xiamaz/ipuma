@@ -342,7 +342,7 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
       auto hash_val = kmer_hash(kmer);
       char prev_left_ext = '0', prev_right_ext = '0';
       bool qf_inserted = false;
-      if (!ctg_kmers) {
+      if (!ctg_kmers && qf) {
         qf_inserted = quotient_filter::insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext);
         if (qf_inserted) {
           num_unique_qf++;
@@ -393,7 +393,7 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
           ext_count_t kmer_count_uint16 = min(kmer_count, UINT16_MAX);
           inc_ext(left_ext, kmer_count_uint16, ext_counts);
           inc_ext(right_ext, kmer_count_uint16, ext_counts + 4);
-          if (!kmer_found_in_ht && !ctg_kmers) {
+          if (qf && !kmer_found_in_ht && !ctg_kmers) {
             // kmer was not in hash table, so it must have been found in the qf
             // add the extensions from the previous entry stored in the qf
             inc_ext(prev_left_ext, 1, ext_counts);
@@ -458,7 +458,7 @@ HashTableGPUDriver<MAX_K>::HashTableGPUDriver() {}
 
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem,
-                                     double &init_time, size_t &gpu_bytes_reqd) {
+                                     double &init_time, size_t &gpu_bytes_reqd, bool use_qf) {
   QuickTimer init_timer;
   init_timer.start();
   this->upcxx_rank_me = upcxx_rank_me;
@@ -472,7 +472,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   gpu_bytes_reqd = (max_elems * elem_size) / 0.8 + elem_buff_size;
   // save 1/5 of avail gpu memory for possible ctg kmers and compact hash table
   // set capacity to max avail remaining from gpu memory - more slots means lower load
-  auto max_slots = 0.5 * (gpu_avail_mem - elem_buff_size) / elem_size;
+  auto max_slots = (use_qf ? 0.7 : 0.8) * (gpu_avail_mem - elem_buff_size) / elem_size;
   // find the first prime number lower than this value
   primes::Prime prime;
   prime.set(min((size_t)max_slots, (size_t)(max_elems * 3)), false);
@@ -492,7 +492,10 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   cudaErrchk(cudaMemset(gpu_insert_stats, 0, sizeof(InsertStats)));
 
   dstate = new HashTableDriverState();
-  quotient_filter::qf_malloc_device(&(dstate->qf), ceil(log2(max_elems)));
+  if (use_qf)
+    quotient_filter::qf_malloc_device(&(dstate->qf), ceil(log2(max_elems)));
+  else
+    dstate->qf = nullptr;
 
   init_timer.stop();
   init_time = init_timer.get_elapsed();
@@ -502,7 +505,7 @@ template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::init_ctg_kmers(int max_elems, size_t gpu_avail_mem) {
   pass_type = CTG_KMERS_PASS;
   // free up space
-  quotient_filter::qf_destroy_device(dstate->qf);
+  if (dstate->qf) quotient_filter::qf_destroy_device(dstate->qf);
   dstate->qf = nullptr;
   size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * (1 + sizeof(count_t)) * 1.5;
   size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(CountsArray);
@@ -520,7 +523,7 @@ void HashTableGPUDriver<MAX_K>::init_ctg_kmers(int max_elems, size_t gpu_avail_m
 template <int MAX_K>
 HashTableGPUDriver<MAX_K>::~HashTableGPUDriver() {
   if (dstate) {
-    // this happens when there are not ctg kmers
+    // this happens when there is no ctg kmers pass
     if (dstate->qf) quotient_filter::qf_destroy_device(dstate->qf);
     delete dstate;
   }
