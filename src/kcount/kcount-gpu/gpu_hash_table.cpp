@@ -45,6 +45,7 @@
 #include <fstream>
 #include <chrono>
 #include <tuple>
+#include <iomanip>
 #include <assert.h>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
@@ -456,6 +457,33 @@ void KmerExtsMap<MAX_K>::clear() {
 template <int MAX_K>
 HashTableGPUDriver<MAX_K>::HashTableGPUDriver() {}
 
+#define ONE_B (1LL)
+#define ONE_KB (1024LL)
+#define ONE_MB (ONE_KB * 1024LL)
+#define ONE_GB (ONE_MB * 1024LL)
+#define ONE_TB (ONE_GB * 1024LL)
+#define ONE_EB (ONE_TB * 1024LL)
+
+static string get_size_str(int64_t sz) {
+  int64_t absz = llabs(sz);
+  double dsize = sz;
+  ostringstream oss;
+  oss << std::fixed << std::setprecision(2);
+  if (absz >= ONE_EB)
+    oss << (dsize / ONE_EB) << "EB";
+  else if (absz >= ONE_TB)
+    oss << (dsize / ONE_TB) << "TB";
+  else if (absz >= ONE_GB)
+    oss << (dsize / ONE_GB) << "GB";
+  else if (absz >= ONE_MB)
+    oss << (dsize / ONE_MB) << "MB";
+  else if (absz >= ONE_KB)
+    oss << (dsize / ONE_KB) << "KB";
+  else
+    oss << absz << "B";
+  return oss.str();
+}
+
 template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem,
                                      double &init_time, size_t &gpu_bytes_reqd, bool use_qf) {
@@ -466,13 +494,18 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   this->kmer_len = kmer_len;
   pass_type = READ_KMERS_PASS;
   gpu_utils::set_gpu_device(upcxx_rank_me);
+  int nbits_qf = ceil(log2(max_elems * 5));
   // now check that we have sufficient memory for the required capacity
   size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * (1 + sizeof(count_t)) * 1.5;
   size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(CountsArray);
-  gpu_bytes_reqd = (max_elems * elem_size) / 0.8 + elem_buff_size;
+  size_t qf_size = (use_qf ? quotient_filter::qf_estimate_memory(nbits_qf) : 0);
+  gpu_bytes_reqd = (max_elems * elem_size) / 0.8 + elem_buff_size + qf_size;
   // save 1/5 of avail gpu memory for possible ctg kmers and compact hash table
   // set capacity to max avail remaining from gpu memory - more slots means lower load
-  auto max_slots = (use_qf ? 0.7 : 0.8) * (gpu_avail_mem - elem_buff_size) / elem_size;
+  auto max_slots = 0.8 * (gpu_avail_mem - elem_buff_size - qf_size) / elem_size;
+  if (!upcxx_rank_me)
+    cout << "On rank 0, gpu bytes reqd " << get_size_str(gpu_bytes_reqd) << " max slots " << max_slots << " qf size "
+         << get_size_str(qf_size) << "\n";
   // find the first prime number lower than this value
   primes::Prime prime;
   prime.set(min((size_t)max_slots, (size_t)(max_elems * 3)), false);
@@ -493,7 +526,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
 
   dstate = new HashTableDriverState();
   if (use_qf)
-    quotient_filter::qf_malloc_device(&(dstate->qf), ceil(log2(max_elems)));
+    quotient_filter::qf_malloc_device(&(dstate->qf), nbits_qf);
   else
     dstate->qf = nullptr;
 
@@ -505,7 +538,15 @@ template <int MAX_K>
 void HashTableGPUDriver<MAX_K>::init_ctg_kmers(int max_elems, size_t gpu_avail_mem) {
   pass_type = CTG_KMERS_PASS;
   // free up space
-  if (dstate->qf) quotient_filter::qf_destroy_device(dstate->qf);
+  if (dstate->qf) {
+    if (!upcxx_rank_me) {
+      /*
+      double qf_load = (double)quotient_filter::qf_get_num_occupied_slots(dstate->qf) / quotient_filter::qf_get_nslots(dstate->qf);
+      cout << "QF load factor " << qf_load << "\n";
+      */
+    }
+    quotient_filter::qf_destroy_device(dstate->qf);
+  }
   dstate->qf = nullptr;
   size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * (1 + sizeof(count_t)) * 1.5;
   size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(CountsArray);
@@ -524,7 +565,16 @@ template <int MAX_K>
 HashTableGPUDriver<MAX_K>::~HashTableGPUDriver() {
   if (dstate) {
     // this happens when there is no ctg kmers pass
-    if (dstate->qf) quotient_filter::qf_destroy_device(dstate->qf);
+    if (dstate->qf) {
+      if (!upcxx_rank_me) {
+        /*
+        double qf_load =
+            (double)quotient_filter::qf_get_num_occupied_slots(dstate->qf) / quotient_filter::qf_get_nslots(dstate->qf);
+        cout << "QF load factor " << qf_load << "\n";
+        */
+      }
+      quotient_filter::qf_destroy_device(dstate->qf);
+    }
     delete dstate;
   }
 }

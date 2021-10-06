@@ -1452,7 +1452,7 @@ __host__ __device__ inline static int _remove(QF *qf, __uint64_t hash, uint64_t 
  * Code that uses the above to implement key-value-counter operations. *
  ***********************************************************************/
 
-__host__ uint64_t qf_estimage_memory(uint64_t nbits) {
+__host__ uint64_t qf_estimate_memory(int nbits) {
   uint64_t nslots = 1ULL << nbits;
 
 #ifdef DEBUG
