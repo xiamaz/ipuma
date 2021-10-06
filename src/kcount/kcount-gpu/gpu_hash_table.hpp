@@ -105,7 +105,7 @@ struct InsertStats {
   unsigned int dropped = 0;
   unsigned int attempted = 0;
   unsigned int new_inserts = 0;
-  unsigned int num_in_qf = 0;
+  unsigned int num_unique_qf = 0;
 };
 
 template <int MAX_K>

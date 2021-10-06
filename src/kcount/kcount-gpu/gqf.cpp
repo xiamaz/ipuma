@@ -1889,7 +1889,6 @@ __device__ uint16_t unlock(volatile uint32_t *lock, int index) {
 
 // consolidate all of the device construction into one convenient func!
 __host__ void qf_malloc_device(QF **qf, int nbits) {
-  printf("******* Allocating %d bits for QF\n", nbits);
   // bring in compile #define
   int rbits = 8;
   int vbits = 8;

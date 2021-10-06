@@ -49,8 +49,8 @@
 #include "kcount-gpu/parse_and_pack.hpp"
 #include "kcount-gpu/gpu_hash_table.hpp"
 
-//#define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
-#define SLOG_GPU SLOG_VERBOSE
+#define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
+//#define SLOG_GPU SLOG_VERBOSE
 
 using namespace std;
 using namespace upcxx_utils;
@@ -254,6 +254,7 @@ void HashTableInserter<MAX_K>::flush_inserts() {
   auto insert_stats = state->ht_gpu_driver.get_stats();
   uint64_t num_dropped_elems = reduce_one((uint64_t)insert_stats.dropped, op_fast_add, 0).wait();
   uint64_t num_attempted_inserts = reduce_one((uint64_t)insert_stats.attempted, op_fast_add, 0).wait();
+  uint64_t num_inserts = reduce_one((uint64_t)insert_stats.new_inserts, op_fast_add, 0).wait();
   uint64_t capacity = state->ht_gpu_driver.get_capacity();
   uint64_t all_capacity = reduce_one(capacity, op_fast_add, 0).wait();
   if (num_dropped_elems) {
@@ -263,6 +264,10 @@ void HashTableInserter<MAX_K>::flush_inserts() {
     else
       SLOG_GPU("  failed to insert ", perc_str(num_dropped_elems, num_attempted_inserts), " elements; capacity ", all_capacity,
                "\n");
+  }
+  if (state->ht_gpu_driver.pass_type == kcount_gpu::READ_KMERS_PASS) {
+    uint64_t num_unique_qf = reduce_one((uint64_t)insert_stats.num_unique_qf, op_fast_add, 0).wait();
+    SLOG_GPU("  QF found ", perc_str(num_unique_qf, num_inserts), " unique kmers ", num_inserts, "\n");
   }
   double load = (double)(insert_stats.new_inserts) / capacity;
   double avg_load_factor = reduce_one(load, op_fast_add, 0).wait() / rank_n();
@@ -305,6 +310,7 @@ void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<M
   barrier();
   if (num_dropped)
     WARN("GPU dropped ", num_dropped, " entries out of ", num_entries, " when compacting to output hash table" KNORM "\n");
+
   auto all_capacity = reduce_one((uint64_t)state->ht_gpu_driver.get_capacity(), op_fast_add, 0).wait();
   auto all_num_purged = reduce_one((uint64_t)num_purged, op_fast_add, 0).wait();
   auto all_num_entries = reduce_one((uint64_t)num_entries, op_fast_add, 0).wait();
