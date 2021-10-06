@@ -219,19 +219,15 @@ template <int MAX_K>
 void HashTableInserter<MAX_K>::init_ctg_kmers(int max_elems) {
   assert(state != nullptr);
   auto init_gpu_mem = gpu_utils::get_gpu_avail_mem();
-  DBG("init gpu mem ", init_gpu_mem, "\n");
   // we don't need to reserve space for either pnp or the read kmers because those have already reduced the gpu_avail_mem
   auto gpu_avail_mem_per_rank = get_avail_gpu_mem_per_rank();
-  DBG("avail per rank ", gpu_avail_mem_per_rank, "\n");
   SLOG_GPU("Available GPU memory per rank for ctg kmers hash table is ", get_size_str(gpu_avail_mem_per_rank), "\n");
   state->ht_gpu_driver.init_ctg_kmers(max_elems, gpu_avail_mem_per_rank);
-  DBG("after ht_gpu_driver_init\n");
   SLOG_GPU("GPU ctg kmers hash table has capacity per rank of ", state->ht_gpu_driver.get_capacity(), " for ", fixed, max_elems,
            " elements\n");
   auto gpu_used_mem = init_gpu_mem - gpu_utils::get_gpu_avail_mem();
   SLOG_GPU("GPU ctg kmers hash table used ", get_size_str(gpu_used_mem), " memory on GPU out of ",
            get_size_str(gpu_utils::get_gpu_tot_mem()), "\n");
-  DBG("gpu used mem ", gpu_used_mem, "\n");
 }
 
 template <int MAX_K>
