@@ -472,7 +472,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   gpu_bytes_reqd = (max_elems * elem_size) / 0.8 + elem_buff_size;
   // save 1/5 of avail gpu memory for possible ctg kmers and compact hash table
   // set capacity to max avail remaining from gpu memory - more slots means lower load
-  auto max_slots = 0.8 * (gpu_avail_mem - elem_buff_size) / elem_size;
+  auto max_slots = 0.6 * (gpu_avail_mem - elem_buff_size) / elem_size;
   // find the first prime number lower than this value
   primes::Prime prime;
   prime.set(min((size_t)max_slots, (size_t)(max_elems * 3)), false);

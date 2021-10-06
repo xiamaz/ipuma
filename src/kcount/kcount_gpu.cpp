@@ -267,7 +267,8 @@ void HashTableInserter<MAX_K>::flush_inserts() {
   }
   if (state->ht_gpu_driver.pass_type == kcount_gpu::READ_KMERS_PASS) {
     uint64_t num_unique_qf = reduce_one((uint64_t)insert_stats.num_unique_qf, op_fast_add, 0).wait();
-    SLOG_GPU("  QF found ", perc_str(num_unique_qf, num_inserts), " unique kmers ", num_inserts, "\n");
+    // SLOG_GPU("  QF found ", perc_str(num_unique_qf, num_inserts), " unique kmers ", num_inserts, "\n");
+    SLOG_GPU("  Using QF, found ", perc_str(num_unique_qf - num_inserts, num_unique_qf), " singletons\n");
   }
   double load = (double)(insert_stats.new_inserts) / capacity;
   double avg_load_factor = reduce_one(load, op_fast_add, 0).wait() / rank_n();
