@@ -573,7 +573,7 @@ void HashTableGPUDriver<MAX_K>::insert_supermer_block() {
                                                            buff_len * 2, kmer_len, is_ctg_kmers, gpu_insert_stats, dstate->qf);
   // the kernel time is not going to be accurate, because we are not waiting for the kernel to complete
   // need to uncomment the line below, which will decrease performance by preventing the overlap of GPU and CPU execution
-  // cudaDeviceSynchronize();
+  cudaDeviceSynchronize();
   dstate->kernel_timer.stop();
   num_gpu_calls++;
   dstate->insert_timer.stop();
