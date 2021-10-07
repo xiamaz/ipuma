@@ -249,6 +249,9 @@ uint64_t qf_get_total_size_in_bytes(const QF *qf);
 uint64_t qf_get_nslots(const QF *qf);
 uint64_t qf_get_num_occupied_slots(const QF *qf);
 
+__host__ uint64_t host_qf_get_nslots(const QF *qf);
+__host__ uint64_t host_qf_get_num_occupied_slots(const QF *qf);
+
 /* Bit-sizes info. */
 uint64_t qf_get_num_key_bits(const QF *qf);
 uint64_t qf_get_num_value_bits(const QF *qf);

@@ -1106,6 +1106,12 @@ __host__ __device__ static inline int insert1(QF *qf, __uint64_t hash, uint8_t r
   // printf("In insert1, Index is %llu, block_offset is %llu, remainder is %llu \n", hash_bucket_index, hash_bucket_block_offset,
   // hash_remainder);
 
+#ifdef __CUDA_ARCH__
+  atomicAdd((unsigned long long *)&qf->metadata->noccupied_slots, 1ULL);
+#else
+  abort();
+#endif
+
   if (is_empty(qf, hash_bucket_index) /* might_be_empty(qf, hash_bucket_index) && runend_index == hash_bucket_index */) {
     METADATA_WORD(qf, runends, hash_bucket_index) |= 1ULL << (hash_bucket_block_offset % 64);
     set_slot(qf, hash_bucket_index, hash_remainder);
@@ -2347,6 +2353,33 @@ uint64_t qf_get_nslots(const QF *qf) { return qf->metadata->nslots; }
 uint64_t qf_get_num_occupied_slots(const QF *qf) {
   pc_sync(&qf->runtimedata->pc_noccupied_slots);
   return qf->metadata->noccupied_slots;
+}
+
+// need to pull metadata from qf, and nslots from metadata
+__host__ uint64_t host_qf_get_nslots(const QF *qf) {
+  QF *host_qf;
+  CUDA_CHECK(cudaMallocHost((void **)&host_qf, sizeof(QF)));
+  CUDA_CHECK(cudaMemcpy(host_qf, qf, sizeof(QF), cudaMemcpyDeviceToHost));
+  qfmetadata *_metadata;
+  CUDA_CHECK(cudaMallocHost((void **)&_metadata, sizeof(qfmetadata)));
+  CUDA_CHECK(cudaMemcpy(_metadata, host_qf->metadata, sizeof(qfmetadata), cudaMemcpyDeviceToHost));
+  uint64_t toReturn = _metadata->nslots;
+  CUDA_CHECK(cudaFreeHost(_metadata));
+  CUDA_CHECK(cudaFreeHost(host_qf));
+  return toReturn;
+}
+
+__host__ uint64_t host_qf_get_num_occupied_slots(const QF *qf) {
+  QF *host_qf;
+  CUDA_CHECK(cudaMallocHost((void **)&host_qf, sizeof(QF)));
+  CUDA_CHECK(cudaMemcpy(host_qf, qf, sizeof(QF), cudaMemcpyDeviceToHost));
+  qfmetadata *_metadata;
+  CUDA_CHECK(cudaMallocHost((void **)&_metadata, sizeof(qfmetadata)));
+  CUDA_CHECK(cudaMemcpy(_metadata, host_qf->metadata, sizeof(qfmetadata), cudaMemcpyDeviceToHost));
+  uint64_t toReturn = _metadata->noccupied_slots;
+  CUDA_CHECK(cudaFreeHost(_metadata));
+  CUDA_CHECK(cudaFreeHost(host_qf));
+  return toReturn;
 }
 
 uint64_t qf_get_num_key_bits(const QF *qf) { return qf->metadata->key_bits; }

@@ -197,15 +197,16 @@ void HashTableInserter<MAX_K>::init(int max_elems, bool use_qf) {
   double init_time;
   // calculate total slots for hash table. Reserve space for parse and pack
   int bytes_for_pnp = KCOUNT_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
-  size_t gpu_bytes_reqd;
+  size_t gpu_bytes_reqd = 0, ht_bytes_used = 0, qf_bytes_used = 0;
   auto init_gpu_mem = gpu_utils::get_gpu_avail_mem();
   auto gpu_avail_mem_per_rank = (get_avail_gpu_mem_per_rank() - bytes_for_pnp) * 0.8;
   SLOG_GPU("Available GPU memory per rank for kmers hash table is ", get_size_str(gpu_avail_mem_per_rank), "\n");
   assert(state != nullptr);
   state->ht_gpu_driver.init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), max_elems, gpu_avail_mem_per_rank, init_time, gpu_bytes_reqd,
-                            use_qf);
+                            ht_bytes_used, qf_bytes_used, use_qf);
   auto capacity = state->ht_gpu_driver.get_capacity();
   SLOG_GPU("GPU read kmers hash table has capacity per rank of ", capacity, " for ", (int64_t)max_elems, " elements\n");
+  SLOG_GPU("Using ", get_size_str(ht_bytes_used), " for the GPU hash table and ", get_size_str(qf_bytes_used), " for the QF\n");
   if (capacity < max_elems * 0.8)
     SLOG_VERBOSE("GPU read kmers hash table has less than requested capacity: ", perc_str(capacity, max_elems),
                  "; full capacity requires ", get_size_str(gpu_bytes_reqd), " memory on GPU but only have ",
@@ -265,7 +266,8 @@ void HashTableInserter<MAX_K>::flush_inserts() {
   if (use_qf && state->ht_gpu_driver.pass_type == kcount_gpu::READ_KMERS_PASS) {
     uint64_t num_unique_qf = reduce_one((uint64_t)insert_stats.num_unique_qf, op_fast_add, 0).wait();
     // SLOG_GPU("  QF found ", perc_str(num_unique_qf, num_inserts), " unique kmers ", num_inserts, "\n");
-    SLOG_GPU("  Using QF, found ", perc_str(num_unique_qf - num_inserts, num_unique_qf), " singletons\n");
+    SLOG_GPU("  QF filtered out ", perc_str(num_unique_qf - num_inserts, num_unique_qf), " singletons\n");
+    SLOG_GPU("  QF load factor ", state->ht_gpu_driver.get_qf_load_factor(), "\n");
   }
   double load = (double)(insert_stats.new_inserts) / capacity;
   double avg_load_factor = reduce_one(load, op_fast_add, 0).wait() / rank_n();

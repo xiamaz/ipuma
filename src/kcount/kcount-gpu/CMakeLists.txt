@@ -3,6 +3,10 @@ add_library(
                                 hashutil.cpp partitioned_counter.cpp)
 if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.13)
   target_link_libraries(KCOUNT_GPU_LIBRARY_obj INTERFACE)
+  # unsuccessful attempt to suppress warning about recursion
+  target_link_options(
+    KCOUNT_GPU_LIBRARY_obj PRIVATE $<DEVICE_LINK:--nvlink-options
+    -suppress-stack-size-warning>)
 endif()
 
 set_source_files_properties(parse_and_pack.cpp PROPERTIES LANGUAGE CUDA
@@ -31,6 +35,10 @@ if(KCOUNT_GPU_STATIC)
   add_library(KCOUNT_GPU_LIBRARY_static STATIC
               $<TARGET_OBJECTS:KCOUNT_GPU_LIBRARY_obj>)
   target_link_libraries(KCOUNT_GPU_LIBRARY_static INTERFACE)
+  # unsuccessful attempt to suppress warning about recursion
+  target_link_options(
+    KCOUNT_GPU_LIBRARY_static PRIVATE $<DEVICE_LINK:--nvlink-options
+    -suppress-stack-size-warning>)
   set_property(TARGET KCOUNT_GPU_LIBRARY_static
                PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
   install(TARGETS KCOUNT_GPU_LIBRARY_static ARCHIVE DESTINATION lib)
