@@ -16,15 +16,18 @@ module load craype
 module load craype-x86-skylake
 
 module load cuda
-module rm cmake
-module load cmake/3.18.2
+module load cmake
 module load git
 module load upcxx-gpu
 
 module list
 
+which g++
+which gcc
+which nvcc
+
 export OMP_NUM_THREADS=1
-export MHM2_CMAKE_EXTRAS="-DCMAKE_CXX_COMPILER=$(which g++) -DCMAKE_C_COMPILER=$(which gcc) -DCMAKE_CUDA_ARCHITECTURES='70'"
+export MHM2_CMAKE_EXTRAS="-DCMAKE_CXX_COMPILER=$(which g++) -DCMAKE_C_COMPILER=$(which gcc)"
 
 # to build:
 # salloc -C gpu -t 30 -q interactive -t 30 -c 8 -G 1
