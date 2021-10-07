@@ -369,7 +369,9 @@ void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<M
   auto avg_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_add, 0).wait() / rank_n();
   auto max_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_max, 0).wait();
   SLOG_GPU("Elapsed GPU time for kmer hash tables:\n");
-  SLOG_GPU("  insert: ", fixed, setprecision(3), avg_gpu_insert_time, " avg, ", max_gpu_insert_time, " max\n");
+  double load_balance = (double)avg_gpu_insert_time / max_gpu_insert_time;
+  SLOG_GPU("  insert: ", fixed, setprecision(3), (load_balance < 0.5 ? KLRED : ""), avg_gpu_insert_time, " avg, ",
+           max_gpu_insert_time, " max, load balance ", load_balance, KNORM, "\n");
   SLOG_GPU("  kernel: ", fixed, setprecision(3), avg_gpu_kernel_time, " avg, ", max_gpu_kernel_time, " max\n");
   barrier();
 }
