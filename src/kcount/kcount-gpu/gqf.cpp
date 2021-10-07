@@ -33,6 +33,7 @@
 #include "hashutil.hpp"
 #include "gqf.hpp"
 #include "gqf_int.hpp"
+#include "gpu-utils/gpu_common.hpp"
 
 #include <cuda_profiler_api.h>
 
@@ -1850,9 +1851,10 @@ __device__ void lock_16(uint16_t *lock, uint64_t index) {
 
 __device__ void unlock_16(uint16_t *lock, uint64_t index) {
   uint16_t zero = 0;
-  uint16_t one = 1;
+  // uint16_t one = 1;
 
-  atomicCAS((uint16_t *)&lock[index], one, zero);
+  // atomicCAS((uint16_t *)&lock[index], one, zero);
+  gpu_common::atomicAndUint16((uint16_t *)&lock[index], zero);
 }
 
 // TODO: it might expect a short int instead of uint16_t
