@@ -1844,23 +1844,16 @@ GPU Modifications
 __device__ void lock_16(uint16_t *lock, uint64_t index) {
   uint16_t zero = 0;
   uint16_t one = 1;
-  int max_tests = 10000;
 
-  while (atomicCAS((uint16_t *)&lock[index], zero, one) != zero) {
-    max_tests--;
-    if (!max_tests) {
-      printf("******* break CAS loop\n");
-      break;
-    }
-  }
+  while (atomicCAS((uint16_t *)&lock[index], zero, one) != zero) ;
 }
 
 __device__ void unlock_16(uint16_t *lock, uint64_t index) {
   uint16_t zero = 0;
-  // uint16_t one = 1;
+  uint16_t one = 1;
 
-  // atomicCAS((uint16_t *)&lock[index], one, zero);
-  gpu_common::atomicAndUint16((uint16_t *)&lock[index], zero);
+  atomicCAS((uint16_t *)&lock[index], one, zero);
+  //gpu_common::atomicAndUint16((uint16_t *)&lock[index], zero);
 }
 
 // TODO: it might expect a short int instead of uint16_t
