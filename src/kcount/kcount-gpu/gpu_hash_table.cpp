@@ -304,7 +304,10 @@ __device__ bool get_kmer_from_supermer(SupermerBuff supermer_buff, uint32_t buff
       char tmp = left_ext;
       left_ext = comp_nucleotide(right_ext);
       right_ext = comp_nucleotide(tmp);
-      if (!left_ext || !right_ext) return false;
+
+      // FIXME: we should be able to have a 0 extension even for revcomp - we do for non-revcomp
+      // if (!left_ext || !right_ext) return false;
+
       memcpy(kmer, kmer_rc, N_LONGS * sizeof(uint64_t));
     }
     break;

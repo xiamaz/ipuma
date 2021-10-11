@@ -127,9 +127,10 @@ class KmerDHT {
   std::chrono::time_point<std::chrono::high_resolution_clock> start_t;
 
   int minimizer_len = 15;
-  bool using_ctg_kmers = false;
 
  public:
+  bool using_ctg_kmers = false;
+  
   KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS);
 
   void clear_stores();

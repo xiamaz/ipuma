@@ -75,6 +75,90 @@ message(
 
 if(ENABLE_CUDA)
   message(STATUS "Building for GPUs with CUDA")
+
+  set(CMAKE_CUDA_STANDARD
+      14
+      CACHE STRING "")
+  set(CMAKE_CUDA_STANDARD_REQUIRED
+      ON
+      CACHE BOOL "")
+  set(CMAKE_CUDA_EXTENSIONS
+      OFF
+      CACHE BOOL "")
+
+  find_package(CUDA REQUIRED)
+
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12)
+    cmake_policy(SET CMP0074 NEW) # use the CUDA_ROOT variable
+  endif()
+
+  enable_language(CUDA)
+  set(MHM2_MIN_CUDA_ARCH 70)
+
+  if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.18)
+    if(NOT CMAKE_CUDA_ARCHITECTURES)
+      include(FindCUDA/select_compute_arch)
+      cuda_detect_installed_gpus(INSTALLED_GPU_CCS_1)
+      string(STRIP "${INSTALLED_GPU_CCS_1}" INSTALLED_GPU_CCS_2)
+      string(REPLACE " " ";" INSTALLED_GPU_CCS_3 "${INSTALLED_GPU_CCS_2}")
+      string(REPLACE "." "" CUDA_ARCH_LIST "${INSTALLED_GPU_CCS_3}")
+      set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
+      message(
+        STATUS "Autodetect CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}"
+      )
+    endif()
+    message(STATUS "Using CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}")
+  else()
+    find_package(CUDA REQUIRED)
+    cuda_select_nvcc_arch_flags(ARCH_FLAGS_LIST)
+    if(ARCH_FLAGS_LIST)
+      string(REPLACE ";" " " ARCH_FLAGS "${ARCH_FLAGS_LIST}")
+      message("Found ARCH_FLAGS_LIST: ${ARCH_FLAGS_LIST}")
+      message("Found CUDA_GPU_DETECT_OUTPUT: ${CUDA_GPU_DETECT_OUTPUT}")
+      if(NOT CMAKE_CUDA_ARCHITECTURES)
+        string(REPLACE "." "" CMAKE_CUDA_ARCHITECTURES "${CUDA_GPU_DETECT_OUTPUT}")
+      endif()
+    else()
+      foreach(_CMAKE_CUDA_COMPUTE_CAPABILITY 70 80)
+        set(ARCH_FLAGS
+            "${ARCH_FLAGS} -gencode arch=compute_${_CMAKE_CUDA_COMPUTE_CAPABILITY},code=sm_${_CMAKE_CUDA_COMPUTE_CAPABILITY}"
+        )
+      endforeach()
+      if(NOT CMAKE_CUDA_COMPUTE_CAPABILITY)
+        set(CMAKE_CUDA_COMPUTE_CAPABILITY
+            70
+            CACHE STRING "")
+      endif()
+      message(
+        WARNING
+          "Could not auto-detect the GPU arch flags building for all gpu compute capabilities 3 - 7 and PTX for ${CMAKE_CUDA_COMPUTE_CAPABILITY}"
+      )
+      set(ARCH_FLAGS
+          "${ARCH_FLAGS} -gencode arch=compute_${CMAKE_CUDA_COMPUTE_CAPABILITY},code=sm_${CMAKE_CUDA_COMPUTE_CAPABILITY}"
+      )
+      set(ARCH_FLAGS
+          "${ARCH_FLAGS} -gencode arch=compute_${CMAKE_CUDA_COMPUTE_CAPABILITY},code=compute_${CMAKE_CUDA_COMPUTE_CAPABILITY}"
+      )
+    endif()
+    message(STATUS "ARCH_FLAGS=${ARCH_FLAGS}")
+  endif()
+
+  foreach(test_cuda_arch ${CMAKE_CUDA_ARCHITECTURES})
+    if(${test_cuda_arch} LESS ${MHM2_MIN_CUDA_ARCH})
+      message(FATAL_ERROR "CUDA architecture ${test_cuda_arch} is incompatible with the minimum ${MHM2_MIN_CUDA_ARCH}.  Try compiling without cuda: -DENABLE_CUDA=OFF")
+    endif()
+  endforeach()
+
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+  set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+  set(CMAKE_CUDA_PTX_COMPILATION ON)
+
+  set(CMAKE_CUDA_FLAGS
+      "${CMAKE_CUDA_FLAGS} -Xcompiler=-Wall ${ARCH_FLAGS} -Wno-deprecated-gpu-targets"
+  )
+
+  message(STATUS "CMAKE_CUDA_FLAGS=${CMAKE_CUDA_FLAGS}")
+
 else()
   message(STATUS "Building for CPUs")
 endif()

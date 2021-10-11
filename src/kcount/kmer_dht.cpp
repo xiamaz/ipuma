@@ -145,7 +145,7 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
                node0_cores * my_adjusted_num_kmers, " entries on node 0\n");
   double init_free_mem = get_free_mem();
   if (my_adjusted_num_kmers <= 0) DIE("no kmers to reserve space for");
-  kmer_store.set_update_func([&kmers = this->local_kmers, &ht_inserter = this->ht_inserter](Supermer supermer) {
+  kmer_store.set_update_func([&ht_inserter = this->ht_inserter](Supermer supermer) {
     num_inserts++;
     ht_inserter->insert_supermer(supermer.seq, supermer.count);
   });

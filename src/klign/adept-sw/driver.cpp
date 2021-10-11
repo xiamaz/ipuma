@@ -177,8 +177,8 @@ struct adept_sw::DriverState {
   unsigned half_length_B = 0;
 };
 
-double adept_sw::GPUDriver::init(int upcxx_rank_me, int upcxx_rank_n, short match_score, short mismatch_score,
-                                 short gap_opening_score, short gap_extending_score, int max_rlen) {
+adept_sw::GPUDriver::GPUDriver(int upcxx_rank_me, int upcxx_rank_n, short match_score, short mismatch_score,
+                               short gap_opening_score, short gap_extending_score, int max_rlen, double& init_time) {
   using timepoint_t = std::chrono::time_point<std::chrono::high_resolution_clock>;
   timepoint_t t = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> elapsed;
@@ -224,7 +224,7 @@ double adept_sw::GPUDriver::init(int upcxx_rank_me, int upcxx_rank_n, short matc
   // elapsed =  std::chrono::high_resolution_clock::now() - t; os << " final=" << elapsed.count();
 
   elapsed = std::chrono::high_resolution_clock::now() - t;
-  return elapsed.count();
+  init_time = elapsed.count();
 }
 
 adept_sw::GPUDriver::~GPUDriver() {

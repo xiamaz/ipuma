@@ -1135,7 +1135,6 @@ s_align *ssw_align(const s_profile *prof,
         } else if (bests[0].score == 255) {
 #ifdef DEBUG
             fprintf(stderr, "Please set 2 to the score_size parameter of the function ssw_init, otherwise the alignment results will be incorrect. refLen=%d readLen=%d match=%d\n", refLen, readLen, prof->mat[0]);
-            assert(0);
 #endif
             free(bests);
             free(r);
