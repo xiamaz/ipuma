@@ -116,7 +116,8 @@ if(ENABLE_CUDA)
       message("Found ARCH_FLAGS_LIST: ${ARCH_FLAGS_LIST}")
       message("Found CUDA_GPU_DETECT_OUTPUT: ${CUDA_GPU_DETECT_OUTPUT}")
       if(NOT CMAKE_CUDA_ARCHITECTURES)
-        string(REPLACE "." "" CMAKE_CUDA_ARCHITECTURES "${CUDA_GPU_DETECT_OUTPUT}")
+        string(REPLACE "." "" CMAKE_CUDA_ARCHITECTURES
+                       "${CUDA_GPU_DETECT_OUTPUT}")
       endif()
     else()
       foreach(_CMAKE_CUDA_COMPUTE_CAPABILITY 70 80)
@@ -145,7 +146,10 @@ if(ENABLE_CUDA)
 
   foreach(test_cuda_arch ${CMAKE_CUDA_ARCHITECTURES})
     if(${test_cuda_arch} LESS ${MHM2_MIN_CUDA_ARCH})
-      message(FATAL_ERROR "CUDA architecture ${test_cuda_arch} is incompatible with the minimum ${MHM2_MIN_CUDA_ARCH}.  Try compiling without cuda: -DENABLE_CUDA=OFF")
+      message(
+        FATAL_ERROR
+          "CUDA architecture ${test_cuda_arch} is incompatible with the minimum ${MHM2_MIN_CUDA_ARCH}.  Try compiling without cuda: -DENABLE_CUDA=OFF"
+      )
     endif()
   endforeach()
 
@@ -211,8 +215,6 @@ foreach(
   options
   merge_reads
   dbjg_traversal
-  spanner
-  splinter
   histogrammer
   aln_depths
   shuffle_reads
