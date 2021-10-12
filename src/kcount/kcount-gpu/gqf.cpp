@@ -59,6 +59,7 @@ namespace quotient_filter {
 
 #define NUM_BUFFERS 10
 #define MAX_BUFFER_SIZE 100
+#define LOCK_DIST 64
 
 #define CYCLES_PER_SECOND 1601000000
 
@@ -1550,7 +1551,7 @@ __host__ uint64_t qf_init(QF *qf, uint64_t nslots, uint64_t key_bits, uint64_t v
   qf->metadata->ndistinct_elts = 0;
   qf->metadata->noccupied_slots = 0;
 
-  qf->runtimedata->num_locks = (qf->metadata->xnslots / NUM_SLOTS_TO_LOCK) + 10;
+  qf->runtimedata->num_locks = ((qf->metadata->xnslots / NUM_SLOTS_TO_LOCK) + 10) * LOCK_DIST;
 
   pc_init(&qf->runtimedata->pc_nelts, (int64_t *)&qf->metadata->nelts, 8, 100);
   pc_init(&qf->runtimedata->pc_ndistinct_elts, (int64_t *)&qf->metadata->ndistinct_elts, 8, 100);
@@ -1845,15 +1846,25 @@ __device__ void lock_16(uint16_t *lock, uint64_t index) {
   uint16_t zero = 0;
   uint16_t one = 1;
 
-  while (atomicCAS((uint16_t *)&lock[index], zero, one) != zero) ;
+  while (atomicCAS((uint16_t *)&lock[index * LOCK_DIST], zero, one) != zero)
+    ;
 }
 
 __device__ void unlock_16(uint16_t *lock, uint64_t index) {
   uint16_t zero = 0;
   uint16_t one = 1;
 
-  atomicCAS((uint16_t *)&lock[index], one, zero);
-  //gpu_common::atomicAndUint16((uint16_t *)&lock[index], zero);
+  atomicCAS((uint16_t *)&lock[index * LOCK_DIST], one, zero);
+}
+
+// lock_16 but built to be included as a piece of a while loop
+// this is more in line with traditional cuda processing, may increase throughput
+__device__ bool try_lock_16(uint16_t *lock, uint64_t index) {
+  uint16_t zero = 0;
+  uint16_t one = 1;
+
+  if (atomicCAS((uint16_t *)&lock[index * LOCK_DIST], zero, one) == zero) return true;
+  return false;
 }
 
 // TODO: it might expect a short int instead of uint16_t
@@ -2090,15 +2101,11 @@ __host__ __device__ bool is_encodable(uint8_t *counter) {
 
 // finalized version of locking kmer insert
 // uses 10 bits 6 bits remainder/val pairings
-
-__device__ bool insert_kmer(QF *qf, uint64_t hash, char forward, char backward, char &returnedfwd, char &returnedback) {
+__device__ qf_returns insert_kmer(QF *qf, uint64_t hash, char forward, char backward, char &returnedfwd, char &returnedback) {
   uint8_t encoded = encode_chars(forward, backward);
-
   uint8_t query;
-
   uint64_t bigquery;
 
-  // bool boolFound;
   hash = hash % qf->metadata->range;
 
   uint64_t hash_bucket_index = hash >> qf->metadata->key_remainder_bits;
@@ -2113,19 +2120,17 @@ __device__ bool insert_kmer(QF *qf, uint64_t hash, char forward, char backward, 
 
   query = bigquery;
 
-  if (found == 0) {
+  if (found == 0)
     qf_insert(qf, hash, encoded, 1, QF_NO_LOCK | QF_KEY_IS_HASH);
-
-  } else {
+  else
     decode_chars(query, returnedfwd, returnedback);
-  }
 
   __threadfence();
   unlock_16(qf->runtimedata->locks, lock_index + 1);
   unlock_16(qf->runtimedata->locks, lock_index);
 
-  // obvious cast for clarity
-  return (found == 0);
+  if (found == 1) return QF_ITEM_FOUND;
+  return QF_ITEM_INSERTED;
 }
 
 // given a kmer we want to look for, and an encoded char, insert it and retreive a copy if it exists

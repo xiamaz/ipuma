@@ -342,15 +342,15 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
       if (kmer.longs[N_LONGS - 1] == KEY_TRANSITION) printf("ERROR: block equal to KEY_TRANSITION\n");
       auto hash_val = kmer_hash(kmer);
       char prev_left_ext = '0', prev_right_ext = '0';
-      bool qf_inserted = false;
+      quotient_filter::qf_returns qf_insert_result = quotient_filter::QF_ITEM_FOUND;
       if (!ctg_kmers && qf) {
-        qf_inserted = quotient_filter::insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext);
-        if (qf_inserted) {
+        qf_insert_result = quotient_filter::insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext);
+        if (qf_insert_result == quotient_filter::QF_ITEM_INSERTED) {
           num_unique_qf++;
           assert(prev_left_ext == '0' && prev_right_ext == '0');
         }
       }
-      if (!qf_inserted || ctg_kmers) {
+      if (!qf || qf_insert_result == quotient_filter::QF_ITEM_FOUND || ctg_kmers) {
         uint64_t slot = hash_val % elems.capacity;
         auto start_slot = slot;
         const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);

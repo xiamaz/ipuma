@@ -40,6 +40,8 @@ the hashes in the CQF, or all the keys.
 
 enum qf_hashmode { QF_HASH_DEFAULT, QF_HASH_INVERTIBLE, QF_HASH_NONE };
 
+enum qf_returns { QF_ITEM_INSERTED, QF_ITEM_FOUND, QF_FULL };
+
 /* The CQF supports concurrent insertions and queries.  Only the
          portion of the CQF being examined or modified is locked, so it
          supports high throughput even with many threads.
@@ -356,7 +358,7 @@ __host__ __device__ void qf_dump_metadata(const QF *qf);
 __host__ void qf_malloc_device(QF **qf, int nbits);
 
 // device_funcs for interacting with the filter
-__device__ bool insert_kmer(QF *qf, uint64_t hash, char forward, char backward, char &returnedfwd, char &returnedback);
+__device__ qf_returns insert_kmer(QF *qf, uint64_t hash, char forward, char backward, char &returnedfwd, char &returnedback);
 
 // destroys a filter
 __host__ void qf_destroy_device(QF *qf);
