@@ -327,6 +327,71 @@ __device__ bool get_kmer_from_supermer(SupermerBuff supermer_buff, uint32_t buff
 }
 
 template <int MAX_K>
+__device__ bool gpu_insert_kmer(KmerCountsMap<MAX_K> elems, uint64_t hash_val, KmerArray<MAX_K> &kmer, char left_ext,
+                                char right_ext, char prev_left_ext, char prev_right_ext, count_t kmer_count, int &new_inserts,
+                                int &dropped_inserts, bool ctg_kmers, bool use_qf, bool update_only) {
+  const int N_LONGS = KmerArray<MAX_K>::N_LONGS;
+  uint64_t slot = hash_val % elems.capacity;
+  auto start_slot = slot;
+  const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
+  bool found_slot = false;
+  bool kmer_found_in_ht = false;
+  uint64_t old_key = KEY_TRANSITION;
+  for (int j = 0; j < MAX_PROBE; j++) {
+    do {
+      old_key = atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
+    } while (old_key == KEY_TRANSITION);
+    if (old_key == KEY_EMPTY) {
+      if (update_only) {
+        old_key = atomicExch((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY);
+        if (old_key != KEY_TRANSITION) printf("ERROR: old key should be KEY_TRANSITION\n");
+        return false;
+      }
+      kmer_set(elems.keys[slot], kmer);
+      found_slot = true;
+      break;
+    } else if (old_key == kmer.longs[N_LONGS - 1]) {
+      if (kmers_equal(elems.keys[slot], kmer)) {
+        found_slot = true;
+        kmer_found_in_ht = true;
+        break;
+      }
+    }
+    // quadratic probing - worse cache but reduced clustering
+    slot = (start_slot + j * j) % elems.capacity;
+    // this entry didn't get inserted because we ran out of probing time (and probably space)
+    if (j == MAX_PROBE - 1) dropped_inserts++;
+  }
+  if (found_slot) {
+    ext_count_t *ext_counts = elems.vals[slot].ext_counts;
+    if (ctg_kmers) {
+      // the count is the min of all counts. Use CAS to deal with the initial zero value
+      int prev_count = atomicCAS(&elems.vals[slot].kmer_count, 0, kmer_count);
+      if (prev_count)
+        atomicMin(&elems.vals[slot].kmer_count, kmer_count);
+      else
+        new_inserts++;
+    } else {
+      assert(kmer_count == 1);
+      int prev_count = atomicAdd(&elems.vals[slot].kmer_count, kmer_count);
+      if (!prev_count) new_inserts++;
+    }
+    ext_count_t kmer_count_uint16 = min(kmer_count, UINT16_MAX);
+    inc_ext(left_ext, kmer_count_uint16, ext_counts);
+    inc_ext(right_ext, kmer_count_uint16, ext_counts + 4);
+    if (use_qf && !update_only && !kmer_found_in_ht && !ctg_kmers) {
+      // kmer was not in hash table, so it must have been found in the qf
+      // add the extensions from the previous entry stored in the qf
+      inc_ext(prev_left_ext, 1, ext_counts);
+      inc_ext(prev_right_ext, 1, ext_counts + 4);
+      // inc the overall kmer count
+      atomicAdd(&elems.vals[slot].kmer_count, 1);
+    }
+  }
+  return true;
+}
+
+template <int MAX_K>
 __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBuff supermer_buff, uint32_t buff_len, int kmer_len,
                                           bool ctg_kmers, InsertStats *insert_stats, quotient_filter::QF *qf) {
   unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -342,66 +407,20 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
       if (kmer.longs[N_LONGS - 1] == KEY_TRANSITION) printf("ERROR: block equal to KEY_TRANSITION\n");
       auto hash_val = kmer_hash(kmer);
       char prev_left_ext = '0', prev_right_ext = '0';
-      quotient_filter::qf_returns qf_insert_result = quotient_filter::QF_ITEM_FOUND;
-      if (!ctg_kmers && qf) {
+      bool use_qf = (qf != nullptr);
+      bool update_only = (use_qf && !ctg_kmers);
+      bool updated = gpu_insert_kmer(elems, hash_val, kmer, left_ext, right_ext, prev_left_ext, prev_right_ext, kmer_count,
+                                     new_inserts, dropped_inserts, ctg_kmers, use_qf, update_only);
+      if (update_only && !updated) {
+        // not found in the hash table - look in the qf
+        quotient_filter::qf_returns qf_insert_result = quotient_filter::QF_ITEM_FOUND;
         qf_insert_result = quotient_filter::insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext);
         if (qf_insert_result == quotient_filter::QF_ITEM_INSERTED) {
           num_unique_qf++;
           assert(prev_left_ext == '0' && prev_right_ext == '0');
-        }
-      }
-      if (!qf || qf_insert_result == quotient_filter::QF_ITEM_FOUND || ctg_kmers) {
-        uint64_t slot = hash_val % elems.capacity;
-        auto start_slot = slot;
-        const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
-        bool found_slot = false;
-        bool kmer_found_in_ht = false;
-        uint64_t old_key = KEY_TRANSITION;
-        for (int j = 0; j < MAX_PROBE; j++) {
-          do {
-            old_key = atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
-          } while (old_key == KEY_TRANSITION);
-          if (old_key == KEY_EMPTY) {
-            kmer_set(elems.keys[slot], kmer);
-            found_slot = true;
-            break;
-          } else if (old_key == kmer.longs[N_LONGS - 1]) {
-            if (kmers_equal(elems.keys[slot], kmer)) {
-              found_slot = true;
-              kmer_found_in_ht = true;
-              break;
-            }
-          }
-          // quadratic probing - worse cache but reduced clustering
-          slot = (start_slot + j * j) % elems.capacity;
-          // this entry didn't get inserted because we ran out of probing time (and probably space)
-          if (j == MAX_PROBE - 1) dropped_inserts++;
-        }
-        if (found_slot) {
-          ext_count_t *ext_counts = elems.vals[slot].ext_counts;
-          if (ctg_kmers) {
-            // the count is the min of all counts. Use CAS to deal with the initial zero value
-            int prev_count = atomicCAS(&elems.vals[slot].kmer_count, 0, kmer_count);
-            if (prev_count)
-              atomicMin(&elems.vals[slot].kmer_count, kmer_count);
-            else
-              new_inserts++;
-          } else {
-            assert(kmer_count == 1);
-            int prev_count = atomicAdd(&elems.vals[slot].kmer_count, kmer_count);
-            if (!prev_count) new_inserts++;
-          }
-          ext_count_t kmer_count_uint16 = min(kmer_count, UINT16_MAX);
-          inc_ext(left_ext, kmer_count_uint16, ext_counts);
-          inc_ext(right_ext, kmer_count_uint16, ext_counts + 4);
-          if (qf && !kmer_found_in_ht && !ctg_kmers) {
-            // kmer was not in hash table, so it must have been found in the qf
-            // add the extensions from the previous entry stored in the qf
-            inc_ext(prev_left_ext, 1, ext_counts);
-            inc_ext(prev_right_ext, 1, ext_counts + 4);
-            // inc the overall kmer count
-            atomicAdd(&elems.vals[slot].kmer_count, 1);
-          }
+        } else if (qf_insert_result == quotient_filter::QF_ITEM_FOUND) {
+          gpu_insert_kmer(elems, hash_val, kmer, left_ext, right_ext, prev_left_ext, prev_right_ext, kmer_count, new_inserts,
+                          dropped_inserts, ctg_kmers, use_qf, false);
         }
       }
     }
