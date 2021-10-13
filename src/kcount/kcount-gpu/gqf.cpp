@@ -59,7 +59,7 @@ namespace quotient_filter {
 
 #define NUM_BUFFERS 10
 #define MAX_BUFFER_SIZE 100
-#define LOCK_DIST 64
+#define LOCK_DIST 1
 
 #define CYCLES_PER_SECOND 1601000000
 
