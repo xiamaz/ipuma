@@ -360,6 +360,9 @@ __host__ void qf_malloc_device(QF **qf, int nbits);
 // device_funcs for interacting with the filter
 __device__ qf_returns insert_kmer(QF *qf, uint64_t hash, char forward, char backward, char &returnedfwd, char &returnedback);
 
+__device__ qf_returns insert_kmer_not_exists(QF *qf, uint64_t hash, char forward, char backward, char &returnedfwd,
+                                             char &returnedback);
+
 // destroys a filter
 __host__ void qf_destroy_device(QF *qf);
 
