@@ -79,6 +79,11 @@ struct SupermerBuff {
   count_t *counts;
 };
 
+// Bytes used per element:
+// k = 21: 8+20 = 28
+// k = 33, 55: 16+20 = 36
+// k = 77: 24+20 = 44
+// k = 99: 32+20 = 52
 template <int MAX_K>
 struct KmerCountsMap {
   // Arrays for keys and values. They are separate because the keys get initialized with max number and the vals with zero
