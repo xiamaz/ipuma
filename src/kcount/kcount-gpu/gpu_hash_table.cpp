@@ -415,7 +415,7 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
         // not found in the hash table - look in the qf
         quotient_filter::qf_returns qf_insert_result = quotient_filter::QF_ITEM_FOUND;
         qf_insert_result =
-            quotient_filter::insert_kmer_not_exists(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext);
+            quotient_filter::insert_kmer(qf, hash_val, left_ext, right_ext, prev_left_ext, prev_right_ext);
         if (qf_insert_result == quotient_filter::QF_ITEM_INSERTED) {
           num_unique_qf++;
           assert(prev_left_ext == '0' && prev_right_ext == '0');
