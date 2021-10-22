@@ -187,7 +187,7 @@ __global__ void gpu_compact_ht(KmerCountsMap<MAX_K> elems, KmerExtsMap<MAX_K> co
       auto start_slot = slot;
       // we set a constraint on the max probe to track whether we are getting excessive collisions and need a bigger default
       // compact table
-      const int MAX_PROBE = (compact_elems.capacity < 200 ? compact_elems.capacity : 200);
+      const int MAX_PROBE = (compact_elems.capacity < KCOUNT_HT_MAX_PROBE ? compact_elems.capacity : KCOUNT_HT_MAX_PROBE);
       // look for empty slot in compact hash table
       for (int j = 0; j < MAX_PROBE; j++) {
         uint64_t old_key =
@@ -488,17 +488,30 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
   this->kmer_len = kmer_len;
   pass_type = READ_KMERS_PASS;
   gpu_utils::set_gpu_device(upcxx_rank_me);
-  int nbits_qf = ceil(log2(max_elems * 5));
+  dstate = new HashTableDriverState();
+  dstate->qf = nullptr;
+  // max ratio of singletons to dups
+  uint64_t max_elems_qf = max_elems * 5;
+  int nbits_qf = log2(max_elems_qf);
+  if (nbits_qf == 0) use_qf = false;
   if (use_qf) {
     qf_bytes_used = quotient_filter::qf_estimate_memory(nbits_qf);
-    if (qf_bytes_used > gpu_avail_mem / 4) {
+    double qf_avail_mem = gpu_avail_mem / 5;
+    if (!upcxx_rank_me)
+      cout << "QF nbits " << nbits_qf << " qf_avail_mem " << qf_avail_mem << " qf bytes used " << qf_bytes_used << "\n" ; 
+    if (qf_bytes_used > qf_avail_mem) {
       // For debugging OOMs
       // size_t prev_bytes_used = qf_bytes_used;
       // int prev_nbits = nbits_qf;
-      double factor = (double)(gpu_avail_mem / 4) / qf_bytes_used;
-      size_t corrected_max_elems = (5 * max_elems * factor);
-      nbits_qf = ceil(log2(corrected_max_elems));
+      double factor = qf_avail_mem / qf_bytes_used;
+      size_t corrected_max_elems = (max_elems_qf * factor);
+      nbits_qf = log2(corrected_max_elems) - 1;
+      // drop bits further for really long kmers because the space requirements for the qf relative to the ht go down
+      if (kmer_len >= 96) nbits_qf--;
+      if (nbits_qf == 0) nbits_qf = 1;
       qf_bytes_used = quotient_filter::qf_estimate_memory(nbits_qf);
+      if (!upcxx_rank_me)
+        cout << "Corrected: QF nbits " << nbits_qf << " qf bytes used " << qf_bytes_used << "\n" ; 
       /*
       // uncomment to debug if crashing with OOM when allocating
       cout << "****** QF nbits corrected to " << nbits_qf << " from " << prev_nbits << "\n";
@@ -506,14 +519,16 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
            << "MB\n";
       */
     }
+    quotient_filter::qf_malloc_device(&(dstate->qf), nbits_qf);
   }
+
   // now check that we have sufficient memory for the required capacity
   size_t elem_buff_size = KCOUNT_GPU_HASHTABLE_BLOCK_SIZE * (1 + sizeof(count_t)) * 1.5;
   size_t elem_size = sizeof(KmerArray<MAX_K>) + sizeof(CountsArray);
-  gpu_bytes_reqd = (max_elems * elem_size) / 0.8 + elem_buff_size + qf_bytes_used;
+  gpu_bytes_reqd = (max_elems * elem_size) + elem_buff_size + qf_bytes_used;
   // save 1/5 of avail gpu memory for possible ctg kmers and compact hash table
   // set capacity to max avail remaining from gpu memory - more slots means lower load
-  auto max_slots = 0.8 * (gpu_avail_mem - elem_buff_size - qf_bytes_used) / elem_size;
+  auto max_slots = (use_qf ? 0.6 : 0.8) * (gpu_avail_mem - elem_buff_size - qf_bytes_used) / elem_size;
   // find the first prime number lower than this value
   primes::Prime prime;
   prime.set(min((size_t)max_slots, (size_t)(max_elems * 3)), false);
@@ -536,13 +551,7 @@ void HashTableGPUDriver<MAX_K>::init(int upcxx_rank_me, int upcxx_rank_n, int km
 
   cudaErrchk(cudaMalloc(&gpu_insert_stats, sizeof(InsertStats)));
   cudaErrchk(cudaMemset(gpu_insert_stats, 0, sizeof(InsertStats)));
-
-  dstate = new HashTableDriverState();
-  if (use_qf)
-    quotient_filter::qf_malloc_device(&(dstate->qf), nbits_qf);
-  else
-    dstate->qf = nullptr;
-
+  
   init_timer.stop();
   init_time = init_timer.get_elapsed();
 }
@@ -746,6 +755,11 @@ int64_t HashTableGPUDriver<MAX_K>::get_capacity() {
     return read_kmers_dev.capacity;
   else
     return ctg_kmers_dev.capacity;
+}
+
+template <int MAX_K>
+int64_t HashTableGPUDriver<MAX_K>::get_final_capacity() {
+  return read_kmers_dev.capacity;
 }
 
 template <int MAX_K>

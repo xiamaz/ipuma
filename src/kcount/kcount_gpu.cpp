@@ -199,7 +199,7 @@ void HashTableInserter<MAX_K>::init(int max_elems, bool use_qf) {
   int bytes_for_pnp = KCOUNT_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
   size_t gpu_bytes_reqd = 0, ht_bytes_used = 0, qf_bytes_used = 0;
   auto init_gpu_mem = gpu_utils::get_gpu_avail_mem();
-  auto gpu_avail_mem_per_rank = (get_avail_gpu_mem_per_rank() - bytes_for_pnp) * 0.8;
+  auto gpu_avail_mem_per_rank = (get_avail_gpu_mem_per_rank() - bytes_for_pnp) * 0.9;
   SLOG_GPU("Available GPU memory per rank for kmers hash table is ", get_size_str(gpu_avail_mem_per_rank), "\n");
   assert(state != nullptr);
   state->ht_gpu_driver.init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), max_elems, gpu_avail_mem_per_rank, init_time, gpu_bytes_reqd,
@@ -207,7 +207,7 @@ void HashTableInserter<MAX_K>::init(int max_elems, bool use_qf) {
   auto capacity = state->ht_gpu_driver.get_capacity();
   SLOG_GPU("GPU read kmers hash table has capacity per rank of ", capacity, " for ", (int64_t)max_elems, " elements\n");
   SLOG_GPU("Using ", get_size_str(ht_bytes_used), " for the GPU hash table and ", get_size_str(qf_bytes_used), " for the QF\n");
-  if (capacity < max_elems * 0.8)
+  if (capacity < max_elems)
     SLOG_VERBOSE("GPU read kmers hash table has less than requested capacity: ", perc_str(capacity, max_elems),
                  "; full capacity requires ", get_size_str(gpu_bytes_reqd), " memory on GPU but only have ",
                  get_size_str(gpu_avail_mem_per_rank), "\n");
@@ -311,11 +311,11 @@ void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<M
   if (num_dropped)
     WARN("GPU dropped ", num_dropped, " entries out of ", num_entries, " when compacting to output hash table" KNORM "\n");
 
-  auto all_capacity = reduce_one((uint64_t)state->ht_gpu_driver.get_capacity(), op_fast_add, 0).wait();
+  auto all_capacity = reduce_one((uint64_t)state->ht_gpu_driver.get_final_capacity(), op_fast_add, 0).wait();
   auto all_num_purged = reduce_one((uint64_t)num_purged, op_fast_add, 0).wait();
   auto all_num_entries = reduce_one((uint64_t)num_entries, op_fast_add, 0).wait();
   auto prepurge_num_entries = all_num_entries + all_num_purged;
-  SLOG_GPU("GPU read kmers hash table: purged ", perc_str(all_num_purged, prepurge_num_entries), " singleton kmers out of ",
+  SLOG_GPU("GPU hash table: purged ", perc_str(all_num_purged, prepurge_num_entries), " singleton kmers out of ",
            prepurge_num_entries, "\n");
   SLOG_GPU("GPU hash table final size is ", all_num_entries, " entries and final load factor is ",
            ((double)all_num_entries / all_capacity), "\n");

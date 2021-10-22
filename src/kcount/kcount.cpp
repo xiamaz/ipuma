@@ -117,7 +117,8 @@ static void add_ctg_kmers(unsigned kmer_len, unsigned prev_kmer_len, Contigs &ct
     if (ctg.seq.length() > kmer_len) max_kmers += ctg.seq.length() - kmer_len + 1;
   }
   int64_t all_max_kmers = reduce_all(max_kmers, op_fast_add).wait();
-  kmer_dht->init_ctg_kmers(all_max_kmers / rank_n());
+  // increase max kmers to allow for load factor 0.67
+  kmer_dht->init_ctg_kmers(1.5 * all_max_kmers / rank_n());
   barrier();
   DBG("after kmer_dht->init_ctg_kmers\n");
   DBG("looping over ", ctgs.size(), " ctgs\n");

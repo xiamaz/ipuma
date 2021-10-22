@@ -170,6 +170,8 @@ class HashTableGPUDriver {
 
   int64_t get_capacity();
 
+  int64_t get_final_capacity();
+  
   InsertStats &get_stats();
 
   int get_num_gpu_calls();

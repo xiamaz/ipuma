@@ -149,8 +149,9 @@ KmerDHT<MAX_K>::KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max
     num_inserts++;
     ht_inserter->insert_supermer(supermer.seq, supermer.count);
   });
-  my_adjusted_num_kmers *= 4;
-  ht_inserter->init(my_adjusted_num_kmers, use_qf);
+  // this is conservative, actually varies from around 1/2 to 1/5
+  if (use_qf) my_num_kmers *= 0.6;
+  ht_inserter->init(my_num_kmers, use_qf);
   barrier();
 }
 
