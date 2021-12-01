@@ -93,6 +93,7 @@ if(ENABLE_CUDA)
   endif()
 
   enable_language(CUDA)
+  set(MHM2_MIN_CUDA_ARCH 70)
 
   if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.18)
     if(NOT CMAKE_CUDA_ARCHITECTURES)
@@ -105,10 +106,6 @@ if(ENABLE_CUDA)
       message(
         STATUS "Autodetect CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}"
       )
-      # if(CUDA_VERSION VERSION_GREATER_EQUAL 11.0) set(CMAKE_CUDA_ARCHITECTURES
-      # 35 50 60 70 80) elseif(CUDA_VERSION VERSION_GREATER_EQUAL 10.0)
-      # set(CMAKE_CUDA_ARCHITECTURES 30 35 50 60 70) else()
-      # set(CMAKE_CUDA_ARCHITECTURES 30 35 50 60 70) endif()
     endif()
     message(STATUS "Using CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}")
   else()
@@ -116,8 +113,14 @@ if(ENABLE_CUDA)
     cuda_select_nvcc_arch_flags(ARCH_FLAGS_LIST)
     if(ARCH_FLAGS_LIST)
       string(REPLACE ";" " " ARCH_FLAGS "${ARCH_FLAGS_LIST}")
+      message("Found ARCH_FLAGS_LIST: ${ARCH_FLAGS_LIST}")
+      message("Found CUDA_GPU_DETECT_OUTPUT: ${CUDA_GPU_DETECT_OUTPUT}")
+      if(NOT CMAKE_CUDA_ARCHITECTURES)
+        string(REPLACE "." "" CMAKE_CUDA_ARCHITECTURES
+                       "${CUDA_GPU_DETECT_OUTPUT}")
+      endif()
     else()
-      foreach(_CMAKE_CUDA_COMPUTE_CAPABILITY 35 50 60 70 80)
+      foreach(_CMAKE_CUDA_COMPUTE_CAPABILITY 70 80)
         set(ARCH_FLAGS
             "${ARCH_FLAGS} -gencode arch=compute_${_CMAKE_CUDA_COMPUTE_CAPABILITY},code=sm_${_CMAKE_CUDA_COMPUTE_CAPABILITY}"
         )
@@ -140,6 +143,15 @@ if(ENABLE_CUDA)
     endif()
     message(STATUS "ARCH_FLAGS=${ARCH_FLAGS}")
   endif()
+
+  foreach(test_cuda_arch ${CMAKE_CUDA_ARCHITECTURES})
+    if(${test_cuda_arch} LESS ${MHM2_MIN_CUDA_ARCH})
+      message(
+        FATAL_ERROR
+          "CUDA architecture ${test_cuda_arch} is incompatible with the minimum ${MHM2_MIN_CUDA_ARCH}.  Try compiling without cuda: -DENABLE_CUDA=OFF"
+      )
+    endif()
+  endforeach()
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
@@ -203,8 +215,6 @@ foreach(
   options
   merge_reads
   dbjg_traversal
-  spanner
-  splinter
   histogrammer
   aln_depths
   shuffle_reads

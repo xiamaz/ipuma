@@ -194,7 +194,7 @@ double Options::setup_output_dir() {
           std::string_view s(buf);
           if (s.find("OST:") != string::npos) num_osts++;
         }
-        fclose(f_osts);
+        pclose(f_osts);
       }
       // reduce to the minimum of 90% or rank_n()
       num_osts = std::min(9 * num_osts / 10, std::min((int)72, (int)rank_n()));  // see Issue #70
