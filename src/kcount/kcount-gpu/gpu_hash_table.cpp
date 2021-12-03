@@ -333,21 +333,23 @@ __global__ void gpu_insert_supermer_block(KmerCountsMap<MAX_K> elems, SupermerBu
       auto start_slot = slot;
       const int MAX_PROBE = (elems.capacity < 200 ? elems.capacity : 200);
       bool found_slot = false;
-      uint64_t old_key = KEY_TRANSITION;
       for (int j = 0; j < MAX_PROBE; j++) {
+        uint64_t old_key = KEY_TRANSITION;
+        // we have to be careful here not to end up with multiple threads on the same warp accessing the same slot, because
+        // that will cause a deadlock. So we loop over all statements in each CAS spin to ensure that all threads get a
+        // chance to execute
         do {
           old_key = atomicCAS((unsigned long long *)&(elems.keys[slot].longs[N_LONGS - 1]), KEY_EMPTY, KEY_TRANSITION);
-        } while (old_key == KEY_TRANSITION);
-        if (old_key == KEY_EMPTY) {
-          kmer_set(elems.keys[slot], kmer);
-          found_slot = true;
-          break;
-        } else if (old_key == kmer.longs[N_LONGS - 1]) {
-          if (kmers_equal(elems.keys[slot], kmer)) {
-            found_slot = true;
-            break;
+          if (old_key != KEY_TRANSITION) {
+            if (old_key == KEY_EMPTY) {
+              kmer_set(elems.keys[slot], kmer);
+              found_slot = true;
+            } else if (old_key == kmer.longs[N_LONGS - 1]) {
+              if (kmers_equal(elems.keys[slot], kmer)) found_slot = true;
+            }
           }
-        }
+        } while (old_key == KEY_TRANSITION);
+        if (found_slot) break;
         // quadratic probing - worse cache but reduced clustering
         slot = (start_slot + j * j) % elems.capacity;
         // this entry didn't get inserted because we ran out of probing time (and probably space)
@@ -507,10 +509,8 @@ void HashTableGPUDriver<MAX_K>::insert_supermer_block() {
   get_kernel_config(buff_len, gpu_unpack_supermer_block, gridsize, threadblocksize);
   gpu_unpack_supermer_block<<<gridsize, threadblocksize>>>(unpacked_elem_buff_dev, packed_elem_buff_dev, buff_len);
   get_kernel_config(buff_len * 2, gpu_insert_supermer_block<MAX_K>, gridsize, threadblocksize);
-  //if (upcxx_rank_me == 0) printf("insert supermer gridsize %d threadblocksize %d\n", gridsize, threadblocksize);
-  gridsize = gridsize * threadblocksize;
-  threadblocksize = 1;
-  //if (upcxx_rank_me == 0) printf("insert supermer gridsize %d threadblocksize %d\n", gridsize, threadblocksize);
+  //gridsize = gridsize * threadblocksize;
+  //threadblocksize = 1;
   gpu_insert_supermer_block<<<gridsize, threadblocksize>>>(is_ctg_kmers ? ctg_kmers_dev : read_kmers_dev, unpacked_elem_buff_dev,
                                                            buff_len * 2, kmer_len, is_ctg_kmers, gpu_insert_stats);
   // the kernel time is not going to be accurate, because we are not waiting for the kernel to complete
