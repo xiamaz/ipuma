@@ -1555,6 +1555,7 @@ __host__ uint64_t qf_estimate_memory(int nbits) {
 
 #ifdef DEBUG
   uint64_t key_remainder_bits = QF_BITS_PER_REMAINDER;
+  assert(key_remainder_bits >= 2);
   uint64_t value_bits = QF_BITS_PER_VALUE;
   uint64_t bits_per_slot;
 #endif
@@ -1568,8 +1569,6 @@ __host__ uint64_t qf_estimate_memory(int nbits) {
   // num_slots = nslots;
   xnslots = nslots + 10 * sqrt((double)nslots);
   nblocks = (xnslots + QF_SLOTS_PER_BLOCK - 1) / QF_SLOTS_PER_BLOCK;
-
-  assert(key_remainder_bits >= 2);
 
 #ifdef DEBUG
   bits_per_slot = key_remainder_bits + value_bits;
