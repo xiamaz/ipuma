@@ -224,4 +224,11 @@ inline __device__ void atomicAddUint16_thres(uint16_t *address, uint16_t val, ui
   if (atomicAddUint16(address, 0) < thres - val) atomicAddUint16(address, val);
 }
 
+inline __device__ short atomicAndUint16(uint16_t *address, uint16_t val) {
+  unsigned int *base_address = (unsigned int *)((char *)address - ((size_t)address & 2));
+  int shift = ((size_t)address & 2) << 3;
+  unsigned int long_val = ((unsigned int)val << shift) | (0xffff0000u >> shift);
+  return (atomicAnd(base_address, long_val) >> shift) & 0xffff;
+}
+
 }  // namespace gpu_common
