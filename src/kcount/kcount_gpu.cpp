@@ -152,12 +152,12 @@ template <int MAX_K>
 void SeqBlockInserter<MAX_K>::done_processing(dist_object<KmerDHT<MAX_K>> &kmer_dht) {
   if (kmer_dht->using_ctg_kmers) {
     DBG("in done_processing with seq_block empty? ", state->seq_block.empty(), "\n");
-    //WARN("in done_processing with seq_block empty? ", state->seq_block.empty(), "\n");
+    // WARN("in done_processing with seq_block empty? ", state->seq_block.empty(), "\n");
   }
   if (!state->seq_block.empty()) process_block(this, kmer_dht);
   if (kmer_dht->using_ctg_kmers) {
     DBG("done_processing\n");
-    //WARN("done_processing\n");
+    // WARN("done_processing\n");
   }
   barrier();
   SLOG_GPU("GPU Parse-N-Pack stats:\n");
@@ -191,24 +191,26 @@ HashTableInserter<MAX_K>::~HashTableInserter() {
 }
 
 template <int MAX_K>
-void HashTableInserter<MAX_K>::init(int max_elems) {
+void HashTableInserter<MAX_K>::init(int max_elems, bool use_qf) {
+  this->use_qf = use_qf;
   state = new HashTableInserterState();
   double init_time;
   // calculate total slots for hash table. Reserve space for parse and pack
   int bytes_for_pnp = KCOUNT_SEQ_BLOCK_SIZE * (2 + Kmer<MAX_K>::get_N_LONGS() * sizeof(uint64_t) + sizeof(int));
-  size_t gpu_bytes_reqd;
+  size_t gpu_bytes_reqd = 0, ht_bytes_used = 0, qf_bytes_used = 0;
   auto init_gpu_mem = gpu_utils::get_gpu_avail_mem();
-  auto gpu_avail_mem_per_rank = (get_avail_gpu_mem_per_rank() - bytes_for_pnp) * 0.95;
+  auto gpu_avail_mem_per_rank = (get_avail_gpu_mem_per_rank() - bytes_for_pnp) * 0.9;
   SLOG_GPU("Available GPU memory per rank for kmers hash table is ", get_size_str(gpu_avail_mem_per_rank), "\n");
   assert(state != nullptr);
-  state->ht_gpu_driver.init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), max_elems, gpu_avail_mem_per_rank, init_time,
-                            gpu_bytes_reqd);
+  state->ht_gpu_driver.init(rank_me(), rank_n(), Kmer<MAX_K>::get_k(), max_elems, gpu_avail_mem_per_rank, init_time, gpu_bytes_reqd,
+                            ht_bytes_used, qf_bytes_used, use_qf);
   auto capacity = state->ht_gpu_driver.get_capacity();
   SLOG_GPU("GPU read kmers hash table has capacity per rank of ", capacity, " for ", (int64_t)max_elems, " elements\n");
-  if (capacity < max_elems * 0.8)
+  SLOG_GPU("Using ", get_size_str(ht_bytes_used), " for the GPU hash table and ", get_size_str(qf_bytes_used), " for the QF\n");
+  if (capacity < max_elems)
     SLOG_VERBOSE("GPU read kmers hash table has less than requested capacity: ", perc_str(capacity, max_elems),
                  "; full capacity requires ", get_size_str(gpu_bytes_reqd), " memory on GPU but only have ",
-                 get_size_str(gpu_avail_mem_per_rank));
+                 get_size_str(gpu_avail_mem_per_rank), "\n");
   SLOG_GPU("Initialized hash table GPU driver in ", fixed, setprecision(3), init_time, " s\n");
   auto gpu_used_mem = init_gpu_mem - gpu_utils::get_gpu_avail_mem();
   SLOG_GPU("GPU read kmers hash table used ", get_size_str(gpu_used_mem), " memory on GPU out of ",
@@ -219,19 +221,15 @@ template <int MAX_K>
 void HashTableInserter<MAX_K>::init_ctg_kmers(int max_elems) {
   assert(state != nullptr);
   auto init_gpu_mem = gpu_utils::get_gpu_avail_mem();
-  DBG("init gpu mem ", init_gpu_mem, "\n");
   // we don't need to reserve space for either pnp or the read kmers because those have already reduced the gpu_avail_mem
   auto gpu_avail_mem_per_rank = get_avail_gpu_mem_per_rank();
-  DBG("avail per rank ", gpu_avail_mem_per_rank, "\n");
   SLOG_GPU("Available GPU memory per rank for ctg kmers hash table is ", get_size_str(gpu_avail_mem_per_rank), "\n");
   state->ht_gpu_driver.init_ctg_kmers(max_elems, gpu_avail_mem_per_rank);
-  DBG("after ht_gpu_driver_init\n");
   SLOG_GPU("GPU ctg kmers hash table has capacity per rank of ", state->ht_gpu_driver.get_capacity(), " for ", fixed, max_elems,
            " elements\n");
   auto gpu_used_mem = init_gpu_mem - gpu_utils::get_gpu_avail_mem();
   SLOG_GPU("GPU ctg kmers hash table used ", get_size_str(gpu_used_mem), " memory on GPU out of ",
            get_size_str(gpu_utils::get_gpu_tot_mem()), "\n");
-  DBG("gpu used mem ", gpu_used_mem, "\n");
 }
 
 template <int MAX_K>
@@ -254,6 +252,7 @@ void HashTableInserter<MAX_K>::flush_inserts() {
   auto insert_stats = state->ht_gpu_driver.get_stats();
   uint64_t num_dropped_elems = reduce_one((uint64_t)insert_stats.dropped, op_fast_add, 0).wait();
   uint64_t num_attempted_inserts = reduce_one((uint64_t)insert_stats.attempted, op_fast_add, 0).wait();
+  uint64_t num_inserts = reduce_one((uint64_t)insert_stats.new_inserts, op_fast_add, 0).wait();
   uint64_t capacity = state->ht_gpu_driver.get_capacity();
   uint64_t all_capacity = reduce_one(capacity, op_fast_add, 0).wait();
   if (num_dropped_elems) {
@@ -264,13 +263,11 @@ void HashTableInserter<MAX_K>::flush_inserts() {
       SLOG_GPU("  failed to insert ", perc_str(num_dropped_elems, num_attempted_inserts), " elements; capacity ", all_capacity,
                "\n");
   }
-  uint64_t key_empty_overlaps = reduce_one((uint64_t)insert_stats.key_empty_overlaps, op_fast_add, 0).wait();
-  if (key_empty_overlaps) {
-    if (key_empty_overlaps > num_attempted_inserts / 10000)
-      SWARN("GPU hash table: dropped ", perc_str(key_empty_overlaps, num_attempted_inserts),
-            " kmers with longs equal to KEY_EMPTY");
-    else
-      SLOG_GPU("  dropped ", perc_str(key_empty_overlaps, num_attempted_inserts), " kmers with longs equal to KEY_EMPTY\n");
+  if (use_qf && state->ht_gpu_driver.pass_type == kcount_gpu::READ_KMERS_PASS) {
+    uint64_t num_unique_qf = reduce_one((uint64_t)insert_stats.num_unique_qf, op_fast_add, 0).wait();
+    // SLOG_GPU("  QF found ", perc_str(num_unique_qf, num_inserts), " unique kmers ", num_inserts, "\n");
+    SLOG_GPU("  QF filtered out ", perc_str(num_unique_qf - num_inserts, num_unique_qf), " singletons\n");
+    SLOG_GPU("  QF load factor ", state->ht_gpu_driver.get_qf_load_factor(), "\n");
   }
   double load = (double)(insert_stats.new_inserts) / capacity;
   double avg_load_factor = reduce_one(load, op_fast_add, 0).wait() / rank_n();
@@ -313,11 +310,12 @@ void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<M
   barrier();
   if (num_dropped)
     WARN("GPU dropped ", num_dropped, " entries out of ", num_entries, " when compacting to output hash table" KNORM "\n");
-  auto all_capacity = reduce_one((uint64_t)state->ht_gpu_driver.get_capacity(), op_fast_add, 0).wait();
+
+  auto all_capacity = reduce_one((uint64_t)state->ht_gpu_driver.get_final_capacity(), op_fast_add, 0).wait();
   auto all_num_purged = reduce_one((uint64_t)num_purged, op_fast_add, 0).wait();
   auto all_num_entries = reduce_one((uint64_t)num_entries, op_fast_add, 0).wait();
   auto prepurge_num_entries = all_num_entries + all_num_purged;
-  SLOG_GPU("GPU read kmers hash table: purged ", perc_str(all_num_purged, prepurge_num_entries), " singleton kmers out of ",
+  SLOG_GPU("GPU hash table: purged ", perc_str(all_num_purged, prepurge_num_entries), " singleton kmers out of ",
            prepurge_num_entries, "\n");
   SLOG_GPU("GPU hash table final size is ", all_num_entries, " entries and final load factor is ",
            ((double)all_num_entries / all_capacity), "\n");
@@ -371,7 +369,9 @@ void HashTableInserter<MAX_K>::insert_into_local_hashtable(dist_object<KmerMap<M
   auto avg_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_add, 0).wait() / rank_n();
   auto max_gpu_kernel_time = reduce_one(gpu_kernel_time, op_fast_max, 0).wait();
   SLOG_GPU("Elapsed GPU time for kmer hash tables:\n");
-  SLOG_GPU("  insert: ", fixed, setprecision(3), avg_gpu_insert_time, " avg, ", max_gpu_insert_time, " max\n");
+  double load_balance = (double)avg_gpu_insert_time / max_gpu_insert_time;
+  SLOG_GPU("  insert: ", fixed, setprecision(3), (load_balance < 0.5 ? KLRED : ""), avg_gpu_insert_time, " avg, ",
+           max_gpu_insert_time, " max, load balance ", load_balance, KNORM, "\n");
   SLOG_GPU("  kernel: ", fixed, setprecision(3), avg_gpu_kernel_time, " avg, ", max_gpu_kernel_time, " max\n");
   barrier();
 }

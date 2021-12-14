@@ -96,12 +96,13 @@ template <int MAX_K>
 class HashTableInserter {
   struct HashTableInserterState;
   HashTableInserterState *state = nullptr;
+  bool use_qf;
 
  public:
   HashTableInserter();
   ~HashTableInserter();
 
-  void init(int num_elems);
+  void init(int num_elems, bool use_qf);
 
   void init_ctg_kmers(int max_elems);
 
@@ -130,8 +131,8 @@ class KmerDHT {
 
  public:
   bool using_ctg_kmers = false;
-  
-  KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS);
+
+  KmerDHT(uint64_t my_num_kmers, int max_kmer_store_bytes, int max_rpcs_in_flight, bool useHHSS, bool use_qf);
 
   void clear_stores();
 
@@ -169,4 +170,3 @@ class KmerDHT {
 
   int32_t get_time_offset_us();
 };
-

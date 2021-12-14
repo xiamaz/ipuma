@@ -79,6 +79,11 @@ struct SupermerBuff {
   count_t *counts;
 };
 
+// Bytes used per element:
+// k = 21: 8+20 = 28
+// k = 33, 55: 16+20 = 36
+// k = 77: 24+20 = 44
+// k = 99: 32+20 = 52
 template <int MAX_K>
 struct KmerCountsMap {
   // Arrays for keys and values. They are separate because the keys get initialized with max number and the vals with zero
@@ -105,7 +110,7 @@ struct InsertStats {
   unsigned int dropped = 0;
   unsigned int attempted = 0;
   unsigned int new_inserts = 0;
-  unsigned int key_empty_overlaps = 0;
+  unsigned int num_unique_qf = 0;
 };
 
 template <int MAX_K>
@@ -147,7 +152,7 @@ class HashTableGPUDriver {
   ~HashTableGPUDriver();
 
   void init(int upcxx_rank_me, int upcxx_rank_n, int kmer_len, int max_elems, size_t gpu_avail_mem, double &init_time,
-            size_t &gpu_bytes_reqd);
+            size_t &gpu_bytes_reqd, size_t &ht_bytes_used, size_t &qf_bytes_used, bool use_qf);
 
   void init_ctg_kmers(int max_elems, size_t gpu_avail_mem);
 
@@ -165,9 +170,13 @@ class HashTableGPUDriver {
 
   int64_t get_capacity();
 
+  int64_t get_final_capacity();
+  
   InsertStats &get_stats();
 
   int get_num_gpu_calls();
+
+  double get_qf_load_factor();
 };
 
 }  // namespace kcount_gpu
