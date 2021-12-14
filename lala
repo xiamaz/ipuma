@@ -1,0 +1,35 @@
+Start
+run kernel
+tid 0 trying to get lock
+tid 1 trying to get lock
+tid 2 trying to get lock
+tid 3 trying to get lock
+tid 4 trying to get lock
+tid 5 trying to get lock
+tid 6 trying to get lock
+tid 7 trying to get lock
+tid 8 trying to get lock
+tid 9 trying to get lock
+tid 10 trying to get lock
+tid 11 trying to get lock
+tid 12 trying to get lock
+tid 13 trying to get lock
+tid 14 trying to get lock
+tid 15 trying to get lock
+tid 16 trying to get lock
+tid 17 trying to get lock
+tid 18 trying to get lock
+tid 19 trying to get lock
+tid 20 trying to get lock
+tid 21 trying to get lock
+tid 22 trying to get lock
+tid 23 trying to get lock
+tid 24 trying to get lock
+tid 25 trying to get lock
+tid 26 trying to get lock
+tid 27 trying to get lock
+tid 28 trying to get lock
+tid 29 trying to get lock
+tid 30 trying to get lock
+tid 31 trying to get lock
+tid 0 got lock 0
