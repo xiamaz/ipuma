@@ -41,6 +41,18 @@ else()
       PARENT_SCOPE)
 endif()
 
+if(ENABLE_POPLAR)
+  add_subdirectory(ipuma-sw)
+  add_library(IPUMA_LIBRARY OBJECT "ipuma-sw/popinit.cpp")
+
+  target_link_libraries(IPUMA_LIBRARY poplar popops poputil)
+
+  add_dependencies(IPUMA_LIBRARY  algoipu.gp_codelets)
+
+  # include_directories("ipuma-sw")
+  # add_subdirectory(ipuma-sw)
+endif()
+
 add_library(KLIGN_LIBRARY ${KLIGN_TARGET_FILES} ${KLIGN_TARGET_OBJECTS})
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
@@ -53,4 +65,4 @@ if(ENABLE_CUDA)
 endif()
 
 target_link_libraries(KLIGN_LIBRARY ${MHM2_LINK_LIBRARIES} ${UPCXX_LIBRARIES}
-                      ${UPCXX_UTILS_LIBRARIES})
+                      ${UPCXX_UTILS_LIBRARIES} IPUMA_LIBRARY)
