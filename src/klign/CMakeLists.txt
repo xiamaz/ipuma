@@ -29,6 +29,16 @@ if(ENABLE_CUDA)
   set(KLIGN_TARGET_OBJECTS
       ${KLIGN_TARGET_OBJECTS}
       PARENT_SCOPE)
+elseif(ENABLE_POPLAR)
+  set(tgt block_align_ipu)
+  add_library(${tgt} OBJECT ${tgt}.cpp)
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12)
+    target_link_libraries(${tgt} ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+  endif()
+  list(APPEND KLIGN_TARGET_OBJECTS $<TARGET_OBJECTS:${tgt}>)
+  set(KLIGN_TARGET_OBJECTS
+      ${KLIGN_TARGET_OBJECTS}
+      PARENT_SCOPE)
 else()
   set(tgt block_align_cpu)
   add_library(${tgt} OBJECT ${tgt}.cpp)
@@ -41,20 +51,20 @@ else()
       PARENT_SCOPE)
 endif()
 
+add_library(KLIGN_LIBRARY ${KLIGN_TARGET_FILES} ${KLIGN_TARGET_OBJECTS})
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 if(ENABLE_POPLAR)
   add_subdirectory(ipuma-sw)
-  add_library(IPUMA_LIBRARY "ipuma-sw/popinit.cpp")
+  add_library(IPUMA_LIBRARY "ipuma-sw/popinit.cpp" "ipuma-sw/matrix.cpp" "ipuma-sw/similarity.cpp" "ipuma-sw/encoding.cpp")
 
   target_link_libraries(IPUMA_LIBRARY poplar popops poputil)
 
   add_dependencies(IPUMA_LIBRARY  algoipu.gp_codelets)
 
-  set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} IPUMA_LIBRARY)
+  set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} IPUMA_LIBRARY poplar)
 endif()
-
-add_library(KLIGN_LIBRARY ${KLIGN_TARGET_FILES} ${KLIGN_TARGET_OBJECTS})
-
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 if(ENABLE_CUDA)
   set_property(TARGET KLIGN_LIBRARY PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF)

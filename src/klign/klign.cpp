@@ -356,7 +356,6 @@ class Aligner {
     // ctg_cache.set_invalid_key(std::numeric_limits<cid_t>::max());
     ctg_cache.reserve(2 * all_num_ctgs / rank_n());
     init_aligner(cpu_aligner.aln_scoring, rlen_limit);
-    mainx();
   }
 
   ~Aligner() {
