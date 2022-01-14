@@ -1,3 +1,7 @@
+# iPuma is an experimental hardware accelerator extension of MetaHipMer2 #
+
+
+---
 # MetaHipMer2 - MHM2 #
 
 [MetaHipMer (*MHM*)](https://sites.google.com/lbl.gov/exabiome/downloads?authuser=0) is a *de novo* metagenome short-read assembler. This is version 2 (MHM2), which is written entirely in
