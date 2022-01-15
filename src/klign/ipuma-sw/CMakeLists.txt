@@ -3,6 +3,7 @@ add_gp_library(
   ASM_SOURCES
   CPP_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/codelets/sw.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/codelets/codelet_batch_affine.cpp
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/codelets/helper.hpp
 )
