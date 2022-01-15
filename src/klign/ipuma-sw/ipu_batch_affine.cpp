@@ -17,7 +17,7 @@ namespace ipu { namespace batchaffine {
 /**
  * Streamable IPU graph for SW
  */
-std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles, unsigned long bufSize, const std::string& format,
+std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles, unsigned long bufSize, unsigned long maxNPerTile, const std::string& format,
                                          const swatlib::Matrix<int8_t> similarityData) {
   program::Sequence prog;
   program::Sequence initProg;
