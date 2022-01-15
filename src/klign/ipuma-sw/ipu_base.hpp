@@ -26,12 +26,12 @@ using namespace poplar;
 namespace ipu {
 
 struct SWConfig {
-	int gapInit = 1;
-	int gapExtend = 1;
-	int matchValue = 2;
-	int mismatchValue = -2;
-	swatlib::Similarity similarity = swatlib::Similarity::simple;
-	swatlib::DataType datatype = swatlib::DataType::string;
+        int gapInit = 1;
+        int gapExtend = 1;
+        int matchValue = 2;
+        int mismatchValue = -2;
+        swatlib::Similarity similarity = swatlib::Similarity::simple;
+        swatlib::DataType datatype = swatlib::DataType::string;
 };
 
 Type formatToType(const std::string& format) {
@@ -119,13 +119,13 @@ inline int extractScoreSW(Engine& engine, const std::string& sA, const std::stri
 
 class IPUAlgorithm {
 protected:
-		SWConfig config;
+                SWConfig config;
 
-		IPUContext& context;
-    std::unique_ptr<Engine> engine;
-    int activeTiles, bufSize;
+                IPUContext& context;
+                std::unique_ptr<Engine> engine;
+                int activeTiles, bufSize;
 public:
-    IPUAlgorithm(SWConfig config, int bufSize = 10001, int activeTiles = 1472) : config(config), activeTiles(activeTiles), bufSize(bufSize), context(IPUContext::getInstance()){
+    IPUAlgorithm(SWConfig config, IPUContext &ctx, int bufSize = 10001, int activeTiles = 1472) : config(config), activeTiles(activeTiles), bufSize(bufSize), context(ctx) {
     }
 
     /**

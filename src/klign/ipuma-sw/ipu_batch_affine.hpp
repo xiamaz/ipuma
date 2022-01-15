@@ -91,7 +91,7 @@ class SWAlgorithm : public IPUAlgorithm {
 protected:
     std::string format;
 public:
-    SWAlgorithm(SWConfig config, int bufSize = 10001, int activeTiles = 1472) : IPUAlgorithm(config, activeTiles, bufSize) {
+    SWAlgorithm(SWConfig config, IPUContext &ctx, int bufSize = 10001, int activeTiles = 1472) : IPUAlgorithm(config, ctx, activeTiles, bufSize) {
         auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
 
         Graph graph = createGraph();
