@@ -65,8 +65,6 @@ public:
     poplar::Output<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> BRange;
 
     bool compute() {
-        memset(&(C[0]), 0, bufSize * sizeof(int));
-        memset(&(bG[0]), 0, bufSize * sizeof(int));
 
         int gI = *gapInit;
         int gE = *gapExt;
@@ -83,6 +81,9 @@ public:
             auto a_len = Alen[n];
             auto b_len = Blen[n];
             if (a_len == 0 || b_len == 0) break;
+
+            memset(&(C[0]), 0, bufSize * sizeof(int));
+            memset(&(bG[0]), 0, bufSize * sizeof(int));
 
             // forward pass
             for (int i = 0; i < b_len; ++i) {
