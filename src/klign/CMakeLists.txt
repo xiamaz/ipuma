@@ -57,11 +57,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 if(ENABLE_POPLAR)
   add_subdirectory(ipuma-sw)
-  add_library(IPUMA_LIBRARY "ipuma-sw/popinit.cpp" "ipuma-sw/matrix.cpp" "ipuma-sw/similarity.cpp" "ipuma-sw/encoding.cpp")
-
-  target_link_libraries(IPUMA_LIBRARY poplar popops poputil)
-
-  add_dependencies(IPUMA_LIBRARY  algoipu.gp_codelets)
+  # add_library(IPUMA_LIBRARY "ipuma-sw/matrix.cpp" "ipuma-sw/similarity.cpp" "ipuma-sw/encoding.cpp")
 
   set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} IPUMA_LIBRARY poplar)
 endif()

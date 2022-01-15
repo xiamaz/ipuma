@@ -13,6 +13,10 @@
 #include "gpu-utils/gpu_utils.hpp"
 #endif
 
+#ifdef ENABLE_IPUS
+#include "klign/ipuma-sw/ipu_batch_affine.h"
+#endif
+
 using std::max;
 using std::min;
 using std::string;
@@ -81,6 +85,33 @@ void check_alns_gpu(vector<Alignment> &alns, vector<int> qstart, vector<int> qen
     i++;
   }
 }
+#endif
+
+#ifdef ENABLE_IPUS
+void test_aligns_ipu(vector<Alignment> &alns, vector<string> query, vector<string> ref, ipu::batchaffine::SWAlgorithm &algo) {
+  std::cout << "Yoo im here\n";
+}
+
+void check_alns_ipu(vector<Alignment> &alns, vector<int> qstart, vector<int> qend, vector<int> rstart, vector<int> rend) {
+  int i = 0;
+  for (Alignment &aln : alns) {
+    if (i == 15) {  // mismatch test
+      EXPECT_TRUE(aln.ref_end - aln.ref_begin <= 3) << "adept.ref_begin:" << aln.ref_begin << "\tadept.ref_end:" << aln.ref_end;
+      EXPECT_TRUE(aln.query_end - aln.query_begin <= 3)
+          << "\tadept.query_begin:" << aln.query_begin << "\tadept.query_end:" << aln.query_end;
+      EXPECT_TRUE(aln.sw_score <= 4);
+      EXPECT_TRUE(aln.sw_score_next_best == 0);
+    } else {
+      EXPECT_EQ(aln.ref_begin, rstart[i]) << "adept.ref_begin:" << aln.ref_begin << "\t"
+                                          << "correct ref_begin:" << rstart[i];
+      EXPECT_EQ(aln.ref_end, rend[i]) << "\tadept.ref_end:" << aln.ref_end << "\tcorrect ref_end:" << rend[i];
+      EXPECT_EQ(aln.query_begin, qstart[i]) << "\tadept.query_begin:" << aln.query_begin << "\tcorrect query_begin:" << qstart[i];
+      EXPECT_EQ(aln.query_end, qend[i]) << "\tadept.query_end:" << aln.query_end << "\tcorrect query end:" << qend[i];
+    }
+    i++;
+  }
+}
+
 #endif
 
 string aln2string(Alignment &aln) {
@@ -424,4 +455,186 @@ TEST(MHMTest, AdeptSW) {
   check_alns_gpu(alns, qstarts, qends, rstarts, rends);
   // cuda tear down happens in driver destructor
 #endif
+
 }
+
+
+#ifdef ENABLE_IPUS
+TEST(MHMTest, ipuma) {
+  double time_to_initialize;
+  int device_count;
+  size_t total_mem;
+  auto driver = ipu::batchaffine::SWAlgorithm({});
+  std::cout << "Initialized IPU\n";
+
+  vector<Alignment> alns;
+  vector<string> refs, queries;
+  vector<int> qstarts, qends, rstarts, rends;
+  // first test
+  string ref = "ACGT";
+  string query = ref;
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(0);
+  qends.push_back(3);
+  rstarts.push_back(0);
+  rends.push_back(3);
+  // second test
+  ref = "AACGT";
+  query = "ACGT";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(0);
+  qends.push_back(3);
+  rstarts.push_back(1);
+  rends.push_back(4);
+  // third test
+  ref = "ACGTT";
+  query = "ACGT";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(0);
+  qends.push_back(3);
+  rstarts.push_back(0);
+  rends.push_back(3);
+  // fourth test
+  ref = "ACGT";
+  query = "TACGT";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(1);
+  qends.push_back(4);
+  rstarts.push_back(0);
+  rends.push_back(3);
+  // fifth test
+  ref = "ACGT";
+  query = "TTACGT";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(2);
+  qends.push_back(5);
+  rstarts.push_back(0);
+  rends.push_back(3);
+  // sixth test
+  ref = "ACGT";
+  query = "ACGTT";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(0);
+  qends.push_back(3);
+  rstarts.push_back(0);
+  rends.push_back(3);
+  // seventh test
+  ref = "ACGT";
+  query = "ACGTTT";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(0);
+  qends.push_back(3);
+  rstarts.push_back(0);
+  rends.push_back(3);
+  // eighth test
+  ref = "ACGT";
+  query = "TACGTT";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(1);
+  qends.push_back(4);
+  rstarts.push_back(0);
+  rends.push_back(3);
+  // ninth test
+  ref = "ACGT";
+  query = "TTACGTT";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(2);
+  qends.push_back(5);
+  rstarts.push_back(0);
+  rends.push_back(3);
+  // tenth test
+  ref = "ACGT";
+  query = "TACGTTT";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(1);
+  qends.push_back(4);
+  rstarts.push_back(0);
+  rends.push_back(3);
+  // eleventh test
+  ref = "ACGT";
+  query = "TTACGTTT";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(2);
+  qends.push_back(5);
+  rstarts.push_back(0);
+  rends.push_back(3);
+  // twelvth test
+  ref = "AAAATTTTCCCCGGGG";
+  query = "AAAATTTTCCCCGGGG";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(0);
+  qends.push_back(15);
+  rstarts.push_back(0);
+  rends.push_back(15);
+  // thirteenth test
+  ref = "AAAATTTTCCCCGGGG";
+  query = "AAAATTTTACCCGGGG";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(0);
+  qends.push_back(15);
+  rstarts.push_back(0);
+  rends.push_back(15);
+  // 1 insert // fourteenth test
+  ref = "AAAATTTTCCCCGGGG";
+  query = "AAAATTTTACCCCGGGG";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(0);
+  qends.push_back(16);
+  rstarts.push_back(0);
+  rends.push_back(15);
+  // 1 del // fifteenth test
+  ref = "AAAATTTTCCCCGGGG";
+  query = "AAAATTTCCCCGGGG";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(0);
+  qends.push_back(14);
+  rstarts.push_back(0);
+  rends.push_back(15);
+  // no match // sixteenth
+  ref = "AAAATTTTCCCCGGGG";
+  query = "GCTAGCTAGCTAGCTA";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(0);
+  qends.push_back(14);
+  rstarts.push_back(0);
+  rends.push_back(15);
+
+  // soft clip start // seventeenth test
+  ref = "AAAATTTTCCCCGGGG";
+  query = "GCTAAAATTTTCCCCGGGG";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(3);
+  qends.push_back(18);
+  rstarts.push_back(0);
+  rends.push_back(15);
+  // soft clip end // eighteenth test
+  ref = "AAAATTTTCCCCGGGG";
+  query = "AAAATTTTCCCCGGGGACT";
+  queries.push_back(query);
+  refs.push_back(ref);
+  qstarts.push_back(0);
+  qends.push_back(15);
+  rstarts.push_back(0);
+  rends.push_back(15);
+
+  test_aligns_ipu(alns, queries, refs, driver);
+  check_alns_ipu(alns, qstarts, qends, rstarts, rends);
+}
+#endif

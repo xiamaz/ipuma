@@ -2,15 +2,7 @@
 #include "kmer.hpp"
 #include "aligner_cpu.hpp"
 
-#include "ipuma-sw/ipulib.hpp"
-#include "ipuma-sw/ipu_batch_affine.hpp"
-
-#include "klign.hpp"
-#include "kmer.hpp"
-#include "aligner_cpu.hpp"
-
-#include "gpu-utils/gpu_utils.hpp"
-#include "adept-sw/driver.hpp"
+#include "ipuma-sw/ipu_batch_affine.h"
 
 using namespace std;
 using namespace upcxx;

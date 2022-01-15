@@ -14,6 +14,11 @@ if(ENABLE_CUDA)
   message(STATUS "Building tests for GPUs with CUDA")
 endif()
 
+if(ENABLE_POPLAR)
+  add_definitions(-DENABLE_IPUS)
+  message(STATUS "Building tests for IPUs with poplar")
+endif()
+
 set(BINARY mhm2_test)
 
 file(

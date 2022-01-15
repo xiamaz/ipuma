@@ -1,7 +1,3 @@
-#ifndef IPU_BATCH_AFFINE_HPP
-#define IPU_BATCH_AFFINE_HPP
-
-// Smith Waterman with static graph size.
 #include <string>
 #include <cmath>
 #include <iostream>
@@ -10,25 +6,13 @@
 #include <poputil/TileMapping.hpp>
 
 #include <popops/Zero.hpp>
-
-#include "ipulib.hpp"
-#include "ipu_base.hpp"
+#include "ipu_base.h"
 #include "similarity.h"
 #include "encoding.h"
 
-using namespace poplar;
+#include "ipu_batch_affine.h"
 
-namespace ipu {
-namespace batchaffine {
-
-const std::string STREAM_A = "a-write";
-const std::string STREAM_A_LEN = "a-len-write";
-const std::string STREAM_B = "b-write";
-const std::string STREAM_B_LEN = "b-len-write";
-const std::string STREAM_SCORES = "scores-read";
-const std::string STREAM_MISMATCHES = "mismatches-read";
-const std::string STREAM_A_RANGE = "a-range-read";
-const std::string STREAM_B_RANGE = "b-range-read";
+namespace ipu { namespace batchaffine {
 
 /**
  * Streamable IPU graph for SW
@@ -112,29 +96,7 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
   return {prog, initProg};
 }
 
-
-struct BlockAlignmentResults {
-  std::vector<int32_t> &scores;
-  std::vector<int32_t> &mismatches;
-  std::vector<int32_t> &a_range_result;
-  std::vector<int32_t> &b_range_result;
-};
-
-class SWAlgorithm : public IPUAlgorithm {
- private:
-  std::vector<char> a;
-  std::vector<int32_t> a_len;
-  std::vector<char> b;
-  std::vector<int32_t> b_len;
-
-  std::vector<int32_t> scores;
-  std::vector<int32_t> mismatches;
-  std::vector<int32_t> a_range_result;
-  std::vector<int32_t> b_range_result;
-
- public:
-  SWAlgorithm(SWConfig config, int maxAB = 300, int activeTiles = 1472)
-      : IPUAlgorithm(config, maxAB, activeTiles) {
+SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int maxAB, int activeTiles) : IPUAlgorithm(config, maxAB, activeTiles) {
     a.resize(maxAB * activeTiles);
     a_len.resize(activeTiles);
     b.resize(maxAB * activeTiles);
@@ -150,54 +112,52 @@ class SWAlgorithm : public IPUAlgorithm {
     std::vector<program::Program> programs = buildGraph(graph, activeTiles, maxAB, "int", similarityMatrix);
 
     createEngine(graph, programs);
+}
+
+BlockAlignmentResults SWAlgorithm::get_result() {
+    return {
+      scores,
+      mismatches,
+      a_range_result,
+      b_range_result
+    };
+}
+
+void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<std::string>& B) {
+  // if (!(checkSize(A) || checkSize(B))) throw std::runtime_error("Too small buffer or number of active tiles.");
+  // size_t transSize = activeTiles * bufSize * sizeof(char);
+
+  auto encoder = swatlib::getEncoder(swatlib::DataType::nucleicAcid);
+  auto vA = encoder.encode(A);
+  auto vB = encoder.encode(B);
+
+  for (size_t i = 0; i < A.size(); i++) {
+    a_len[i] = A[i].size();
+    b_len[i] = B[i].size();
   }
 
-  BlockAlignmentResults get_result() {
-      return {
-        scores,
-        mismatches,
-        a_range_result,
-        b_range_result
-      };
+  for (size_t i = 0; i < A.size(); i++) {
+    for (size_t j = 0; j < A[i].size(); j++) {
+      a[i * bufSize + j] = vA[i][j];
+    }
+  }
+  for (size_t i = 0; i < A.size(); i++) {
+    for (size_t j = 0; j < B[i].size(); j++) {
+      b[i * bufSize + j] = vB[i][j];
+    }
   }
 
-  void compare(const std::vector<std::string>& A, const std::vector<std::string>& B) {
-    // if (!(checkSize(A) || checkSize(B))) throw std::runtime_error("Too small buffer or number of active tiles.");
-    // size_t transSize = activeTiles * bufSize * sizeof(char);
+  engine->writeTensor(STREAM_A, &a[0], &a[a.size()]);
+  engine->writeTensor(STREAM_A_LEN, &a_len[0], &a_len[a_len.size()]);
+  engine->writeTensor(STREAM_B, &b[0], &b[b.size()]);
+  engine->writeTensor(STREAM_B_LEN, &b_len[0], &b_len[b_len.size()]);
 
-    auto encoder = swatlib::getEncoder(swatlib::DataType::nucleicAcid);
-    auto vA = encoder.encode(A);
-    auto vB = encoder.encode(B);
+  engine->run(0);
 
-    for (size_t i = 0; i < A.size(); i++) {
-      a_len[i] = A[i].size();
-      b_len[i] = B[i].size();
-    }
+  engine->readTensor(STREAM_SCORES, &*scores.begin(), &*scores.end());
+  engine->readTensor(STREAM_MISMATCHES, &*mismatches.begin(), &*mismatches.end());
+  engine->readTensor(STREAM_A_RANGE, &*a_range_result.begin(), &*a_range_result.end());
+  engine->readTensor(STREAM_B_RANGE, &*b_range_result.begin(), &*b_range_result.end());
+}
 
-    for (size_t i = 0; i < A.size(); i++) {
-      for (size_t j = 0; j < A[i].size(); j++) {
-        a[i * bufSize + j] = vA[i][j];
-      }
-    }
-    for (size_t i = 0; i < A.size(); i++) {
-      for (size_t j = 0; j < B[i].size(); j++) {
-        b[i * bufSize + j] = vB[i][j];
-      }
-    }
-
-    engine->writeTensor(STREAM_A, &a[0], &a[a.size()]);
-    engine->writeTensor(STREAM_A_LEN, &a_len[0], &a_len[a_len.size()]);
-    engine->writeTensor(STREAM_B, &b[0], &b[b.size()]);
-    engine->writeTensor(STREAM_B_LEN, &b_len[0], &b_len[b_len.size()]);
-
-    engine->run(0);
-
-    engine->readTensor(STREAM_SCORES, &*scores.begin(), &*scores.end());
-    engine->readTensor(STREAM_MISMATCHES, &*mismatches.begin(), &*mismatches.end());
-    engine->readTensor(STREAM_A_RANGE, &*a_range_result.begin(), &*a_range_result.end());
-    engine->readTensor(STREAM_B_RANGE, &*b_range_result.begin(), &*b_range_result.end());
-  }
-};
-}  // namespace batchaffine
-}  // namespace ipu
-#endif  // IPU_BATCH_AFFINE_HPP
+}}
