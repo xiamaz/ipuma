@@ -96,7 +96,7 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
   return {prog, initProg};
 }
 
-SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int maxAB, int activeTiles) : IPUAlgorithm(config) {
+SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int maxAB, int maxNPerTile, int activeTiles) : IPUAlgorithm(config) {
     a.resize(maxAB * activeTiles);
     a_len.resize(activeTiles);
     b.resize(maxAB * activeTiles);
@@ -110,7 +110,7 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int maxAB, int activeTiles) : IPU
     Graph graph = createGraph();
 
     auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
-    std::vector<program::Program> programs = buildGraph(graph, activeTiles, maxAB, "int", similarityMatrix);
+    std::vector<program::Program> programs = buildGraph(graph, activeTiles, maxAB, maxNPerTile, "int", similarityMatrix);
 
     createEngine(graph, programs);
 }

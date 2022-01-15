@@ -284,6 +284,9 @@ class Aligner {
   vector<string> ctg_seqs;
   vector<string> read_seqs;
 
+  int64_t total_ctg_len = 0;
+  int64_t total_read_len = 0;
+
   future<> active_kernel_fut;
 
   int64_t max_clen = 0;
