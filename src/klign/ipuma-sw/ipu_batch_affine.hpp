@@ -1,10 +1,6 @@
 #ifndef IPU_BATCH_AFFINE_HPP
 #define IPU_BATCH_AFFINE_HPP
 
-#ifndef KLIGN_GPU_BLOCK_SIZE
-#define KLIGN_GPU_BLOCK_SIZE 20000
-#endif
-
 // Smith Waterman with static graph size.
 #include <string>
 #include <cmath>
@@ -119,9 +115,9 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
 class SWAlgorithm : public IPUAlgorithm {
  private:
   std::vector<char> a;
-  std::vector<int16_t> a_len;
+  std::vector<int32_t> a_len;
   std::vector<char> b;
-  std::vector<int16_t> b_len;
+  std::vector<int32_t> b_len;
 
   std::vector<int32_t> scores;
   std::vector<int32_t> mismatches;
@@ -130,13 +126,15 @@ class SWAlgorithm : public IPUAlgorithm {
 
  public:
   SWAlgorithm(SWConfig config, int maxAB = 300, int activeTiles = 1472)
-      : IPUAlgorithm(config, activeTiles, maxAB) {
-    a.reserve(maxAB * activeTiles);
-    a_len.reserve(activeTiles);
-    b.reserve(maxAB * activeTiles);
-    b_len.reserve(activeTiles);
-    scores.reserve(activeTiles);
-    mismatches.reserve(activeTiles);
+      : IPUAlgorithm(config, maxAB, activeTiles) {
+    a.resize(maxAB * activeTiles);
+    a_len.resize(activeTiles);
+    b.resize(maxAB * activeTiles);
+    b_len.resize(activeTiles);
+    scores.resize(activeTiles);
+    mismatches.resize(activeTiles);
+    a_range_result.resize(activeTiles);
+    b_range_result.resize(activeTiles);
 
     Graph graph = createGraph();
 
@@ -150,8 +148,9 @@ class SWAlgorithm : public IPUAlgorithm {
     // if (!(checkSize(A) || checkSize(B))) throw std::runtime_error("Too small buffer or number of active tiles.");
     // size_t transSize = activeTiles * bufSize * sizeof(char);
 
-    assert(A.size() == B.size());
-    assert(A.size() == activeTiles);
+    cout << "Jooooo" << std::endl;
+    cout << "A" << A.size() << std::endl;
+    cout << "a" << a.size() << std::endl;
     auto encoder = swatlib::getEncoder(swatlib::DataType::nucleicAcid);
     auto vA = encoder.encode(A);
     auto vB = encoder.encode(B);
@@ -176,16 +175,13 @@ class SWAlgorithm : public IPUAlgorithm {
     engine->writeTensor(STREAM_A_LEN, &a_len[0], &a_len[a_len.size()]);
     engine->writeTensor(STREAM_B, &b[0], &b[b.size()]);
     engine->writeTensor(STREAM_B_LEN, &b_len[0], &b_len[b_len.size()]);
-    cout << "Wrote" << std::endl;
 
     engine->run(0);
-    cout << "Ran" << std::endl;
 
     engine->readTensor(STREAM_SCORES, &*scores.begin(), &*scores.end());
     engine->readTensor(STREAM_MISMATCHES, &*mismatches.begin(), &*mismatches.end());
     engine->readTensor(STREAM_A_RANGE, &*a_range_result.begin(), &*a_range_result.end());
     engine->readTensor(STREAM_B_RANGE, &*b_range_result.begin(), &*b_range_result.end());
-    cout << "Read" << std::endl;
   }
 };
 }  // namespace batchaffine
