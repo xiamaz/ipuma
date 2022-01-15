@@ -22,34 +22,42 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
                                        Alns *alns,
                                        bool report_cigar,
                                        IntermittentTimer &aln_kernel_timer) {
-  assert(!report_cigar);
   future<> fut = upcxx_utils::execute_in_thread_pool([aln_block_data, report_cigar, &aln_kernel_timer] {
+    DBG_VERBOSE("Starting _ipu_align_block_kernel of ", aln_block_data->kernel_alns.size(), "\n");
     aln_kernel_timer.start();
     ipu_driver->compare(aln_block_data->read_seqs, aln_block_data->ctg_seqs);
-      // for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
-      // // progress();
-      // Aln &aln = aln_block_data->kernel_alns[i];
-      // aln.rstop = aln.rstart + aln_results.query_end[i] + 1;
-      // aln.rstart += aln_results.query_begin[i];
-      // aln.cstop = aln.cstart + aln_results.ref_end[i] + 1;
-      // aln.cstart += aln_results.ref_begin[i];
-      // if (aln.orient == '-') switch_orient(aln.rstart, aln.rstop, aln.rlen);
-      // aln.score1 = aln_results.top_scores[i];
-      // // FIXME: needs to be set to the second best
-      // aln.score2 = 0;
-      // // FIXME: need to get the mismatches
-      // aln.mismatches = 0;  // ssw_aln.mismatches;
-      // aln.identity = 100 * aln.score1 / aln_block_data->aln_scoring.match / aln.rlen;
-      // aln.read_group_id = aln_block_data->read_group_id;
-      // // FIXME: need to get cigar
-      // if (report_cigar) set_sam_string(aln, "*", "*");  // FIXME until there is a valid:ssw_aln.cigar_string);
-      // aln_block_data->alns->add_aln(aln);
+    auto aln_results = ipu_driver->get_result();
+    for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
+      auto uda = aln_results.a_range_result[i];
+      int16_t query_begin = uda & 0xffff;
+      int16_t query_end = uda >> 16;
+
+      auto udb = aln_results.b_range_result[i];
+      int16_t ref_begin = udb & 0xffff;
+      int16_t ref_end = udb >> 16;
+
+      Aln &aln = aln_block_data->kernel_alns[i];
+      aln.rstop = aln.rstart + query_end + 1;
+      aln.rstart += query_begin;
+      aln.cstop = aln.cstart + ref_end + 1;
+      aln.cstart += ref_begin;
+      if (aln.orient == '-') switch_orient(aln.rstart, aln.rstop, aln.rlen);
+      aln.score1 = aln_results.scores[i];
+      // FIXME: needs to be set to the second best
+      aln.score2 = 0;
+      aln.mismatches = aln_results.mismatches[i];  // ssw_aln.mismatches;
+      aln.identity = 100 * aln.score1 / aln_block_data->aln_scoring.match / aln.rlen;
+      aln.read_group_id = aln_block_data->read_group_id;
+      // FIXME: need to get cigar
+      if (report_cigar) set_sam_string(aln, "*", "*");  // FIXME until there is a valid:ssw_aln.cigar_string);
+      aln_block_data->alns->add_aln(aln);
+    }
 
     aln_kernel_timer.stop();
   });
   fut = fut.then([alns = alns, aln_block_data]() {
-    // DBG_VERBOSE("appending and returning ", aln_block_data->alns->size(), "\n");
-    // alns->append(*(aln_block_data->alns));
+    DBG_VERBOSE("appending and returning ", aln_block_data->alns->size(), "\n");
+    alns->append(*(aln_block_data->alns));
   });
 
   return fut;
@@ -106,7 +114,7 @@ void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vecto
 //   } else if (steal_secs > 0.01) {
 //     LOG("Waited ", steal_secs, "s for previous block to complete\n");
 //   }
-  while (!active_kernel_fut.ready() && !kernel_alns.empty()) {
+  while (!active_kernel_fut.ready() || kernel_alns.empty()) {
     progress();
   }
   if (!kernel_alns.empty()) {

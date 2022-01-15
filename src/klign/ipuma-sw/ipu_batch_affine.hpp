@@ -112,6 +112,14 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
   return {prog, initProg};
 }
 
+
+struct BlockAlignmentResults {
+  std::vector<int32_t> &scores;
+  std::vector<int32_t> &mismatches;
+  std::vector<int32_t> &a_range_result;
+  std::vector<int32_t> &b_range_result;
+};
+
 class SWAlgorithm : public IPUAlgorithm {
  private:
   std::vector<char> a;
@@ -144,13 +152,19 @@ class SWAlgorithm : public IPUAlgorithm {
     createEngine(graph, programs);
   }
 
+  BlockAlignmentResults get_result() {
+      return {
+        scores,
+        mismatches,
+        a_range_result,
+        b_range_result
+      };
+  }
+
   void compare(const std::vector<std::string>& A, const std::vector<std::string>& B) {
     // if (!(checkSize(A) || checkSize(B))) throw std::runtime_error("Too small buffer or number of active tiles.");
     // size_t transSize = activeTiles * bufSize * sizeof(char);
 
-    cout << "Jooooo" << std::endl;
-    cout << "A" << A.size() << std::endl;
-    cout << "a" << a.size() << std::endl;
     auto encoder = swatlib::getEncoder(swatlib::DataType::nucleicAcid);
     auto vA = encoder.encode(A);
     auto vB = encoder.encode(B);
