@@ -60,7 +60,7 @@ void test_aligns_gpu(vector<Alignment> &alns, vector<string> query, vector<strin
   auto aln_results = gpu_driver.get_aln_results();
 
   for (int i = 0; i < query.size(); i++) {
-    alns.push_back({});
+
     Alignment &alignment = alns[i];
     translate_adept_to_ssw(alignment, aln_results, i);
   }
@@ -89,11 +89,38 @@ void check_alns_gpu(vector<Alignment> &alns, vector<int> qstart, vector<int> qen
 
 #ifdef ENABLE_IPUS
 void test_aligns_ipu(vector<Alignment> &alns, vector<string> query, vector<string> ref, ipu::batchaffine::SWAlgorithm &algo) {
-  std::cout << "Yoo im here\n";
+  alns.reserve(query.size());
+
+  algo.compare(query, ref);
+  auto aln_results = algo.get_result();
+
+  for (int i = 0; i < query.size(); i++) {
+    alns.push_back({});
+    Alignment &aln = alns[i];
+
+    auto uda = aln_results.a_range_result[i];
+    int16_t query_begin = uda & 0xffff;
+    int16_t query_end = uda >> 16;
+
+    auto udb = aln_results.b_range_result[i];
+    int16_t ref_begin = udb & 0xffff;
+    int16_t ref_end = udb >> 16;
+
+    aln.query_end = query_end;
+    aln.query_begin = query_begin;
+    aln.ref_begin = ref_begin;
+    aln.ref_end = ref_end;
+    aln.sw_score = aln_results.scores[i];
+    aln.sw_score_next_best = 0;
+    aln.mismatches = 0;
+  }
 }
 
 void check_alns_ipu(vector<Alignment> &alns, vector<int> qstart, vector<int> qend, vector<int> rstart, vector<int> rend) {
   int i = 0;
+
+  EXPECT_TRUE(alns.size() == qstart.size()) << "Number of alignments does not equal number of comparisons (" << qstart.size() <<")";
+
   for (Alignment &aln : alns) {
     if (i == 15) {  // mismatch test
       EXPECT_TRUE(aln.ref_end - aln.ref_begin <= 3) << "adept.ref_begin:" << aln.ref_begin << "\tadept.ref_end:" << aln.ref_end;
