@@ -98,14 +98,15 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
 }
 
 SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int maxAB, int maxNPerTile, int activeTiles) : IPUAlgorithm(config) {
-    a.resize(maxAB * activeTiles);
-    a_len.resize(activeTiles);
-    b.resize(maxAB * activeTiles);
-    b_len.resize(activeTiles);
-    scores.resize(activeTiles);
-    mismatches.resize(activeTiles);
-    a_range_result.resize(activeTiles);
-    b_range_result.resize(activeTiles);
+    auto totalPairs = activeTiles * maxNPerTile;
+    a.resize(maxAB * totalPairs);
+    a_len.resize(totalPairs);
+    b.resize(maxAB * totalPairs);
+    b_len.resize(totalPairs);
+    scores.resize(totalPairs);
+    mismatches.resize(totalPairs);
+    a_range_result.resize(totalPairs);
+    b_range_result.resize(totalPairs);
     this->maxAB = maxAB;
 
     Graph graph = createGraph();
