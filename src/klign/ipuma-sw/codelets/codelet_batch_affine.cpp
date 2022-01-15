@@ -36,131 +36,104 @@ void inline setZeroPart(void* sa_out, unsigned count) {
 }
 #endif
 
-template<class T>T max(std::initializer_list<T> l) {
-    T v = *l.begin();
-    for (auto i = l.begin() + 1; i != l.end(); ++i) {
-        if (v < *i) {
-            v = *i;
-        }
-    }
-    return v;
-}
-
 template<class T>T max(T a, T b) {
     return a > b ? a : b;
-}
-
-template<class T>
-inline T compareElementsT(char a, char b) {
-    if (a == b)
-        return 1.0;
-    return -1.0;
-}
-
-inline short compareElements(char a, char b) {
-    if (a == b)
-        return 1;
-    return -1;
-}
-
-/**
- * Calculate a single SW cell.
- */
-inline void calcCell(short top, short left, short diag, short* sScore, char* sDir) {
-    short max = 0;
-    short maxDir = 'n';
-
-    if (top > max && top > left && top > diag) {
-        max = top;
-        maxDir = 't';
-    } else if (left > diag && left > max) {
-        max = left;
-        maxDir = 'l';
-    } else if (diag > max) {
-        max = diag;
-        maxDir = 'd';
-    }
-
-    *sScore = max;
-    *sDir = maxDir;
-}
-
-/**
- * Calculate a single SW cell.
- */
-inline void calcCell(int top, int left, int diag, int* sScore, char* sDir) {
-    int max = 0;
-    char maxDir = 'n';
-
-    if (top > max && top > left && top > diag) {
-        max = top;
-        maxDir = 't';
-    } else if (left > diag && left > max) {
-        max = left;
-        maxDir = 'l';
-    } else if (diag > max) {
-        max = diag;
-        maxDir = 'd';
-    }
-
-    *sScore = max;
-    *sDir = maxDir;
 }
 
 /**
  * Single SW operations for cell i, j
  * based on Fig. 1, Wozniak et al 1997
  */
-template<class T>
 class SWAffine : public poplar::Vertex {
 private:
-    poplar::Vector<T, poplar::VectorLayout::ONE_PTR> C;
-    poplar::Vector<T, poplar::VectorLayout::ONE_PTR> bG;
+    poplar::Vector<int, poplar::VectorLayout::ONE_PTR> C;
+    poplar::Vector<int, poplar::VectorLayout::ONE_PTR> bG;
 public:
     // Fields
-    poplar::Vector<poplar::Input<poplar::Vector<T, poplar::VectorLayout::ONE_PTR>>> simMatrix;
-    poplar::Input<T> gapInit;
-    poplar::Input<T> gapExt;
+    poplar::Vector<poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>>> simMatrix;
+    poplar::Input<size_t> Alen;
+    poplar::Input<size_t> Blen;
+    poplar::Input<int> gapInit;
+    poplar::Input<int> gapExt;
     poplar::Input<int> bufSize;
     poplar::Input<poplar::Vector<unsigned char, poplar::VectorLayout::ONE_PTR>> A;
     poplar::Input<poplar::Vector<unsigned char, poplar::VectorLayout::ONE_PTR>> B;
     poplar::Output<int> score;
+    poplar::Output<int> mismatches;
+    poplar::Output<int> ARange;
+    poplar::Output<int> BRange;
 
     bool compute() {
-        // find size of string A and B
-        int Alen = 0, Blen = 0;
-        for (; (Alen < bufSize - 1) && A[Alen] != simMatrix.size(); ++Alen) {
-        }
-        for (; (Blen < bufSize - 1) && B[Blen] != simMatrix.size(); ++Blen) {
-        }
+        memset(&(C[0]), 0, bufSize * sizeof(int));
+        memset(&(bG[0]), 0, bufSize * sizeof(int));
 
-        // setZeroPart(&(C[0]), (*bufSize * sizeof(T) + 7) >> 3);
-        // setZeroPart(&(bG[0]), (*bufSize * sizeof(T) + 7) >> 3);
-        memset(&(C[0]), 0, bufSize * sizeof(T));
-        memset(&(bG[0]), 0, bufSize * sizeof(T));
-
-        T gI = *gapInit;
-        T gE = *gapExt;
-        T s = 0;
-        T lastNoGap, prevNoGap;
+        int gI = *gapInit;
+        int gE = *gapExt;
+        int s = 0;
+        int lastNoGap, prevNoGap;
+        uint16_t Astart = 0;
+        uint16_t Bstart = 0;
+        uint16_t Aend = 0;
+        uint16_t Bend = 0;
+        
+        // forward pass
         for (int i = 0; i < Blen; ++i) {
-            T aGap;
+            int aGap;
             lastNoGap = prevNoGap = 0;
             aGap = gapInit;
             for (unsigned j = 0; j < Alen; ++j) {
                 aGap = max(lastNoGap + gI + gE, aGap + gE);
                 bG[j] = max(C[j] + gI + gE, bG[j] + gE);
-                lastNoGap = max(static_cast<T>(prevNoGap + simMatrix[A[j]][B[i]]), aGap);
+                if (A[j] == B[i]) {
+                    *mismatches += 1;
+                }
+                lastNoGap = max(prevNoGap + simMatrix[A[j]][B[i]], aGap);
                 lastNoGap = max(lastNoGap, bG[j]);
-                lastNoGap = max(lastNoGap, static_cast<T>(0));
+                lastNoGap = max(lastNoGap, 0);
                 prevNoGap = C[j];
                 C[j] = lastNoGap;
-                s = max(s, lastNoGap);
+                if (lastNoGap > s) {
+                    Aend = j;
+                    Bend = i;
+                    s = lastNoGap;
+                }
+                // s = max(s, lastNoGap);
             }
         }
         *score = s;
+
+        s = 0;
+
+        memset(&(C[0]), 0, bufSize * sizeof(int));
+        memset(&(bG[0]), 0, bufSize * sizeof(int));
+        // reverse pass
+        for (int i = Bend; i >= 0; --i) {
+            int aGap;
+            lastNoGap = prevNoGap = 0;
+            aGap = gapInit;
+            for (int j = Aend; j >= 0; --j) {
+                aGap = max(lastNoGap + gI + gE, aGap + gE);
+                bG[j] = max(C[j] + gI + gE, bG[j] + gE);
+                lastNoGap = max(prevNoGap + simMatrix[A[j]][B[i]], aGap);
+                lastNoGap = max(lastNoGap, bG[j]);
+                lastNoGap = max(lastNoGap, 0);
+                prevNoGap = C[j];
+                C[j] = lastNoGap;
+                if (lastNoGap > s) {
+                    Astart = j;
+                    Bstart = i;
+                    s = lastNoGap;
+                }
+            }
+        }
+
+        uint16_t range[2];
+        range[0] = Astart;
+        range[1] = Aend;
+        *ARange = *reinterpret_cast<uint32_t*>(range);
+        range[0] = Bstart;
+        range[1] = Bend;
+        *BRange = *reinterpret_cast<uint32_t*>(range);
         return true;
     }
 };
-
-template class SWAffine<int>;
