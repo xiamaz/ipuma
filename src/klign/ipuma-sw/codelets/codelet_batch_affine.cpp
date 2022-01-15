@@ -68,14 +68,14 @@ public:
 
         int gI = *gapInit;
         int gE = *gapExt;
-        int s = 0;
-        int lastNoGap, prevNoGap;
-        uint16_t Astart = 0;
-        uint16_t Bstart = 0;
-        uint16_t Aend = 0;
-        uint16_t Bend = 0;
         
         for (int n = 0; n < maxNPerTile; ++n) {
+            int lastNoGap, prevNoGap;
+            int s = 0;
+            uint16_t Astart = 0;
+            uint16_t Bstart = 0;
+            uint16_t Aend = 0;
+            uint16_t Bend = 0;
             int n_offset = n * bufSize;
 
             auto a_len = Alen[n];
