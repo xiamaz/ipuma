@@ -16,7 +16,7 @@ using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
 
-static IPUContext *ipu_driver;
+static ipu::batchaffine::SWAlgorithm *ipu_driver;
 
 static upcxx::future<> gpu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns, bool report_cigar,
                                        IntermittentTimer &aln_kernel_timer) {
@@ -38,7 +38,8 @@ void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
     }
     double init_time;
     if (ipu_driver == NULL) {
-      ipu_driver = new IPUContext();
+      ipu::SWConfig config = {1, 1, 2, -2, swatlib::Similarity::nucleicAcid, swatlib::DataType::nucleicAcid};
+      ipu_driver = new ipu::batchaffine::SWAlgorithm(config, 300, 1472 * 6);
       // local_team().rank_me(), local_team().rank_n(), (short)aln_scoring.match,
       //                                    (short)-aln_scoring.mismatch, (short)-aln_scoring.gap_opening,
       //                                    (short)-aln_scoring.gap_extending, rlen_limit, init_time);

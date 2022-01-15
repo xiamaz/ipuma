@@ -3,6 +3,9 @@
 
 #include <string>
 
+#include <libgen.h>
+#include <unistd.h>
+
 #include <poplar/Engine.hpp>
 #include <poplar/Graph.hpp>
 #include <poplar/SyncType.hpp>
@@ -98,8 +101,21 @@ void convertSimilarityMatrix(Target& target, const Type& t, swatlib::Matrix<int8
     *buffer = b;
 }
 
+std::string get_selfpath() {
+    char buff[PATH_MAX];
+    ssize_t len = ::readlink("/proc/self/exe", buff, sizeof(buff)-1);
+    if (len != -1) {
+      buff[len] = '\0';
+      return std::string(buff);
+    }
+    return "";
+}
+
 inline void addCodelets(Graph& graph) {
-    graph.addCodelets("build/bin/algoipu.gp");
+    auto selfPath = get_selfpath();
+    auto rootPath = std::string(dirname(dirname(&selfPath[0])));
+    std::cout << rootPath << "\n";
+    graph.addCodelets(rootPath + "/bin/codelets/algoipu.gp");
 }
 
 inline int extractScoreSW(Engine& engine, const std::string& sA, const std::string& sB) {
@@ -117,15 +133,14 @@ inline int extractScoreSW(Engine& engine, const std::string& sA, const std::stri
     return S(x, y);
 }
 
-class IPUAlgorithm {
+class IPUAlgorithm : IPUContext {
 protected:
-                SWConfig config;
+    SWConfig config;
 
-                IPUContext& context;
-                std::unique_ptr<Engine> engine;
-                int activeTiles, bufSize;
+    std::unique_ptr<Engine> engine;
+    int activeTiles, bufSize;
 public:
-    IPUAlgorithm(SWConfig config, IPUContext &ctx, int bufSize = 10001, int activeTiles = 1472) : config(config), activeTiles(activeTiles), bufSize(bufSize), context(ctx) {
+    IPUAlgorithm(SWConfig config, int bufSize = 10001, int activeTiles = 1472) : config(config), activeTiles(activeTiles), bufSize(bufSize) {
     }
 
     /**
@@ -146,7 +161,7 @@ public:
     }
 
     Graph createGraph() {
-        auto target = context.getTarget();
+        auto target = getTarget();
         Graph graph(target);
         addCodelets(graph);
         popops::addCodelets(graph);
@@ -155,7 +170,7 @@ public:
 
     // Needs to be called in child class
     void createEngine(Graph& graph, std::vector<program::Program> programs) {
-        auto& device = context.getDevice();
+        auto& device = getDevice();
         poplar::OptionFlags engineOptions;
         engine = std::make_unique<Engine>(graph, programs, engineOptions);
         engine->load(device);

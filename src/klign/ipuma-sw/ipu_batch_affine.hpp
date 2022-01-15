@@ -88,15 +88,13 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
 }
 
 class SWAlgorithm : public IPUAlgorithm {
-protected:
-    std::string format;
 public:
-    SWAlgorithm(SWConfig config, IPUContext &ctx, int bufSize = 10001, int activeTiles = 1472) : IPUAlgorithm(config, ctx, activeTiles, bufSize) {
+    SWAlgorithm(SWConfig config, int bufSize = 10001, int activeTiles = 1472) : IPUAlgorithm(config, activeTiles, bufSize) {
         auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
 
         Graph graph = createGraph();
 
-        std::vector<program::Program> programs = buildGraph(graph, activeTiles, bufSize, format, similarityMatrix);
+        std::vector<program::Program> programs = buildGraph(graph, activeTiles, bufSize, "int", similarityMatrix);
 
         createEngine(graph, programs);
     }

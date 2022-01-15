@@ -10,18 +10,10 @@
 
 // This is a singleton based on: https://stackoverflow.com/a/1008289
 class IPUContext {
-// public:
-//         static IPUContext& getInstance() {
-//                 static IPUContext instance;
-//                 return instance;
-//         }
-        private:
+private:
     poplar::Device device;
     poplar::Target target;
 
-    /**
-     * platform either cpu or ipu
-     */
 public:
     IPUContext() {
         auto manager = poplar::DeviceManager::createDeviceManager();
@@ -52,9 +44,6 @@ public:
     poplar::Graph getGraph() {
         return std::move(poplar::Graph(target));
     }
-
-    IPUContext(IPUContext const&)      = delete;
-    void operator=(IPUContext const&)  = delete;
 };
 
 #endif // IPULIB_H
