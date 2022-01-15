@@ -329,7 +329,7 @@ class Aligner {
       kernel_alns.emplace_back(rname, cid, 0, 0, rlen, cstart, 0, clen, orient);
       ctg_seqs.emplace_back(cseq);
       read_seqs.emplace_back(rseq);
-      if (num_alns >= KLIGN_GPU_BLOCK_SIZE) {
+      if (num_alns >= (1472 * 6 * 200 * 50)) {
         // for (auto &&x : ctg_seqs) {
         //   SLOG_VERBOSE("HistC: ", x.size(), "\n"); 
         // }
@@ -401,6 +401,7 @@ class Aligner {
     t.start();
     auto num = kernel_alns.size();
     if (num) {
+      SWARN("Flush Remaining, incomplete block.");
       kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, max_clen, max_rlen,
                          aln_kernel_timer);
       clear_aln_bufs();
