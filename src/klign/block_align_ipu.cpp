@@ -16,11 +16,36 @@ using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
 
-static ipu::batchaffine::SWAlgorithm *ipu_driver = NULL;
+static ipu::batchaffine::SWAlgorithm *ipu_driver = nullptr;
 
-static upcxx::future<> gpu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns, bool report_cigar,
+static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data,
+                                       Alns *alns,
+                                       bool report_cigar,
                                        IntermittentTimer &aln_kernel_timer) {
+  assert(!report_cigar);
   future<> fut = upcxx_utils::execute_in_thread_pool([aln_block_data, report_cigar, &aln_kernel_timer] {
+    aln_kernel_timer.start();
+    ipu_driver->compare(aln_block_data->read_seqs, aln_block_data->ctg_seqs);
+      // for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
+      // // progress();
+      // Aln &aln = aln_block_data->kernel_alns[i];
+      // aln.rstop = aln.rstart + aln_results.query_end[i] + 1;
+      // aln.rstart += aln_results.query_begin[i];
+      // aln.cstop = aln.cstart + aln_results.ref_end[i] + 1;
+      // aln.cstart += aln_results.ref_begin[i];
+      // if (aln.orient == '-') switch_orient(aln.rstart, aln.rstop, aln.rlen);
+      // aln.score1 = aln_results.top_scores[i];
+      // // FIXME: needs to be set to the second best
+      // aln.score2 = 0;
+      // // FIXME: need to get the mismatches
+      // aln.mismatches = 0;  // ssw_aln.mismatches;
+      // aln.identity = 100 * aln.score1 / aln_block_data->aln_scoring.match / aln.rlen;
+      // aln.read_group_id = aln_block_data->read_group_id;
+      // // FIXME: need to get cigar
+      // if (report_cigar) set_sam_string(aln, "*", "*");  // FIXME until there is a valid:ssw_aln.cigar_string);
+      // aln_block_data->alns->add_aln(aln);
+
+    aln_kernel_timer.stop();
   });
   fut = fut.then([alns = alns, aln_block_data]() {
     // DBG_VERBOSE("appending and returning ", aln_block_data->alns->size(), "\n");
@@ -88,16 +113,22 @@ void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vecto
     assert(active_kernel_fut.ready() && "active_kernel_fut should already be ready");
     active_kernel_fut.wait();  // should be ready already
     shared_ptr<AlignBlockData> aln_block_data = make_shared<AlignBlockData>(kernel_alns, ctg_seqs, read_seqs, max_clen, max_rlen, read_group_id, cpu_aligner.aln_scoring);
-    assert(kernel_alns.empty());
 
-    // for now, the GPU alignment doesn't support cigars
     if (cpu_aligner.ssw_filter.report_cigar) {
       SWARN("Not implemented cigar for IPUs");
       exit(1);
-      // active_kernel_fut = gpu_align_block(aln_block_data, alns, cpu_aligner.ssw_filter.report_cigar, aln_kernel_timer);
-    } else {
-      active_kernel_fut = cpu_aligner.ssw_align_block(aln_block_data, alns);
     }
+    
+    assert(kernel_alns.empty());
+    active_kernel_fut = ipu_align_block(aln_block_data, alns, cpu_aligner.ssw_filter.report_cigar, aln_kernel_timer);
+    // // for now, the GPU alignment doesn't support cigars
+    // if (cpu_aligner.ssw_filter.report_cigar) {
+    //   SWARN("Not implemented cigar for IPUs");
+    //   exit(1);
+    //   // active_kernel_fut = gpu_align_block(aln_block_data, alns, cpu_aligner.ssw_filter.report_cigar, aln_kernel_timer);
+    // } else {
+    //   active_kernel_fut = cpu_aligner.ssw_align_block(aln_block_data, alns);
+    // }
   } else {
     SWARN("Block shall not be empty");  
     exit(1);

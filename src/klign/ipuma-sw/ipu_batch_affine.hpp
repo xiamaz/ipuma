@@ -1,9 +1,14 @@
 #ifndef IPU_BATCH_AFFINE_HPP
 #define IPU_BATCH_AFFINE_HPP
 
+#ifndef KLIGN_GPU_BLOCK_SIZE
+#define KLIGN_GPU_BLOCK_SIZE 20000
+#endif
+
 // Smith Waterman with static graph size.
 #include <string>
 #include <cmath>
+#include <iostream>
 
 #include <poplar/Graph.hpp>
 #include <poputil/TileMapping.hpp>
@@ -102,82 +107,79 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
 }
 
 class SWAlgorithm : public IPUAlgorithm {
+private:
+    std::vector<char> a;
+    std::vector<int16_t> a_len;
+    std::vector<char> b;
+    std::vector<int16_t> b_len;
+
+
+    std::vector<int32_t> scores;
+    std::vector<int32_t> mismatches;
+    std::vector<int32_t> a_range_result;
+    std::vector<int32_t> b_range_result;
 public:
-    SWAlgorithm(SWConfig config, int bufSize = 10001, int activeTiles = 1472) : IPUAlgorithm(config, activeTiles, bufSize) {
-        auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
+
+
+    SWAlgorithm(SWConfig config, int maxAB = 300, int activeTiles = 1472) : IPUAlgorithm(config, activeTiles, maxAB) {
+        a.reserve(maxAB * activeTiles);
+        a_len.reserve(activeTiles);
+        b.reserve(maxAB * activeTiles);
+        b_len.reserve(activeTiles);
+        scores.reserve(activeTiles);
+        mismatches.reserve(activeTiles);
 
         Graph graph = createGraph();
 
-        std::vector<program::Program> programs = buildGraph(graph, activeTiles, bufSize, "int", similarityMatrix);
+        auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
+        std::vector<program::Program> programs = buildGraph(graph, activeTiles, maxAB, "int", similarityMatrix);
 
         createEngine(graph, programs);
     }
 
-    swatlib::Matrix<int> compare(const std::vector<std::string>& A, const std::vector<std::string>& B) {
-        if (!(checkSize(A) || checkSize(B))) throw std::runtime_error("Too small buffer or number of active tiles.");
-        size_t transSize = activeTiles * bufSize * sizeof(char);
+    void compare(const std::vector<std::string>& A, const std::vector<std::string>& B) {
+        // if (!(checkSize(A) || checkSize(B))) throw std::runtime_error("Too small buffer or number of active tiles.");
+        // size_t transSize = activeTiles * bufSize * sizeof(char);
 
-        auto encoder = swatlib::getEncoder(config.datatype);
+        assert(A.size() == B.size());
+        assert(A.size() == activeTiles);
+        auto encoder = swatlib::getEncoder(swatlib::DataType::nucleicAcid);
         auto vA = encoder.encode(A);
         auto vB = encoder.encode(B);
+        
+        for (size_t i = 0; i < A.size(); i++) {
+            a_len[i] = A[i].size();
+            b_len[i] = B[i].size();
+        }
 
-        uint64_t totalCycles = 0;
-        swatlib::Matrix<int> results(vA.size(), vB.size());
-
-        size_t totalBufferSize = activeTiles * bufSize * sizeof(uint8_t);
-        size_t rowBufferSize = bufSize * sizeof(uint8_t);
-        uint8_t* bufferA = (uint8_t*) malloc(totalBufferSize);
-        uint8_t* bufferB = (uint8_t*) malloc(totalBufferSize);
-
-        int bi = 0, ai =0;
-        // always fit the maximum number of comparisons onto all tiles
-        while (bi < vB.size() && ai < vA.size()) {
-            std::vector<std::tuple<int, int>> indices;
-            std::vector<int> scores(activeTiles);
-
-            memset(bufferA, encoder.get_terminator(), totalBufferSize);
-            memset(bufferB, encoder.get_terminator(), totalBufferSize);
-
-            for (int k = 0; k < activeTiles; ++k) {
-                auto& a = vA[ai];
-                auto& b = vB[bi];
-                for (int l = 0; l < a.size(); ++l) {
-                    bufferA[k * rowBufferSize + l] = a[l];
-                }
-                for (int l = 0; l < b.size(); ++l) {
-                    bufferB[k * rowBufferSize + l] = b[l];
-                }
-
-                indices.push_back({ai, bi});
-                // increment indices
-                ++bi;
-                if (bi >= vB.size()) {
-                    ++ai;
-                    bi = 0;
-                }
-                if (ai >= vA.size()) {
-                    break;
-                }
+        for (size_t i = 0; i < A.size(); i++) {
+            for (size_t j = 0; j < A[i].size(); j++) {
+                a[i*bufSize+j] = vA[i][j];
             }
-
-            engine->writeTensor("a-write", bufferA, bufferA + totalBufferSize);
-            engine->writeTensor("b-write", bufferB, bufferB + totalBufferSize);
-
-            engine->run(0);
-
-            engine->readTensor("scores-read", &*scores.begin(), &*scores.end());
-            for (int k = 0; k < indices.size(); ++k) {
-                auto [i, j] = indices[k];
-                results(i, j) = scores[k];
+        }
+        for (size_t i = 0; i < A.size(); i++) {
+            for (size_t j = 0; j < B[i].size(); j++) {
+                b[i*bufSize+j] = vB[i][j];
             }
         }
 
-        free(bufferA);
-        free(bufferB);
 
-        return results;
-    }
-};
+            engine->writeTensor(STREAM_A,     &a[0],    &a[a.size()]);
+            engine->writeTensor(STREAM_A_LEN, &a_len[0], &a_len[a_len.size()]);
+            engine->writeTensor(STREAM_B,     &b[0],    &b[b.size()]);
+            engine->writeTensor(STREAM_B_LEN, &b_len[0], &b_len[b_len.size()]);
+            cout << "Wrote" << std::endl;
+
+            engine->run(0);
+            cout << "Ran" <<std::endl;
+
+            engine->readTensor(STREAM_SCORES, &*scores.begin(), &*scores.end());
+            engine->readTensor(STREAM_MISMATCHES, &*mismatches.begin(), &*mismatches.end());
+            engine->readTensor(STREAM_A_RANGE, &*a_range_result.begin(), &*a_range_result.end());
+            engine->readTensor(STREAM_B_RANGE, &*b_range_result.begin(), &*b_range_result.end());
+            cout << "Read" <<std::endl;
+        }
+    };
 }
 }
 #endif // IPU_BATCH_AFFINE_HPP
