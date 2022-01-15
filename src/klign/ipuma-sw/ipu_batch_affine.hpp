@@ -69,27 +69,38 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
         graph.setTileMapping(Blens[i], tileIndex);
 
         graph.setTileMapping(Scores[i], tileIndex);
+        graph.setTileMapping(ARanges[i], tileIndex);
+        graph.setTileMapping(BRanges[i], tileIndex);
+        graph.setTileMapping(Mismatches[i], tileIndex);
     }
 
-    graph.createHostWrite("a-write", As);
-    graph.createHostWrite("b-write", Bs);
-    graph.createHostWrite("alen-write", Alens);
-    graph.createHostWrite("blen-write", Blens);
-    graph.createHostRead("scores-read", Scores);
+    graph.createHostWrite(STREAM_A, As);
+    graph.createHostWrite(STREAM_B, Bs);
+    graph.createHostWrite(STREAM_A_LEN, Alens);
+    graph.createHostWrite(STREAM_B_LEN, Blens);
+    graph.createHostRead(STREAM_SCORES, Scores);
+    graph.createHostRead(STREAM_MISMATCHES, Mismatches);
+    graph.createHostRead(STREAM_A_RANGE, ARanges);
+    graph.createHostRead(STREAM_B_RANGE, BRanges);
 
     auto frontCs = graph.addComputeSet("front");
     for (int i = 0; i < activeTiles; ++i) {
         int tileIndex = i % tileCount;
         VertexRef vtx = graph.addVertex(
-            frontCs, "SWAffine<" + format + ">",
+            frontCs, "SWAffine",
             {
-                {"A", As[i]},
-                {"B", Bs[i]},
-                {"simMatrix", similarity},
                 {"bufSize", bufSize},
-                {"score", Scores[i]},
                 {"gapInit", 0},
                 {"gapExt", -1},
+                {"A", As[i]},
+                {"Alen", Alens[i]},
+                {"Blen", Blens[i]},
+                {"B", Bs[i]},
+                {"simMatrix", similarity},
+                {"score", Scores[i]},
+                {"mismatches", Mismatches[i]},
+                {"ARange", ARanges[i]},
+                {"BRange", BRanges[i]},
             }
         );
         graph.setFieldSize(vtx["C"], bufSize + 1);
