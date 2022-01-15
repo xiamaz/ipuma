@@ -25,11 +25,11 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
   auto target = graph.getTarget();
   int tileCount = target.getTilesPerIPU();
 
-  Tensor As = graph.addVariable(UNSIGNED_CHAR, {activeTiles, bufSize}, "A");
-  Tensor Bs = graph.addVariable(UNSIGNED_CHAR, {activeTiles, bufSize}, "B");
+  Tensor As = graph.addVariable(UNSIGNED_CHAR, {activeTiles, maxNPerTile * bufSize}, "A");
+  Tensor Bs = graph.addVariable(UNSIGNED_CHAR, {activeTiles, maxNPerTile * bufSize}, "B");
 
-  Tensor Alens = graph.addVariable(UNSIGNED_INT, {activeTiles}, "Alen");
-  Tensor Blens = graph.addVariable(UNSIGNED_INT, {activeTiles}, "Blen");
+  Tensor Alens = graph.addVariable(UNSIGNED_INT, {activeTiles, maxNPerTile}, "Alen");
+  Tensor Blens = graph.addVariable(UNSIGNED_INT, {activeTiles, maxNPerTile}, "Blen");
 
   auto [m, n] = similarityData.shape();
 
@@ -41,10 +41,10 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
   free(similarityBuffer);
 
   // Tensor similarity = graph.addConstant(SIGNED_CHAR, {m, n}, similarityData.data(), "similarity");
-  Tensor Scores = graph.addVariable(INT, {activeTiles}, "Scores");
-  Tensor ARanges = graph.addVariable(INT, {activeTiles}, "ARanges");
-  Tensor BRanges = graph.addVariable(INT, {activeTiles}, "BRanges");
-  Tensor Mismatches = graph.addVariable(INT, {activeTiles}, "Mismatches");
+  Tensor Scores = graph.addVariable(INT, {activeTiles, maxNPerTile}, "Scores");
+  Tensor ARanges = graph.addVariable(INT, {activeTiles, maxNPerTile}, "ARanges");
+  Tensor BRanges = graph.addVariable(INT, {activeTiles, maxNPerTile}, "BRanges");
+  Tensor Mismatches = graph.addVariable(INT, {activeTiles, maxNPerTile}, "Mismatches");
 
   graph.setTileMapping(similarity, 0);
   for (int i = 0; i < activeTiles; ++i) {
@@ -77,6 +77,7 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
                                         {"bufSize", bufSize},
                                         {"gapInit", 0},
                                         {"gapExt", -1},
+                                        {"maxNPerTile", maxNPerTile},
                                         {"A", As[i]},
                                         {"Alen", Alens[i]},
                                         {"Blen", Blens[i]},
