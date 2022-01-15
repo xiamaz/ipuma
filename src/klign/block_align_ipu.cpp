@@ -17,8 +17,11 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
   future<> fut = upcxx_utils::execute_in_thread_pool([aln_block_data, report_cigar, &aln_kernel_timer] {
     DBG_VERBOSE("Starting _ipu_align_block_kernel of ", aln_block_data->kernel_alns.size(), "\n");
     aln_kernel_timer.start();
+    SWARN("Launch compare");
     ipu_driver->compare(aln_block_data->read_seqs, aln_block_data->ctg_seqs);
+    SWARN("Comapre done");
     auto aln_results = ipu_driver->get_result();
+    SWARN("getres");
     for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
       auto uda = aln_results.a_range_result[i];
       int16_t query_begin = uda & 0xffff;
@@ -37,7 +40,9 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
       aln.score1 = aln_results.scores[i];
       // FIXME: needs to be set to the second best
       aln.score2 = 0;
-      aln.mismatches = aln_results.mismatches[i];  // ssw_aln.mismatches;
+      // aln.mismatches = aln_results.mismatches[i];  // ssw_aln.mismatches;
+      aln.mismatches = 0;
+
       aln.identity = 100 * aln.score1 / aln_block_data->aln_scoring.match / aln.rlen;
       aln.read_group_id = aln_block_data->read_group_id;
       // FIXME: need to get cigar

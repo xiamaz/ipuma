@@ -36,6 +36,7 @@ class SWAlgorithm : public IPUAlgorithm {
   std::vector<int32_t> mismatches;
   std::vector<int32_t> a_range_result;
   std::vector<int32_t> b_range_result;
+  int maxAB;
 
  public:
   SWAlgorithm(SWConfig config, int maxAB = 300, int activeTiles = 1472);

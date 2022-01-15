@@ -36,7 +36,6 @@ protected:
     SWConfig config;
 
     std::unique_ptr<Engine> engine;
-    int activeTiles, bufSize;
 public:
     IPUAlgorithm(SWConfig config);
 
