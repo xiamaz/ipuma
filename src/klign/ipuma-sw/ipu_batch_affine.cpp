@@ -156,23 +156,17 @@ void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<s
     }
   }
 
-  std::cout << "Write" << std::endl;
   engine->writeTensor(STREAM_A, &a[0], &a[a.size()]);
   engine->writeTensor(STREAM_A_LEN, &a_len[0], &a_len[a_len.size()]);
   engine->writeTensor(STREAM_B, &b[0], &b[b.size()]);
   engine->writeTensor(STREAM_B_LEN, &b_len[0], &b_len[b_len.size()]);
-  std::cout << "Write done" << std::endl;
 
-  std::cout << "Run" << std::endl;
   engine->run(0);
-  std::cout << "Run done" << std::endl;
 
-  std::cout << "Read" << std::endl;
   engine->readTensor(STREAM_SCORES, &*scores.begin(), &*scores.end());
   engine->readTensor(STREAM_MISMATCHES, &*mismatches.begin(), &*mismatches.end());
   engine->readTensor(STREAM_A_RANGE, &*a_range_result.begin(), &*a_range_result.end());
   engine->readTensor(STREAM_B_RANGE, &*b_range_result.begin(), &*b_range_result.end());
-  std::cout << "Read done" << std::endl;
 }
 
 }}

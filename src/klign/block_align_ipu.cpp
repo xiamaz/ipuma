@@ -17,11 +17,8 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
   future<> fut = upcxx_utils::execute_in_thread_pool([aln_block_data, report_cigar, &aln_kernel_timer] {
     DBG_VERBOSE("Starting _ipu_align_block_kernel of ", aln_block_data->kernel_alns.size(), "\n");
     aln_kernel_timer.start();
-    SWARN("Launch compare");
     ipu_driver->compare(aln_block_data->read_seqs, aln_block_data->ctg_seqs);
-    SWARN("Comapre done");
     auto aln_results = ipu_driver->get_result();
-    SWARN("getres");
     for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
       auto uda = aln_results.a_range_result[i];
       int16_t query_begin = uda & 0xffff;
@@ -69,7 +66,7 @@ void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
     double init_time;
     if (ipu_driver == NULL) {
       ipu::SWConfig config = {aln_scoring.gap_opening, aln_scoring.gap_extending, aln_scoring.match, -aln_scoring.mismatch, swatlib::Similarity::nucleicAcid, swatlib::DataType::nucleicAcid};
-      ipu_driver = new ipu::batchaffine::SWAlgorithm(config, 1000, 1472 * 6);
+      ipu_driver = new ipu::batchaffine::SWAlgorithm(config, 300, 1472 * 6);
       // local_team().rank_me(), local_team().rank_n(), (short)aln_scoring.match,
       //                                    (short)-aln_scoring.mismatch, (short)-aln_scoring.gap_opening,
       //                                    (short)-aln_scoring.gap_extending, rlen_limit, init_time);
