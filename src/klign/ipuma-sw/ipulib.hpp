@@ -28,7 +28,7 @@ public:
           std::cerr << "Error attaching to device\n";
         }
 
-        auto device = std::move(*it);
+        device = std::move(*it);
         target = device.getTarget();
     }
 
