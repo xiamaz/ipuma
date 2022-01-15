@@ -16,7 +16,7 @@ using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
 
-static ipu::batchaffine::SWAlgorithm *ipu_driver;
+static ipu::batchaffine::SWAlgorithm *ipu_driver = NULL;
 
 static upcxx::future<> gpu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns, bool report_cigar,
                                        IntermittentTimer &aln_kernel_timer) {

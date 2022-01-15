@@ -172,7 +172,9 @@ public:
     void createEngine(Graph& graph, std::vector<program::Program> programs) {
         auto& device = getDevice();
         poplar::OptionFlags engineOptions;
+        std::cout << "Help1\n";
         engine = std::make_unique<Engine>(graph, programs, engineOptions);
+        std::cout << "Help2\n";
         engine->load(device);
     }
 
