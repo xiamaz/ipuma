@@ -164,6 +164,3 @@ public:
 };
 
 template class SWAffine<int>;
-template class SWAffine<float>;
-template class SWAffine<half>;
-template class SWAffine<short>;

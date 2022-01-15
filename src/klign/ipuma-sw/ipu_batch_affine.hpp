@@ -19,6 +19,16 @@ using namespace poplar;
 
 namespace ipu {
 namespace batchaffine {
+
+const std::string STREAM_A = "a-write";
+const std::string STREAM_A_LEN = "a-len-write";
+const std::string STREAM_B = "b-write";
+const std::string STREAM_B_LEN = "b-len-write";
+const std::string STREAM_SCORES = "scores-read";
+const std::string STREAM_MISMATCHES = "mismatches-read";
+const std::string STREAM_A_RANGE = "a-range-read";
+const std::string STREAM_B_RANGE = "b-range-read";
+
 /**
  * Streamable IPU graph for SW
  */
@@ -46,15 +56,19 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
 
     // Tensor similarity = graph.addConstant(SIGNED_CHAR, {m, n}, similarityData.data(), "similarity");
     Tensor Scores = graph.addVariable(INT, {activeTiles}, "Scores");
+    Tensor ARanges = graph.addVariable(INT, {activeTiles}, "ARanges");
+    Tensor BRanges = graph.addVariable(INT, {activeTiles}, "BRanges");
+    Tensor Mismatches = graph.addVariable(INT, {activeTiles}, "Mismatches");
 
     graph.setTileMapping(similarity, 0);
     for (int i = 0; i < activeTiles; ++i) {
         int tileIndex = i % tileCount;
         graph.setTileMapping(As[i], tileIndex);
         graph.setTileMapping(Bs[i], tileIndex);
-        graph.setTileMapping(Scores[i], tileIndex);
         graph.setTileMapping(Alens[i], tileIndex);
         graph.setTileMapping(Blens[i], tileIndex);
+
+        graph.setTileMapping(Scores[i], tileIndex);
     }
 
     graph.createHostWrite("a-write", As);
@@ -98,8 +112,6 @@ public:
 
         createEngine(graph, programs);
     }
-
-    bool hasVectorizedCompare() { return true; }
 
     swatlib::Matrix<int> compare(const std::vector<std::string>& A, const std::vector<std::string>& B) {
         if (!(checkSize(A) || checkSize(B))) throw std::runtime_error("Too small buffer or number of active tiles.");
