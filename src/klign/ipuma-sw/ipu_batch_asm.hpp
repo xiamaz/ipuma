@@ -112,7 +112,7 @@ public:
     bool hasVectorizedCompare() { return true; }
 
     swatlib::Matrix<int> compare(const std::vector<std::string>& A, const std::vector<std::string>& B, swatlib::TickTock& t) {
-        if (!(checkSize(A) || checkSize(B))) throw std::runtime_error("Too small buffer or number of active tiles.");
+        // if (!(checkSize(A) || checkSize(B))) throw std::runtime_error("Too small buffer or number of active tiles.");
         size_t transSize = activeTiles * bufSize * sizeof(uint32_t);
 
         auto encoder = getEncoder(datatype);

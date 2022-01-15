@@ -96,7 +96,7 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
   return {prog, initProg};
 }
 
-SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int maxAB, int activeTiles) : IPUAlgorithm(config, maxAB, activeTiles) {
+SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int maxAB, int activeTiles) : IPUAlgorithm(config) {
     a.resize(maxAB * activeTiles);
     a_len.resize(activeTiles);
     b.resize(maxAB * activeTiles);

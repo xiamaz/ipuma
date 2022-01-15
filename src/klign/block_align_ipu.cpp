@@ -63,8 +63,8 @@ void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
     }
     double init_time;
     if (ipu_driver == NULL) {
-      ipu::SWConfig config = {1, 1, 2, -2, swatlib::Similarity::nucleicAcid, swatlib::DataType::nucleicAcid};
-      ipu_driver = new ipu::batchaffine::SWAlgorithm(config, 300, 1472 * 6);
+      ipu::SWConfig config = {aln_scoring.gap_opening, aln_scoring.gap_extending, aln_scoring.match, aln_scoring.mismatch, swatlib::Similarity::nucleicAcid, swatlib::DataType::nucleicAcid};
+      ipu_driver = new ipu::batchaffine::SWAlgorithm(config, 1000, 1472 * 6);
       // local_team().rank_me(), local_team().rank_n(), (short)aln_scoring.match,
       //                                    (short)-aln_scoring.mismatch, (short)-aln_scoring.gap_opening,
       //                                    (short)-aln_scoring.gap_extending, rlen_limit, init_time);

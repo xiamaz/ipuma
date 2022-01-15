@@ -124,7 +124,7 @@ inline int extractScoreSW(Engine& engine, const std::string& sA, const std::stri
     return S(x, y);
 }
 
-IPUAlgorithm::IPUAlgorithm(SWConfig config, int bufSize, int activeTiles) : config(config), activeTiles(activeTiles), bufSize(bufSize) {
+IPUAlgorithm::IPUAlgorithm(SWConfig config) : config(config) {
     auto manager = poplar::DeviceManager::createDeviceManager();
     // Attempt to attach to a single IPU:
     auto devices = manager.getDevices(poplar::TargetType::IPU, 1);
@@ -139,18 +139,6 @@ IPUAlgorithm::IPUAlgorithm(SWConfig config, int bufSize, int activeTiles) : conf
 
     device = std::move(*it);
     target = device.getTarget();
-}
-
-/**
- * Check that the array fits into the ipu.
- */
-bool IPUAlgorithm::checkSize(const std::vector<std::string>& S) {
-    int maxLen = 0;
-    for (const std::string& s : S) {
-        int sSize = s.size();
-        if (sSize > maxLen) maxLen = sSize;
-    }
-    return maxLen < bufSize;
 }
 
 void IPUAlgorithm::addCycleCount(Graph& graph, program::Sequence& mainProgram) {
@@ -175,15 +163,15 @@ void IPUAlgorithm::createEngine(Graph& graph, std::vector<program::Program> prog
 }
 
 poplar::Target& IPUAlgorithm::getTarget() {
-	  return target;
+          return target;
 }
 
 poplar::Device& IPUAlgorithm::getDevice() {
-		return device;
+                return device;
 }
 
 poplar::Graph IPUAlgorithm::getGraph() {
-	  return std::move(poplar::Graph(target));
+          return std::move(poplar::Graph(target));
 }
 
 }

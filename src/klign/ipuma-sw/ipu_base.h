@@ -38,12 +38,7 @@ protected:
     std::unique_ptr<Engine> engine;
     int activeTiles, bufSize;
 public:
-    IPUAlgorithm(SWConfig config, int bufSize = 10001, int activeTiles = 1472);
-
-    /**
-     * Check that the array fits into the ipu.
-     */
-    bool checkSize(const std::vector<std::string>& S);
+    IPUAlgorithm(SWConfig config);
 
     void addCycleCount(Graph& graph, program::Sequence& mainProgram);
 
