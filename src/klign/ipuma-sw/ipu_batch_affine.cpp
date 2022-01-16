@@ -18,7 +18,7 @@ namespace batchaffine {
 /**
  * Streamable IPU graph for SW
  */
-std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles, unsigned long bufSize, unsigned long maxNPerTile,
+std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles, unsigned long bufSize, unsigned long maxBatches,
                                          const std::string& format, const swatlib::Matrix<int8_t> similarityData) {
   program::Sequence prog;
   program::Sequence initProg;
@@ -26,11 +26,11 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
   auto target = graph.getTarget();
   int tileCount = target.getTilesPerIPU();
 
-  Tensor As = graph.addVariable(UNSIGNED_CHAR, {activeTiles, maxNPerTile * bufSize}, "A");
-  Tensor Bs = graph.addVariable(UNSIGNED_CHAR, {activeTiles, maxNPerTile * bufSize}, "B");
+  Tensor As = graph.addVariable(UNSIGNED_CHAR, {activeTiles, bufSize}, "A");
+  Tensor Bs = graph.addVariable(UNSIGNED_CHAR, {activeTiles, bufSize}, "B");
 
-  Tensor Alens = graph.addVariable(UNSIGNED_INT, {activeTiles, maxNPerTile}, "Alen");
-  Tensor Blens = graph.addVariable(UNSIGNED_INT, {activeTiles, maxNPerTile}, "Blen");
+  Tensor Alens = graph.addVariable(UNSIGNED_INT, {activeTiles, maxBatches}, "Alen");
+  Tensor Blens = graph.addVariable(UNSIGNED_INT, {activeTiles, maxBatches}, "Blen");
 
   auto [m, n] = similarityData.shape();
 
@@ -42,10 +42,10 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
   free(similarityBuffer);
 
   // Tensor similarity = graph.addConstant(SIGNED_CHAR, {m, n}, similarityData.data(), "similarity");
-  Tensor Scores = graph.addVariable(INT, {activeTiles, maxNPerTile}, "Scores");
-  Tensor ARanges = graph.addVariable(INT, {activeTiles, maxNPerTile}, "ARanges");
-  Tensor BRanges = graph.addVariable(INT, {activeTiles, maxNPerTile}, "BRanges");
-  Tensor Mismatches = graph.addVariable(INT, {activeTiles, maxNPerTile}, "Mismatches");
+  Tensor Scores = graph.addVariable(INT, {activeTiles, maxBatches}, "Scores");
+  Tensor ARanges = graph.addVariable(INT, {activeTiles, maxBatches}, "ARanges");
+  Tensor BRanges = graph.addVariable(INT, {activeTiles, maxBatches}, "BRanges");
+  Tensor Mismatches = graph.addVariable(INT, {activeTiles, maxBatches}, "Mismatches");
 
   graph.setTileMapping(similarity, 0);
   for (int i = 0; i < activeTiles; ++i) {
@@ -78,7 +78,7 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
                                         {"bufSize", bufSize},
                                         {"gapInit", 0},
                                         {"gapExt", -1},
-                                        {"maxNPerTile", maxNPerTile},
+                                        {"maxNPerTile", maxBatches},
                                         {"A", As[i]},
                                         {"Alen", Alens[i]},
                                         {"Blen", Blens[i]},
