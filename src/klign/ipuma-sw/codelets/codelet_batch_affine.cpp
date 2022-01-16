@@ -55,10 +55,11 @@ public:
     poplar::Input<int> gapInit;
     poplar::Input<int> gapExt;
     poplar::Input<int> bufSize;
+    poplar::Input<int> maxAB;
     poplar::Input<poplar::Vector<unsigned char, poplar::VectorLayout::ONE_PTR>> A;
     poplar::Input<poplar::Vector<unsigned char, poplar::VectorLayout::ONE_PTR>> B;
-    poplar::Input<poplar::Vector<size_t, poplar::VectorLayout::ONE_PTR>> Alen;
-    poplar::Input<poplar::Vector<size_t, poplar::VectorLayout::ONE_PTR>> Blen;
+    poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> Alen;
+    poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> Blen;
     poplar::Output<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> score;
     poplar::Output<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> mismatches;
     poplar::Output<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> ARange;
@@ -84,8 +85,8 @@ public:
             auto b_len = Blen[n];
             if (a_len == 0 || b_len == 0) break;
 
-            memset(&(C[0]), 0, bufSize * sizeof(int));
-            memset(&(bG[0]), 0, bufSize * sizeof(int));
+            memset(&(C[0]), 0, maxAB * sizeof(int));
+            memset(&(bG[0]), 0, maxAB * sizeof(int));
 
             // forward pass
             for (int i = 0; i < b_len; ++i) {
@@ -106,15 +107,14 @@ public:
                         Bend = i;
                         s = lastNoGap;
                     }
-                    // s = max(s, lastNoGap);
                 }
             }
             score[n] = s;
 
             s = 0;
 
-            memset(&(C[0]), 0, bufSize * sizeof(int));
-            memset(&(bG[0]), 0, bufSize * sizeof(int));
+            memset(&(C[0]), 0, maxAB * sizeof(int));
+            memset(&(bG[0]), 0, maxAB * sizeof(int));
             // reverse pass
             for (int i = Bend; i >= 0; --i) {
                 int aGap;

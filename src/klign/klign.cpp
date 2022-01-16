@@ -338,11 +338,12 @@ class Aligner {
         current_bucket_elems++;
       };
       #ifdef POPLAR_ENABLED
-      bool bucket_oom = total_ctg_len + cseq.size()  >= KLIGN_IPU_BUFSIZE || total_read_len + rseq.size() >= KLIGN_IPU_BUFSIZE;
-      bool bucket_ooe = current_bucket_elems >= KLIGN_IPU_MAX_BATCHES;
+      bool bucket_oom = (total_ctg_len + cseq.size()  >= KLIGN_IPU_BUFSIZE) || (total_read_len + rseq.size() >= KLIGN_IPU_BUFSIZE);
+      bool bucket_ooe = current_bucket_elems + 1 > KLIGN_IPU_MAX_BATCHES;
       if (bucket_oom || bucket_ooe) {
-        if (current_ipu_bucket == KLIGN_IPU_TILES) {
+        if (current_ipu_bucket + 1 == KLIGN_IPU_TILES) {
           // Our buckets are all full.
+          std::cout << "Bucket oom: " << bucket_oom << " Bucket ooe: " << bucket_ooe << std::endl;
           kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, max_clen, max_rlen, aln_kernel_timer);
           clear_aln_bufs();
         } else {
@@ -350,6 +351,7 @@ class Aligner {
           current_ipu_bucket++;
           total_ctg_len = 0;  
           total_read_len = 0;  
+          current_bucket_elems = 0;
         }
       };
       push();

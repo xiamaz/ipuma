@@ -10,6 +10,7 @@
 #include "similarity.h"
 #include "encoding.h"
 
+#include "vector.hpp"
 #include "ipu_batch_affine.h"
 
 namespace ipu {
@@ -18,7 +19,7 @@ namespace batchaffine {
 /**
  * Streamable IPU graph for SW
  */
-std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles, unsigned long bufSize, unsigned long maxBatches,
+std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles, unsigned long maxAB, unsigned long bufSize, unsigned long maxBatches,
                                          const std::string& format, const swatlib::Matrix<int8_t> similarityData) {
   program::Sequence prog;
   program::Sequence initProg;
@@ -29,8 +30,8 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
   Tensor As = graph.addVariable(UNSIGNED_CHAR, {activeTiles, bufSize}, "A");
   Tensor Bs = graph.addVariable(UNSIGNED_CHAR, {activeTiles, bufSize}, "B");
 
-  Tensor Alens = graph.addVariable(UNSIGNED_INT, {activeTiles, maxBatches}, "Alen");
-  Tensor Blens = graph.addVariable(UNSIGNED_INT, {activeTiles, maxBatches}, "Blen");
+  Tensor Alens = graph.addVariable(INT, {activeTiles, maxBatches}, "Alen");
+  Tensor Blens = graph.addVariable(INT, {activeTiles, maxBatches}, "Blen");
 
   auto [m, n] = similarityData.shape();
 
@@ -76,6 +77,7 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
     VertexRef vtx = graph.addVertex(frontCs, "SWAffine",
                                     {
                                         {"bufSize", bufSize},
+                                        {"maxAB", maxAB},
                                         {"gapInit", 0},
                                         {"gapExt", -1},
                                         {"maxNPerTile", maxBatches},
@@ -89,8 +91,8 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
                                         {"ARange", ARanges[i]},
                                         {"BRange", BRanges[i]},
                                     });
-    graph.setFieldSize(vtx["C"], bufSize + 1);
-    graph.setFieldSize(vtx["bG"], bufSize + 1);
+    graph.setFieldSize(vtx["C"], maxAB + 1);
+    graph.setFieldSize(vtx["bG"], maxAB + 1);
     graph.setTileMapping(vtx, tileIndex);
     graph.setPerfEstimate(vtx, 1);
   }
@@ -100,109 +102,102 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
 
 SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int activeTiles, int maxAB, int maxBatches, int bufsize)
     : IPUAlgorithm(config) {
+  this->maxAB = maxAB;
+  this->bufsize = bufsize;
+  this->maxBatches = maxBatches;
+  this->tilesUsed = activeTiles;
+
   auto totalPairs = activeTiles * maxBatches;
-  a.resize(bufsize);
+
+  a.resize(activeTiles * bufsize);
   a_len.resize(totalPairs);
-  b.resize(bufsize);
+  std::fill(a_len.begin(), a_len.end(), 0);
+
+  b.resize(activeTiles * bufsize);
   b_len.resize(totalPairs);
+  std::fill(b_len.begin(), b_len.end(), 0);
+
   scores.resize(totalPairs);
   mismatches.resize(totalPairs);
   a_range_result.resize(totalPairs);
   b_range_result.resize(totalPairs);
   bucket_pairs.resize(activeTiles);
-  this->maxAB = maxAB;
-  this->bufsize = bufsize;
-  this->maxBatches = maxBatches;
 
   Graph graph = createGraph();
 
   auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
-  std::vector<program::Program> programs = buildGraph(graph, activeTiles, maxAB, maxBatches, "int", similarityMatrix);
+  std::vector<program::Program> programs = buildGraph(graph, activeTiles, maxAB, bufsize, maxBatches, "int", similarityMatrix);
 
   createEngine(graph, programs);
 }
 
 BlockAlignmentResults SWAlgorithm::get_result() { return {scores, mismatches, a_range_result, b_range_result}; }
 
+void SWAlgorithm::fillBuckets(const std::vector<std::string>& A, const std::vector<std::string>& B) {
+  std::fill(bucket_pairs.begin(), bucket_pairs.end(), 0);
+  int curBucket = 0;
+  int curBucketASize = 0;
+  int curBucketBSize = 0;
+  for (int i = 0; i < A.size(); ++i) {
+    const auto& a = A[i];
+    const auto& b = B[i];
+    if (a.size() > maxAB || b.size() > maxAB) {
+      std::cout << "sizes of sequences: a(" << a.size() << "), b(" << b.size() << ") larger than maxAB(" << maxAB << ")\n";
+      exit(1);
+    }
+    int newBucketASize = curBucketASize + a.size();
+    int newBucketBSize = curBucketBSize + b.size();
+    if ((newBucketASize > bufsize || newBucketBSize > bufsize) || bucket_pairs[curBucket] >= maxBatches) {
+      curBucket++;
+      curBucketASize = 0;
+      curBucketBSize = 0;
+    }
+    bucket_pairs[curBucket]++;
+  }
+}
+
 void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<std::string>& B) {
   // if (!(checkSize(A) || checkSize(B))) throw std::runtime_error("Too small buffer or number of active tiles.");
   // size_t transSize = activeTiles * bufSize * sizeof(char);
+  if (A.size() > maxBatches * tilesUsed) {
+    std::cout << "A has more elements than the maxBatchsize" << std::endl;
+    std::cout << "A.size() = " << A.size() << std::endl;
+    std::cout << "max comparisons = " << tilesUsed << " * " << maxBatches << std::endl;
+    exit(1);
+  }
 
   auto encoder = swatlib::getEncoder(swatlib::DataType::nucleicAcid);
   auto vA = encoder.encode(A);
   auto vB = encoder.encode(B);
 
-  {
-    // TODO(lbb): Duplicated from klign.cpp, pass as parameter.
-    size_t offset = 0;
-    size_t current_bucket_a_len = 0;
-    size_t current_bucket_b_len = 0;
-    size_t current_bucket_elems = 0;
-    size_t current_bucket_id = 0;
-    for (size_t i = 0; i < A.size(); i++) {
-      // Check in which bucket we are.
-      bool bucket_oom = current_bucket_a_len + A[i].size()  >= bufsize || current_bucket_b_len + B[i].size() >= bufsize;
-      bool bucket_ooe = current_bucket_elems >= maxBatches;
-      if (bucket_oom || bucket_ooe) {
-        bucket_pairs[current_bucket_id] = current_bucket_elems;
-        current_bucket_id++;
-        offset = bufsize * current_bucket_id;
-        current_bucket_a_len = 0;
-        current_bucket_b_len = 0;
-        current_bucket_elems = 0;
-      }
-      current_bucket_elems++;
-      current_bucket_a_len += A[i].size();
-      current_bucket_b_len += B[i].size();
+  size_t bufferOffset = 0;
+  size_t bucketIncr = 0;
+  size_t index = 0;
 
-      // Assign to bucketet list
-      a_len[offset] = A[i].size();
-      b_len[offset] = B[i].size();
-      offset++;
-      if (a_len[offset] > maxAB) {
-        std::cout << "A is longer then maxAB" << std::endl;
-        exit(1);
-      }
-      if (b_len[offset] > maxAB) {
-        std::cout << "B is longer then maxAB" << std::endl;
-        exit(1);
-      }
-    }
-  }
+  fillBuckets(A, B);
 
-  {
-    size_t offset = 0;
-    size_t current_bucket_elem = 0;
-    size_t current_bucket_id = 0;
-    for (size_t i = 0; i < A.size(); i++) {
-      for (size_t j = 0; j < A[i].size(); j++) {
-        a[offset] = vA[i][j];
-        offset++;
+  std::fill(a_len.begin(), a_len.end(), 0);
+  std::fill(b_len.begin(), b_len.end(), 0);
+  for (const auto& cmpCountBucket : bucket_pairs) {
+    size_t bucketAOffset = 0;
+    size_t bucketBOffset = 0;
+    for (int cmpIndex = 0; cmpIndex < cmpCountBucket; ++cmpIndex) {
+      // Copy strings A[index] and B[index] to a and b
+      const auto& curA = vA[index];
+      const auto& curB = vB[index];
+      for (int i = 0; i < curA.size(); ++i) {
+        a[bufferOffset + bucketAOffset++] = curA[i];
       }
-      current_bucket_elem++;
-      if (current_bucket_elem >= bucket_pairs[current_bucket_id]) {
-        offset = bufsize * current_bucket_id;
-        current_bucket_elem = 0;
-        current_bucket_id++;
+      for (int i = 0; i < curB.size(); ++i) {
+        b[bufferOffset + bucketBOffset++] = curB[i];
       }
+      a_len[bucketIncr + cmpIndex] = curA.size();
+      b_len[bucketIncr + cmpIndex] = curB.size();
+      index++;
     }
-  }
-  {
-    size_t offset = 0;
-    size_t current_bucket_elem = 0;
-    size_t current_bucket_id = 0;
-    for (size_t i = 0; i < A.size(); i++) {
-      for (size_t j = 0; j < B[i].size(); j++) {
-        b[offset] = vB[i][j];
-        offset++;
-      }
-      current_bucket_elem++;
-      if (current_bucket_elem >= bucket_pairs[current_bucket_id]) {
-        offset = bufsize * current_bucket_id;
-        current_bucket_elem = 0;
-        current_bucket_id++;
-      }
-    }
+
+    bufferOffset += bufsize;
+    bucketIncr += maxBatches;
   }
 
   engine->writeTensor(STREAM_A, &a[0], &a[a.size()]);

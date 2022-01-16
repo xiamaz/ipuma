@@ -27,7 +27,7 @@ struct BlockAlignmentResults {
 
 class SWAlgorithm : public IPUAlgorithm {
  private:
-  std::vector<int> bucket_pairs;
+  std::vector<size_t> bucket_pairs;
 
   std::vector<char> a;
   std::vector<int32_t> a_len;
@@ -41,9 +41,12 @@ class SWAlgorithm : public IPUAlgorithm {
   int maxAB;
   int bufsize;
   int maxBatches;
+  int tilesUsed;
+
+  void fillBuckets(const std::vector<std::string>& A, const std::vector<std::string>& B);
 
  public:
-  SWAlgorithm(SWConfig config, int activeTiles = 1472, int maxAB = 300, int maxBatches = 100, int bufsize = 30000);
+  SWAlgorithm(SWConfig config, int activeTiles = 1, int maxAB = 300, int maxBatches = 20, int bufsize = 3000);
 
   BlockAlignmentResults get_result();
 
