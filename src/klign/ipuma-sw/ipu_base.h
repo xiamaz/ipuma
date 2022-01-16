@@ -1,6 +1,18 @@
 #ifndef IPU_BASE_HPP
 #define IPU_BASE_HPP
 
+#ifndef KLIGN_IPU_MAXAB_SIZE
+#define KLIGN_IPU_MAXAB_SIZE 200
+#endif
+
+#ifndef KLIGN_IPU_TILES
+#define KLIGN_IPU_TILES 8832
+#endif
+
+#ifndef KLIGN_IPU_BATCHES
+#define KLIGN_IPU_BATCHES 110
+#endif
+
 #include <poplar/Graph.hpp>
 #include <poplar/Engine.hpp>
 

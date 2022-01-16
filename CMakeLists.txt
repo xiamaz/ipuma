@@ -107,6 +107,7 @@ endif()
 
 option(ENABLE_POPLAR "Enable POPLAR" OFF)
 if(ENABLE_POPLAR)
+  add_definitions(-DPOPLAR_ENABLED)
   include(AddGPLibrary)
   message(STATUS "Building for IPU with POPLAR")
   set(POPLIBS_ENABLED_IPU_ARCH_NAMES "cpu;ipu2")

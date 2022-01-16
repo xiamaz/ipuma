@@ -329,7 +329,11 @@ class Aligner {
       kernel_alns.emplace_back(rname, cid, 0, 0, rlen, cstart, 0, clen, orient);
       ctg_seqs.emplace_back(cseq);
       read_seqs.emplace_back(rseq);
-      if (num_alns >= (1472 * 6 * 200 * 50)) {
+      #ifdef POPLAR_ENABLED
+       if (num_alns >= (KLIGN_IPU_MAXAB_SIZE * KLIGN_IPU_TILES * KLIGN_IPU_BATCHES)) {
+      #else
+       if (num_alns >= KLIGN_GPU_BLOCK_SIZE) {
+      #endif
         // for (auto &&x : ctg_seqs) {
         //   SLOG_VERBOSE("HistC: ", x.size(), "\n"); 
         // }
