@@ -109,7 +109,10 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int activeTiles, int maxAB, int m
   mismatches.resize(totalPairs);
   a_range_result.resize(totalPairs);
   b_range_result.resize(totalPairs);
+  bucket_pairs.resize(activeTiles);
   this->maxAB = maxAB;
+  this->bufsize = bufsize;
+  this->maxBatches = maxBatches;
 
   Graph graph = createGraph();
 
@@ -129,34 +132,75 @@ void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<s
   auto vA = encoder.encode(A);
   auto vB = encoder.encode(B);
 
-  for (size_t i = 0; i < A.size(); i++) {
-    a_len[i] = A[i].size();
-    b_len[i] = B[i].size();
-    if (a_len[i] > maxAB) {
-      std::cout << "A is longer then maxAB" << std::endl;
-      exit(1);
-    }
-    if (b_len[i] > maxAB) {
-      std::cout << "B is longer then maxAB" << std::endl;
-      exit(1);
+  {
+    // TODO(lbb): Duplicated from klign.cpp, pass as parameter.
+    size_t offset = 0;
+    size_t current_bucket_a_len = 0;
+    size_t current_bucket_b_len = 0;
+    size_t current_bucket_elems = 0;
+    size_t current_bucket_id = 0;
+    for (size_t i = 0; i < A.size(); i++) {
+      // Check in which bucket we are.
+      bool bucket_oom = current_bucket_a_len + A[i].size()  >= bufsize || current_bucket_b_len + B[i].size() >= bufsize;
+      bool bucket_ooe = current_bucket_elems >= maxBatches;
+      if (bucket_oom || bucket_ooe) {
+        bucket_pairs[current_bucket_id] = current_bucket_elems;
+        current_bucket_id++;
+        offset = bufsize * current_bucket_id;
+        current_bucket_a_len = 0;
+        current_bucket_b_len = 0;
+        current_bucket_elems = 0;
+      }
+      current_bucket_elems++;
+      current_bucket_a_len += A[i].size();
+      current_bucket_b_len += B[i].size();
+
+      // Assign to bucketet list
+      a_len[offset] = A[i].size();
+      b_len[offset] = B[i].size();
+      offset++;
+      if (a_len[offset] > maxAB) {
+        std::cout << "A is longer then maxAB" << std::endl;
+        exit(1);
+      }
+      if (b_len[offset] > maxAB) {
+        std::cout << "B is longer then maxAB" << std::endl;
+        exit(1);
+      }
     }
   }
 
   {
     size_t offset = 0;
+    size_t current_bucket_elem = 0;
+    size_t current_bucket_id = 0;
     for (size_t i = 0; i < A.size(); i++) {
       for (size_t j = 0; j < A[i].size(); j++) {
         a[offset] = vA[i][j];
         offset++;
       }
+      current_bucket_elem++;
+      if (current_bucket_elem >= bucket_pairs[current_bucket_id]) {
+        offset = bufsize * current_bucket_id;
+        current_bucket_elem = 0;
+        current_bucket_id++;
+      }
     }
   }
   {
     size_t offset = 0;
+    size_t current_bucket_elem = 0;
+    size_t current_bucket_id = 0;
     for (size_t i = 0; i < A.size(); i++) {
       for (size_t j = 0; j < B[i].size(); j++) {
         b[offset] = vB[i][j];
         offset++;
+      }
+      current_bucket_elem++;
+      if (current_bucket_elem >= bucket_pairs[current_bucket_id]) {
+        offset = bufsize * current_bucket_id;
+        current_bucket_elem = 0;
+        current_bucket_id++;
       }
     }
   }

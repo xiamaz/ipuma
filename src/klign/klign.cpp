@@ -286,6 +286,8 @@ class Aligner {
 
   int64_t total_ctg_len = 0;
   int64_t total_read_len = 0;
+  int64_t current_bucket_elems = 0;
+  int64_t current_ipu_bucket = 0;
 
   future<> active_kernel_fut;
 
@@ -329,19 +331,28 @@ class Aligner {
         // this is also the way it's done in meraligner
         kernel_alns.emplace_back(rname, cid, 0, 0, rlen, cstart, 0, clen, orient);
         ctg_seqs.emplace_back(cseq);
-        total_ctg_len+= cseq.size();
         read_seqs.emplace_back(rseq);
+        // Add to bucket length
+        total_ctg_len += cseq.size();
         total_read_len += rseq.size();
+        current_bucket_elems++;
       };
       #ifdef POPLAR_ENABLED
-      bool oom = total_ctg_len + cseq.size()  >= KLIGN_IPU_BUFSIZE || total_read_len + rseq.size() >= KLIGN_IPU_BUFSIZE;
-      bool ooe = num_alns >= KLIGN_IPU_MAX_BATCHES;
-       if (oom || ooe) {
-          kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, max_clen,
-                           max_rlen, aln_kernel_timer);
+      bool bucket_oom = total_ctg_len + cseq.size()  >= KLIGN_IPU_BUFSIZE || total_read_len + rseq.size() >= KLIGN_IPU_BUFSIZE;
+      bool bucket_ooe = current_bucket_elems >= KLIGN_IPU_MAX_BATCHES;
+      if (bucket_oom || bucket_ooe) {
+        if (current_ipu_bucket == KLIGN_IPU_TILES) {
+          // Our buckets are all full.
+          kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, max_clen, max_rlen, aln_kernel_timer);
           clear_aln_bufs();
-        };
-        push();
+        } else {
+          // Close bucket and create a new one. 
+          current_ipu_bucket++;
+          total_ctg_len = 0;  
+          total_read_len = 0;  
+        }
+      };
+      push();
       #else
       push();
        if (num_alns >= KLIGN_GPU_BLOCK_SIZE) {
@@ -405,6 +416,8 @@ class Aligner {
     max_rlen = 0;
     total_ctg_len = 0;
     total_read_len = 0;
+    current_ipu_bucket = 0;
+    current_bucket_elems = 0;
   }
 
   void flush_remaining(int read_group_id) {
