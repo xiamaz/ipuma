@@ -68,6 +68,9 @@ public:
 
         int gI = *gapInit;
         int gE = *gapExt;
+
+        int i_offset = 0;
+        int j_offset = 0;
         
         for (int n = 0; n < maxNPerTile; ++n) {
             int lastNoGap, prevNoGap;
@@ -76,7 +79,6 @@ public:
             uint16_t Bstart = 0;
             uint16_t Aend = 0;
             uint16_t Bend = 0;
-            int n_offset = n * bufSize;
 
             auto a_len = Alen[n];
             auto b_len = Blen[n];
@@ -94,7 +96,7 @@ public:
                     aGap = max(lastNoGap + gI + gE, aGap + gE);
                     bG[j] = max(C[j] + gI + gE, bG[j] + gE);
 
-                    lastNoGap = max(prevNoGap + simMatrix[A[n_offset + j]][B[n_offset + i]], aGap);
+                    lastNoGap = max(prevNoGap + simMatrix[A[j_offset + j]][B[i_offset + i]], aGap);
                     lastNoGap = max(lastNoGap, bG[j]);
                     lastNoGap = max(lastNoGap, 0);
                     prevNoGap = C[j];
@@ -121,7 +123,7 @@ public:
                 for (int j = Aend; j >= 0; --j) {
                     aGap = max(lastNoGap + gI + gE, aGap + gE);
                     bG[j] = max(C[j] + gI + gE, bG[j] + gE);
-                    lastNoGap = max(prevNoGap + simMatrix[A[n_offset + j]][B[n_offset + i]], aGap);
+                    lastNoGap = max(prevNoGap + simMatrix[A[j_offset + j]][B[i_offset + i]], aGap);
                     lastNoGap = max(lastNoGap, bG[j]);
                     lastNoGap = max(lastNoGap, 0);
                     prevNoGap = C[j];
@@ -141,6 +143,9 @@ public:
             range[0] = Bstart;
             range[1] = Bend;
             BRange[n] = *reinterpret_cast<uint32_t*>(range);
+
+            i_offset += b_len;
+            j_offset += a_len;
         }
         return true;
     }
