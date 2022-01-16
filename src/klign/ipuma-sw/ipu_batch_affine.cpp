@@ -12,13 +12,14 @@
 
 #include "ipu_batch_affine.h"
 
-namespace ipu { namespace batchaffine {
+namespace ipu {
+namespace batchaffine {
 
 /**
  * Streamable IPU graph for SW
  */
-std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles, unsigned long bufSize, unsigned long maxNPerTile, const std::string& format,
-                                         const swatlib::Matrix<int8_t> similarityData) {
+std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles, unsigned long bufSize, unsigned long maxNPerTile,
+                                         const std::string& format, const swatlib::Matrix<int8_t> similarityData) {
   program::Sequence prog;
   program::Sequence initProg;
 
@@ -97,34 +98,28 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
   return {prog, initProg};
 }
 
-SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int maxAB, int maxNPerTile, int activeTiles) : IPUAlgorithm(config) {
-    auto totalPairs = activeTiles * maxNPerTile;
-    a.resize(maxAB * totalPairs);
-    a_len.resize(totalPairs);
-    b.resize(maxAB * totalPairs);
-    b_len.resize(totalPairs);
-    scores.resize(totalPairs);
-    mismatches.resize(totalPairs);
-    a_range_result.resize(totalPairs);
-    b_range_result.resize(totalPairs);
-    this->maxAB = maxAB;
+SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int activeTiles, int maxAB, int maxBatches, int bufsize)
+    : IPUAlgorithm(config) {
+  auto totalPairs = activeTiles * maxBatches;
+  a.resize(bufsize);
+  a_len.resize(totalPairs);
+  b.resize(bufsize);
+  b_len.resize(totalPairs);
+  scores.resize(totalPairs);
+  mismatches.resize(totalPairs);
+  a_range_result.resize(totalPairs);
+  b_range_result.resize(totalPairs);
+  this->maxAB = maxAB;
 
-    Graph graph = createGraph();
+  Graph graph = createGraph();
 
-    auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
-    std::vector<program::Program> programs = buildGraph(graph, activeTiles, maxAB, maxNPerTile, "int", similarityMatrix);
+  auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
+  std::vector<program::Program> programs = buildGraph(graph, activeTiles, maxAB, maxBatches, "int", similarityMatrix);
 
-    createEngine(graph, programs);
+  createEngine(graph, programs);
 }
 
-BlockAlignmentResults SWAlgorithm::get_result() {
-    return {
-      scores,
-      mismatches,
-      a_range_result,
-      b_range_result
-    };
-}
+BlockAlignmentResults SWAlgorithm::get_result() { return {scores, mismatches, a_range_result, b_range_result}; }
 
 void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<std::string>& B) {
   // if (!(checkSize(A) || checkSize(B))) throw std::runtime_error("Too small buffer or number of active tiles.");
@@ -147,14 +142,22 @@ void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<s
     }
   }
 
-  for (size_t i = 0; i < A.size(); i++) {
-    for (size_t j = 0; j < A[i].size(); j++) {
-      a[i * maxAB + j] = vA[i][j];
+  {
+    size_t offset = 0;
+    for (size_t i = 0; i < A.size(); i++) {
+      for (size_t j = 0; j < A[i].size(); j++) {
+        a[offset] = vA[i][j];
+        offset++;
+      }
     }
   }
-  for (size_t i = 0; i < A.size(); i++) {
-    for (size_t j = 0; j < B[i].size(); j++) {
-      b[i * maxAB + j] = vB[i][j];
+  {
+    size_t offset = 0;
+    for (size_t i = 0; i < A.size(); i++) {
+      for (size_t j = 0; j < B[i].size(); j++) {
+        b[offset] = vB[i][j];
+        offset++;
+      }
     }
   }
 
@@ -171,4 +174,5 @@ void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<s
   engine->readTensor(STREAM_B_RANGE, &*b_range_result.begin(), &*b_range_result.end());
 }
 
-}}
+}  // namespace batchaffine
+}  // namespace ipu

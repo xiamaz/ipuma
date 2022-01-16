@@ -319,32 +319,37 @@ class Aligner {
       if (cpu_aligner.ssw_filter.report_cigar) set_sam_string(aln, rseq, to_string(overlap_len) + "=");  // exact match '=' not 'M'
       alns->add_aln(aln);
     } else {
-      max_clen = max((int64_t)cseq.size(), max_clen);
-      max_rlen = max((int64_t)rseq.size(), max_rlen);
       int64_t num_alns = kernel_alns.size() + 1;
-      unsigned max_matrix_size = (max_clen + 1) * (max_rlen + 1);
-      int64_t tot_mem_est = num_alns * (max_clen + max_rlen + 2 * sizeof(int) + 5 * sizeof(short));
-      // contig is the ref, read is the query - done this way so that we can potentially do multiple alns to each read
-      // this is also the way it's done in meraligner
-      kernel_alns.emplace_back(rname, cid, 0, 0, rlen, cstart, 0, clen, orient);
-      ctg_seqs.emplace_back(cseq);
-      read_seqs.emplace_back(rseq);
+      auto push = [&](){
+        max_clen = max((int64_t)cseq.size(), max_clen);
+        max_rlen = max((int64_t)rseq.size(), max_rlen);
+        unsigned max_matrix_size = (max_clen + 1) * (max_rlen + 1);
+        int64_t tot_mem_est = num_alns * (max_clen + max_rlen + 2 * sizeof(int) + 5 * sizeof(short));
+        // contig is the ref, read is the query - done this way so that we can potentially do multiple alns to each read
+        // this is also the way it's done in meraligner
+        kernel_alns.emplace_back(rname, cid, 0, 0, rlen, cstart, 0, clen, orient);
+        ctg_seqs.emplace_back(cseq);
+        total_ctg_len+= cseq.size();
+        read_seqs.emplace_back(rseq);
+        total_read_len += rseq.size();
+      };
       #ifdef POPLAR_ENABLED
-       if (num_alns >= (KLIGN_IPU_MAXAB_SIZE * KLIGN_IPU_TILES * KLIGN_IPU_BATCHES)) {
+      bool oom = total_ctg_len + cseq.size()  >= KLIGN_IPU_BUFSIZE || total_read_len + rseq.size() >= KLIGN_IPU_BUFSIZE;
+      bool ooe = num_alns >= KLIGN_IPU_MAX_BATCHES;
+       if (oom || ooe) {
+          kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, max_clen,
+                           max_rlen, aln_kernel_timer);
+          clear_aln_bufs();
+        };
+        push();
       #else
+      push();
        if (num_alns >= KLIGN_GPU_BLOCK_SIZE) {
-      #endif
-        // for (auto &&x : ctg_seqs) {
-        //   SLOG_VERBOSE("HistC: ", x.size(), "\n"); 
-        // }
-        // for (auto &&x : read_seqs) {
-        //   SLOG_VERBOSE("HistR: ", x.size(), "\n"); 
-        // }
-         
         kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, max_clen,
                            max_rlen, aln_kernel_timer);
         clear_aln_bufs();
       }
+      #endif
     }
   }
 
@@ -398,6 +403,8 @@ class Aligner {
     read_seqs.clear();
     max_clen = 0;
     max_rlen = 0;
+    total_ctg_len = 0;
+    total_read_len = 0;
   }
 
   void flush_remaining(int read_group_id) {

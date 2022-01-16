@@ -82,9 +82,10 @@ add_definitions(-DKLIGN_UNALIGNED_THRES=1)
 # the block size of alignments to be dispatched to the GPU
 add_definitions(-DKLIGN_GPU_BLOCK_SIZE=2000)
 # IPU
-add_definitions(-DKLIGN_IPU_MAXAB_SIZE=200)
 add_definitions(-DKLIGN_IPU_TILES=8832)
-add_definitions(-DKLIGN_IPU_BATCHES=110)
+add_definitions(-DKLIGN_IPU_BUFSIZE=30000)
+add_definitions(-DKLIGN_IPU_MAXAB_SIZE=200)
+add_definitions(-DKLIGN_IPU_MAX_BATCHES=300)
 
 # turns off code used for kmer caches (i.e. disables --klign-kmer-cache option)
 add_definitions(-DUSE_KMER_CACHE)

@@ -9,8 +9,12 @@
 #define KLIGN_IPU_TILES 8832
 #endif
 
-#ifndef KLIGN_IPU_BATCHES
-#define KLIGN_IPU_BATCHES 110
+#ifndef KLIGN_IPU_MAX_BATCHES
+#define KLIGN_IPU_MAX_BATCHES 300
+#endif
+
+#ifndef KLIGN_IPU_BUFSIZE
+#define KLIGN_IPU_BUFSIZE 30000
 #endif
 
 #include <poplar/Graph.hpp>

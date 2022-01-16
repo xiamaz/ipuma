@@ -39,7 +39,7 @@ class SWAlgorithm : public IPUAlgorithm {
   int maxAB;
 
  public:
-  SWAlgorithm(SWConfig config, int maxAB = 300, int maxNPerTile = 100, int activeTiles = 1472);
+  SWAlgorithm(SWConfig config, int activeTiles = 1472, int maxAB = 300, int maxBatches = 100, int bufsize = 30000);
 
   BlockAlignmentResults get_result();
 
