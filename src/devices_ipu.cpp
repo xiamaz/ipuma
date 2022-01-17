@@ -60,15 +60,13 @@ using namespace upcxx_utils;
 //#define SLOG_GPU(...) SLOG(KLMAGENTA, __VA_ARGS__, KNORM)
 #define SLOG_GPU SLOG_VERBOSE
 
-static bool init_ipu_thread = true;
-static future<> detect_gpu_fut;
+static future<> detect_ipu_fut;
 static double gpu_startup_duration = 0;
 static int num_gpus_on_node = 0;
 
 void init_devices() {
-  init_ipu_thread = true;
   // initialize the GPU and first-touch memory and functions in a new thread as this can take many seconds to complete
-  detect_gpu_fut = execute_in_thread_pool([]() {
+  detect_ipu_fut = execute_in_thread_pool([]() {
     CPUAligner cpu_aln(false);
     auto& aln_scoring = cpu_aln.aln_scoring;
     ipu::SWConfig config = {aln_scoring.gap_opening, aln_scoring.gap_extending,        aln_scoring.match,
@@ -78,11 +76,9 @@ void init_devices() {
 }
 
 void done_init_devices() {
-  if (init_ipu_thread) {
     Timer t("Waiting for IPU to be initialized (should be noop)");
-    init_gpu_thread = false;
-    detect_gpu_fut.wait();
-    SWARN("IPU DONE");
+    detect_ipu_fut.wait();
+    SWARN("IPU init is DONE");
     // if (gpu_utils::gpus_present()) {
     //   barrier(local_team());
     //   int num_uuids = 0;
@@ -116,5 +112,4 @@ void done_init_devices() {
     // } else {
     //   SDIE("No GPUs available - this build requires GPUs");
     // }
-  }
 }
