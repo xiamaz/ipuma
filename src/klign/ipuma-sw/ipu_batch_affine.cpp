@@ -62,16 +62,27 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
     graph.setTileMapping(Mismatches[i], tileIndex);
   }
 
-  graph.createHostWrite(STREAM_A, As);
-  graph.createHostWrite(STREAM_B, Bs);
-  graph.createHostWrite(STREAM_A_LEN, Alens);
-  graph.createHostWrite(STREAM_B_LEN, Blens);
-  graph.createHostRead(STREAM_SCORES, Scores);
-  graph.createHostRead(STREAM_MISMATCHES, Mismatches);
-  graph.createHostRead(STREAM_A_RANGE, ARanges);
-  graph.createHostRead(STREAM_B_RANGE, BRanges);
+  // graph.createHostWrite(STREAM_A, As);
+  // graph.createHostWrite(STREAM_B, Bs);
+  // graph.createHostWrite(STREAM_A_LEN, Alens);
+  // graph.createHostWrite(STREAM_B_LEN, Blens);
 
-  auto frontCs = graph.addComputeSet("front");
+  // graph.createHostRead(STREAM_SCORES, Scores);
+  // graph.createHostRead(STREAM_MISMATCHES, Mismatches);
+  // graph.createHostRead(STREAM_A_RANGE, ARanges);
+  // graph.createHostRead(STREAM_B_RANGE, BRanges);
+
+  auto host_stream_a     = graph.addHostToDeviceFIFO(STREAM_A, UNSIGNED_CHAR,  As.numElements());
+  auto host_stream_b     = graph.addHostToDeviceFIFO(STREAM_B, UNSIGNED_CHAR, Bs.numElements());
+  auto host_stream_a_len = graph.addHostToDeviceFIFO(STREAM_A_LEN, INT, Alens.numElements());
+  auto host_stream_b_len = graph.addHostToDeviceFIFO(STREAM_B_LEN, INT, Blens.numElements());
+
+  auto device_stream_scores     = graph.addDeviceToHostFIFO(STREAM_SCORES, INT, Scores.numElements());
+  auto device_stream_mismatches = graph.addDeviceToHostFIFO(STREAM_MISMATCHES, INT, Mismatches.numElements());
+  auto device_stream_a_range    = graph.addDeviceToHostFIFO(STREAM_A_RANGE, INT, ARanges.numElements());
+  auto device_stream_b_range    = graph.addDeviceToHostFIFO(STREAM_B_RANGE, INT, BRanges.numElements());
+
+  auto frontCs = graph.addComputeSet("SmithWaterman");
   for (int i = 0; i < activeTiles; ++i) {
     int tileIndex = i % tileCount;
     VertexRef vtx = graph.addVertex(frontCs, "SWAffine",
@@ -96,7 +107,21 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
     graph.setTileMapping(vtx, tileIndex);
     graph.setPerfEstimate(vtx, 1);
   }
+  auto h2d_prog = program::Sequence({
+    poplar::program::Copy(host_stream_a    , As.flatten()),
+    poplar::program::Copy(host_stream_b    , Bs.flatten()),
+    poplar::program::Copy(host_stream_a_len, Alens.flatten()),
+    poplar::program::Copy(host_stream_b_len, Blens.flatten())}
+  );
+  auto d2h_prog =program::Sequence({
+    poplar::program::Copy(Scores.flatten()    , device_stream_scores    ),
+    poplar::program::Copy(Mismatches.flatten(), device_stream_mismatches),
+    poplar::program::Copy(ARanges.flatten()   , device_stream_a_range   ),
+    poplar::program::Copy(BRanges.flatten()   , device_stream_b_range   )}
+  );
+  prog.add(h2d_prog);
   prog.add(program::Execute(frontCs));
+  prog.add(d2h_prog);
   return {prog, initProg};
 }
 
@@ -129,6 +154,16 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int activeTiles, int maxAB, int m
   std::vector<program::Program> programs = buildGraph(graph, activeTiles, maxAB, bufsize, maxBatches, "int", similarityMatrix);
 
   createEngine(graph, programs);
+
+  engine->connectStream(STREAM_A, a.data());
+  engine->connectStream(STREAM_A_LEN, a_len.data());
+  engine->connectStream(STREAM_B, b.data());
+  engine->connectStream(STREAM_B_LEN, b_len.data());
+
+  engine->connectStream(STREAM_SCORES, scores.data());
+  engine->connectStream(STREAM_MISMATCHES, mismatches.data());
+  engine->connectStream(STREAM_A_RANGE, a_range_result.data());
+  engine->connectStream(STREAM_B_RANGE, b_range_result.data());
 }
 
 BlockAlignmentResults SWAlgorithm::get_result() { return {scores, mismatches, a_range_result, b_range_result}; }
@@ -200,18 +235,17 @@ void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<s
     bucketIncr += maxBatches;
   }
 
-  engine->writeTensor(STREAM_A, &a[0], &a[a.size()]);
-  engine->writeTensor(STREAM_A_LEN, &a_len[0], &a_len[a_len.size()]);
-  engine->writeTensor(STREAM_B, &b[0], &b[b.size()]);
-  engine->writeTensor(STREAM_B_LEN, &b_len[0], &b_len[b_len.size()]);
+  // engine->writeTensor(STREAM_A, &a[0], &a[a.size()]);
+  // engine->writeTensor(STREAM_A_LEN, &a_len[0], &a_len[a_len.size()]);
+  // engine->writeTensor(STREAM_B, &b[0], &b[b.size()]);
+  // engine->writeTensor(STREAM_B_LEN, &b_len[0], &b_len[b_len.size()]);
 
   engine->run(0);
 
-  engine->readTensor(STREAM_SCORES, &*scores.begin(), &*scores.end());
-  engine->readTensor(STREAM_MISMATCHES, &*mismatches.begin(), &*mismatches.end());
-  engine->readTensor(STREAM_A_RANGE, &*a_range_result.begin(), &*a_range_result.end());
-  engine->readTensor(STREAM_B_RANGE, &*b_range_result.begin(), &*b_range_result.end());
+  // engine->readTensor(STREAM_SCORES, &*scores.begin(), &*scores.end());
+  // engine->readTensor(STREAM_MISMATCHES, &*mismatches.begin(), &*mismatches.end());
+  // engine->readTensor(STREAM_A_RANGE, &*a_range_result.begin(), &*a_range_result.end());
+  // engine->readTensor(STREAM_B_RANGE, &*b_range_result.begin(), &*b_range_result.end());
 }
-
 }  // namespace batchaffine
 }  // namespace ipu

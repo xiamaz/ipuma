@@ -343,7 +343,6 @@ class Aligner {
       if (bucket_oom || bucket_ooe) {
         if (current_ipu_bucket + 1 == KLIGN_IPU_TILES) {
           // Our buckets are all full.
-          std::cout << "Bucket oom: " << bucket_oom << " Bucket ooe: " << bucket_ooe << std::endl;
           kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, max_clen, max_rlen, aln_kernel_timer);
           clear_aln_bufs();
         } else {
