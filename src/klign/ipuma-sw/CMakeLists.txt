@@ -8,6 +8,6 @@ add_gp_library(
     ${CMAKE_CURRENT_SOURCE_DIR}/codelets/helper.hpp
 )
 
-add_library(IPUMA_LIBRARY "ipu_batch_affine.cpp" "matrix.cpp" "ipu_base.cpp" "similarity.cpp" "encoding.cpp")
+add_library(IPUMA_LIBRARY "ipu_batch_affine.cpp" "matrix.cpp" "ipu_base.cpp" "similarity.cpp" "encoding.cpp" "driver.cpp")
 target_link_libraries(IPUMA_LIBRARY poplar popops poputil)
 add_dependencies(IPUMA_LIBRARY  algoipu.gp_codelets)
