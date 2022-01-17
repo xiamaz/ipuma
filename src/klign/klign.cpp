@@ -52,7 +52,6 @@
 #include <thread>
 #include <upcxx/upcxx.hpp>
 
-#include "ipuma-sw/popinit.hpp"
 #include "klign.hpp"
 #include "kmer.hpp"
 #include "ssw.hpp"

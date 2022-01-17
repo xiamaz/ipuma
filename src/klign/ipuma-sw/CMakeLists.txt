@@ -1,11 +1,11 @@
 add_gp_library(
   NAME algoipu
   ASM_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/codelets/codelet_batch_asm.S
   CPP_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/codelets/sw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/codelets/codelet_batch_affine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/codelets/codelet_batch_asm.cpp
   HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/codelets/helper.hpp
 )
 
 add_library(IPUMA_LIBRARY "ipu_batch_affine.cpp" "matrix.cpp" "ipu_base.cpp" "similarity.cpp" "encoding.cpp" "driver.cpp")

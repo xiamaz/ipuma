@@ -10,9 +10,11 @@ using namespace upcxx_utils;
 
 static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns, bool report_cigar,
                                        IntermittentTimer &aln_kernel_timer) {
-  future<> fut = upcxx_utils::execute_in_thread_pool([aln_block_data, report_cigar, &aln_kernel_timer] {
+  AsyncTimer t("ipu_align_block (thread)");
+  future<> fut = upcxx_utils::execute_in_thread_pool([aln_block_data, t, report_cigar, &aln_kernel_timer] {
     DBG_VERBOSE("Starting _ipu_align_block_kernel of ", aln_block_data->kernel_alns.size(), "\n");
     aln_kernel_timer.start();
+    t.start();
     getDriver()->compare(aln_block_data->read_seqs, aln_block_data->ctg_seqs);
     auto aln_results = getDriver()->get_result();
     for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
@@ -42,10 +44,13 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
       if (report_cigar) set_sam_string(aln, "*", "*");  // FIXME until there is a valid:ssw_aln.cigar_string);
       aln_block_data->alns->add_aln(aln);
     }
-
+    t.stop();
     aln_kernel_timer.stop();
   });
-  fut = fut.then([alns = alns, aln_block_data]() {
+  fut = fut.then([alns = alns, t, aln_block_data]() {
+    SLOG_VERBOSE("Finished IPU SSW aligning block of ", aln_block_data->kernel_alns.size(), " in ", t.get_elapsed(), "s (",
+               (t.get_elapsed() > 0 ? aln_block_data->kernel_alns.size() / t.get_elapsed() : 0.0), " aln/s)\n");
+
     DBG_VERBOSE("appending and returning ", aln_block_data->alns->size(), "\n");
     alns->append(*(aln_block_data->alns));
   });
