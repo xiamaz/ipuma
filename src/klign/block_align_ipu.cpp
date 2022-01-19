@@ -13,9 +13,10 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
   AsyncTimer t("ipu_align_block (thread)");
   future<> fut = upcxx_utils::execute_in_thread_pool([aln_block_data, t, report_cigar, &aln_kernel_timer] {
     DBG_VERBOSE("Starting _ipu_align_block_kernel of ", aln_block_data->kernel_alns.size(), "\n");
-    aln_kernel_timer.start();
     t.start();
+    aln_kernel_timer.start();
     getDriver()->compare(aln_block_data->read_seqs, aln_block_data->ctg_seqs);
+    aln_kernel_timer.stop();
     auto aln_results = getDriver()->get_result();
     for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
       auto uda = aln_results.a_range_result[i];
@@ -45,7 +46,6 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
       aln_block_data->alns->add_aln(aln);
     }
     t.stop();
-    aln_kernel_timer.stop();
   });
   fut = fut.then([alns = alns, t, aln_block_data]() {
     SLOG_VERBOSE("Finished IPU SSW aligning block of ", aln_block_data->kernel_alns.size(), " in ", t.get_elapsed(), "s (",
@@ -68,7 +68,14 @@ void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
 
   ipu::SWConfig config = {aln_scoring.gap_opening, aln_scoring.gap_extending,        aln_scoring.match,
                           -aln_scoring.mismatch,   swatlib::Similarity::nucleicAcid, swatlib::DataType::nucleicAcid};
-  init_single_ipu(config, KLIGN_IPU_TILES, KLIGN_IPU_MAXAB_SIZE, KLIGN_IPU_MAX_BATCHES, KLIGN_IPU_BUFSIZE);
+  ipu::batchaffine::IPUAlgoConfig algoconfig = {
+    KLIGN_IPU_TILES,
+    KLIGN_IPU_MAXAB_SIZE,
+    KLIGN_IPU_MAX_BATCHES,
+    KLIGN_IPU_BUFSIZE,
+    ipu::batchaffine::VertexType::cpp,
+  };
+  init_single_ipu(config, algoconfig);
   SLOG_VERBOSE("Initialized ipuma driver in ", init_time, " s\n");
 }
 

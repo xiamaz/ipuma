@@ -2,6 +2,8 @@
 #include <cmath>
 #include <iostream>
 
+#include "upcxx_utils/timers.hpp"
+
 #include <poplar/Graph.hpp>
 #include <poputil/TileMapping.hpp>
 
@@ -16,10 +18,22 @@
 namespace ipu {
 namespace batchaffine {
 
+int IPUAlgoConfig::getTotalNumberOfComparisons() {
+  return tilesUsed * maxBatches;
+}
+
+int IPUAlgoConfig::getTotalBufferSize() {
+  return tilesUsed * bufsize;
+}
+
+std::string IPUAlgoConfig::getVertexTypeString() {
+  return typeString[static_cast<int>(vtype)];
+}
+
 /**
  * Streamable IPU graph for SW
  */
-std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles, unsigned long maxAB, unsigned long bufSize, unsigned long maxBatches,
+std::vector<program::Program> buildGraph(Graph& graph, std::string vtype, unsigned long activeTiles, unsigned long maxAB, unsigned long bufSize, unsigned long maxBatches,
                                          const std::string& format, const swatlib::Matrix<int8_t> similarityData) {
   program::Sequence prog;
   program::Sequence initProg;
@@ -62,16 +76,6 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
     graph.setTileMapping(Mismatches[i], tileIndex);
   }
 
-  // graph.createHostWrite(STREAM_A, As);
-  // graph.createHostWrite(STREAM_B, Bs);
-  // graph.createHostWrite(STREAM_A_LEN, Alens);
-  // graph.createHostWrite(STREAM_B_LEN, Blens);
-
-  // graph.createHostRead(STREAM_SCORES, Scores);
-  // graph.createHostRead(STREAM_MISMATCHES, Mismatches);
-  // graph.createHostRead(STREAM_A_RANGE, ARanges);
-  // graph.createHostRead(STREAM_B_RANGE, BRanges);
-
   auto host_stream_a     = graph.addHostToDeviceFIFO(STREAM_A, UNSIGNED_CHAR,  As.numElements());
   auto host_stream_b     = graph.addHostToDeviceFIFO(STREAM_B, UNSIGNED_CHAR, Bs.numElements());
   auto host_stream_a_len = graph.addHostToDeviceFIFO(STREAM_A_LEN, INT, Alens.numElements());
@@ -85,7 +89,7 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
   auto frontCs = graph.addComputeSet("SmithWaterman");
   for (int i = 0; i < activeTiles; ++i) {
     int tileIndex = i % tileCount;
-    VertexRef vtx = graph.addVertex(frontCs, "SWAffine",
+    VertexRef vtx = graph.addVertex(frontCs, vtype,
                                     {
                                         {"bufSize", bufSize},
                                         {"maxAB", maxAB},
@@ -125,33 +129,38 @@ std::vector<program::Program> buildGraph(Graph& graph, unsigned long activeTiles
   return {prog, initProg};
 }
 
-SWAlgorithm::SWAlgorithm(ipu::SWConfig config, int activeTiles, int maxAB, int maxBatches, int bufsize)
-    : IPUAlgorithm(config) {
-  this->maxAB = maxAB;
-  this->bufsize = bufsize;
-  this->maxBatches = maxBatches;
-  this->tilesUsed = activeTiles;
+SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
+    : IPUAlgorithm(config), algoconfig(algoconfig) {
+  // this->maxAB = maxAB;
+  // this->bufsize = bufsize;
+  // this->maxBatches = maxBatches;
+  // this->tilesUsed = activeTiles;
 
-  auto totalPairs = activeTiles * maxBatches;
+  const auto totalComparisonsCount = algoconfig.getTotalNumberOfComparisons();
+  const auto inputBufferSize = algoconfig.getTotalBufferSize();
 
-  a.resize(activeTiles * bufsize);
-  a_len.resize(totalPairs);
+  a.resize(inputBufferSize);
+  a_len.resize(totalComparisonsCount);
   std::fill(a_len.begin(), a_len.end(), 0);
 
-  b.resize(activeTiles * bufsize);
-  b_len.resize(totalPairs);
+  b.resize(inputBufferSize);
+  b_len.resize(totalComparisonsCount);
   std::fill(b_len.begin(), b_len.end(), 0);
 
-  scores.resize(totalPairs);
-  mismatches.resize(totalPairs);
-  a_range_result.resize(totalPairs);
-  b_range_result.resize(totalPairs);
-  bucket_pairs.resize(activeTiles);
+  scores.resize(totalComparisonsCount);
+  mismatches.resize(totalComparisonsCount);
+  a_range_result.resize(totalComparisonsCount);
+  b_range_result.resize(totalComparisonsCount);
+  bucket_pairs.resize(algoconfig.tilesUsed);
 
   Graph graph = createGraph();
 
   auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
-  std::vector<program::Program> programs = buildGraph(graph, activeTiles, maxAB, bufsize, maxBatches, "int", similarityMatrix);
+  std::vector<program::Program> programs = buildGraph(graph, algoconfig.getVertexTypeString(), algoconfig.tilesUsed, algoconfig.maxAB, algoconfig.bufsize, algoconfig.maxBatches, "int", similarityMatrix);
+
+#ifdef POPLAR_DEBUG
+  addCycleCount(graph, static_cast<program::Sequence&>(programs[0]));
+#endif
 
   createEngine(graph, programs);
 
@@ -176,13 +185,13 @@ void SWAlgorithm::fillBuckets(const std::vector<std::string>& A, const std::vect
   for (int i = 0; i < A.size(); ++i) {
     const auto& a = A[i];
     const auto& b = B[i];
-    if (a.size() > maxAB || b.size() > maxAB) {
-      std::cout << "sizes of sequences: a(" << a.size() << "), b(" << b.size() << ") larger than maxAB(" << maxAB << ")\n";
+    if (a.size() > algoconfig.maxAB || b.size() > algoconfig.maxAB) {
+      std::cout << "sizes of sequences: a(" << a.size() << "), b(" << b.size() << ") larger than maxAB(" << algoconfig.maxAB << ")\n";
       exit(1);
     }
     int newBucketASize = curBucketASize + a.size();
     int newBucketBSize = curBucketBSize + b.size();
-    if ((newBucketASize > bufsize || newBucketBSize > bufsize) || bucket_pairs[curBucket] >= maxBatches) {
+    if ((newBucketASize > algoconfig.bufsize || newBucketBSize > algoconfig.bufsize) || bucket_pairs[curBucket] >= algoconfig.maxBatches) {
       curBucket++;
       curBucketASize = 0;
       curBucketBSize = 0;
@@ -192,12 +201,13 @@ void SWAlgorithm::fillBuckets(const std::vector<std::string>& A, const std::vect
 }
 
 void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<std::string>& B) {
-  // if (!(checkSize(A) || checkSize(B))) throw std::runtime_error("Too small buffer or number of active tiles.");
-  // size_t transSize = activeTiles * bufSize * sizeof(char);
-  if (A.size() > maxBatches * tilesUsed) {
+  upcxx_utils::AsyncTimer preprocessTimer("Preprocess");
+  upcxx_utils::AsyncTimer engineTimer("Engine");
+  preprocessTimer.start();
+  if (A.size() > algoconfig.maxBatches * algoconfig.tilesUsed) {
     std::cout << "A has more elements than the maxBatchsize" << std::endl;
     std::cout << "A.size() = " << A.size() << std::endl;
-    std::cout << "max comparisons = " << tilesUsed << " * " << maxBatches << std::endl;
+    std::cout << "max comparisons = " << algoconfig.tilesUsed << " * " << algoconfig.maxBatches << std::endl;
     exit(1);
   }
 
@@ -231,21 +241,23 @@ void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<s
       index++;
     }
 
-    bufferOffset += bufsize;
-    bucketIncr += maxBatches;
+    bufferOffset += algoconfig.bufsize;
+    bucketIncr += algoconfig.maxBatches;
   }
+  preprocessTimer.stop();
 
-  // engine->writeTensor(STREAM_A, &a[0], &a[a.size()]);
-  // engine->writeTensor(STREAM_A_LEN, &a_len[0], &a_len[a_len.size()]);
-  // engine->writeTensor(STREAM_B, &b[0], &b[b.size()]);
-  // engine->writeTensor(STREAM_B_LEN, &b_len[0], &b_len[b_len.size()]);
-
+  engineTimer.start();
   engine->run(0);
+  engineTimer.stop();
+  SLOG("Inner comparison time: ", preprocessTimer.get_elapsed(), " engine run: ", engineTimer.get_elapsed(), "\n");
 
-  // engine->readTensor(STREAM_SCORES, &*scores.begin(), &*scores.end());
-  // engine->readTensor(STREAM_MISMATCHES, &*mismatches.begin(), &*mismatches.end());
-  // engine->readTensor(STREAM_A_RANGE, &*a_range_result.begin(), &*a_range_result.end());
-  // engine->readTensor(STREAM_B_RANGE, &*b_range_result.begin(), &*b_range_result.end());
+#ifdef POPLAR_DEBUG
+  uint32_t cycles[2];
+  engine->readTensor("cycles", &cycles, &cycles + 1);
+  uint64_t totalCycles = (((uint64_t)cycles[1]) << 32) | cycles[0];
+  float computedTime = (double) totalCycles / getTarget().getTileClockFrequency();
+  SLOG("Poplar cycle count: ", totalCycles, " computed time (in s): ", computedTime, "\n");
+#endif
 }
 }  // namespace batchaffine
 }  // namespace ipu

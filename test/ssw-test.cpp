@@ -491,7 +491,7 @@ TEST(MHMTest, ipuma) {
   double time_to_initialize;
   int device_count;
   size_t total_mem;
-  auto driver = ipu::batchaffine::SWAlgorithm({});
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {});
   std::cout << "Initialized IPU\n";
 
   vector<Alignment> alns;

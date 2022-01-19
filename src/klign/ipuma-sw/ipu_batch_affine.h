@@ -17,6 +17,36 @@ const std::string STREAM_MISMATCHES = "mismatches-read";
 const std::string STREAM_A_RANGE = "a-range-read";
 const std::string STREAM_B_RANGE = "b-range-read";
 
+const std::string IPU_AFFINE_CPP = "SWAffine";
+const std::string IPU_AFFINE_ASM = "SWAffineAsm";
+
+enum class VertexType {cpp, assembly};
+
+static const std::string typeString[] = {"SWAffine", "SWAffineAsm"};
+
+struct IPUAlgoConfig {
+  int tilesUsed = 1; // number of active vertices
+  int maxAB = 300; // maximum length of a single comparison
+  int maxBatches = 20; // maximum number of comparisons in a single batch
+  int bufsize = 3000; // total size of buffer for A and B individually
+  VertexType vtype = VertexType::cpp;
+
+  /**
+   * @brief This calculates the total number of comparisons that can be computed in a single engine run on the IPU.
+   * 
+   * @return int 
+   */
+  int getTotalNumberOfComparisons();
+
+  /**
+   * @brief This calculated the required buffer size for input strings across all vertices.
+   * 
+   * @return int 
+   */
+  int getTotalBufferSize();
+
+  std::string getVertexTypeString();
+};
 
 struct BlockAlignmentResults {
   std::vector<int32_t> &scores;
@@ -38,15 +68,13 @@ class SWAlgorithm : public IPUAlgorithm {
   std::vector<int32_t> mismatches;
   std::vector<int32_t> a_range_result;
   std::vector<int32_t> b_range_result;
-  int maxAB;
-  int bufsize;
-  int maxBatches;
-  int tilesUsed;
+
+  IPUAlgoConfig algoconfig;
 
   void fillBuckets(const std::vector<std::string>& A, const std::vector<std::string>& B);
 
  public:
-  SWAlgorithm(SWConfig config, int activeTiles = 1, int maxAB = 300, int maxBatches = 20, int bufsize = 3000);
+  SWAlgorithm(SWConfig config, IPUAlgoConfig algoconfig);
 
   BlockAlignmentResults get_result();
 

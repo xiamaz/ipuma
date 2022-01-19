@@ -8,7 +8,7 @@
 
 
 ipu::batchaffine::SWAlgorithm* getDriver();
-void init_single_ipu(ipu::SWConfig config, int tiles, int maxAB, int maxBatches, int bufsize);
+void init_single_ipu(ipu::SWConfig config, ipu::batchaffine::IPUAlgoConfig algoconfig);
 
 
 

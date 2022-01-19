@@ -55,6 +55,8 @@ add_library(KLIGN_LIBRARY ${KLIGN_TARGET_FILES} ${KLIGN_TARGET_OBJECTS})
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
+add_definitions(-DPOPLAR_DEBUG)
+
 if(ENABLE_POPLAR)
   add_subdirectory(ipuma-sw)
   # add_library(IPUMA_LIBRARY "ipuma-sw/matrix.cpp" "ipuma-sw/similarity.cpp" "ipuma-sw/encoding.cpp")

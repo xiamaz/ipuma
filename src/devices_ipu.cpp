@@ -71,7 +71,14 @@ void init_devices() {
     auto& aln_scoring = cpu_aln.aln_scoring;
     ipu::SWConfig config = {aln_scoring.gap_opening, aln_scoring.gap_extending,        aln_scoring.match,
                             -aln_scoring.mismatch,   swatlib::Similarity::nucleicAcid, swatlib::DataType::nucleicAcid};
-    init_single_ipu(config, KLIGN_IPU_TILES, KLIGN_IPU_MAXAB_SIZE, KLIGN_IPU_MAX_BATCHES, KLIGN_IPU_BUFSIZE);
+    ipu::batchaffine::IPUAlgoConfig algoconfig = {
+      KLIGN_IPU_TILES,
+      KLIGN_IPU_MAXAB_SIZE,
+      KLIGN_IPU_MAX_BATCHES,
+      KLIGN_IPU_BUFSIZE,
+      ipu::batchaffine::VertexType::cpp,
+    };
+    init_single_ipu(config, algoconfig);
   });
 }
 
