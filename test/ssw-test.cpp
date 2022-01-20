@@ -487,6 +487,21 @@ TEST(MHMTest, AdeptSW) {
 
 
 #ifdef ENABLE_IPUS
+TEST(MHMTest, ipumaperf) {
+  int numWorkers = 8832;
+  int numCmps = 100;
+  int strlen = 300;
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, 40000, ipu::batchaffine::VertexType::cpp});
+  vector<string> refs, queries;
+
+  // generate input strings
+  for (int i = 0; i < numCmps * numWorkers; ++i) {
+    refs.push_back(string(strlen, 'A'));
+    queries.push_back(string(strlen, 'T'));
+  }
+  driver.compare(queries, refs);
+}
+
 TEST(MHMTest, ipuma) {
   double time_to_initialize;
   int device_count;

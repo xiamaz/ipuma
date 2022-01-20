@@ -7,36 +7,7 @@
 #include <print.h>
 #include <type_traits>
 
-static constexpr auto COMPACT_DELTAN = poplar::VectorListLayout::COMPACT_DELTAN;
-
-#ifdef __IPU__
-#include <arch/gc_tile_defines.h>
-#include <ipu_memory_intrinsics>
-
-static __attribute__((always_inline)) unsigned maskForRepeat(unsigned input) {
-  return input & CSR_W_REPEAT_COUNT__VALUE__MASK;
-}
-
-void inline setZeroPart(void* sa_out, unsigned count) {
-    int2 * o = reinterpret_cast<int2*>(sa_out);
-    const int2 zzero = {0, 0}; 
-    const unsigned loopCount = maskForRepeat(count);
-    for (unsigned i = 0; i < loopCount; i++) {
-      ipu::store_postinc(&o, zzero, 1);
-    }
-}
-#else
-
-static __attribute__((always_inline)) unsigned maskForRepeat(unsigned input) {
-  return input;
-}
-
-void inline setZeroPart(void* sa_out, unsigned count) {
-  memset(sa_out, 0, count);
-}
-#endif
-
-template<class T>T max(T a, T b) {
+int max(int a, int b) {
     return a > b ? a : b;
 }
 
@@ -115,6 +86,7 @@ public:
 
             memset(&(C[0]), 0, maxAB * sizeof(int));
             memset(&(bG[0]), 0, maxAB * sizeof(int));
+
             // reverse pass
             for (int i = Bend; i >= 0; --i) {
                 int aGap;

@@ -18,6 +18,19 @@
 namespace ipu {
 namespace batchaffine {
 
+long long getCellCount(const std::vector<std::string>& A, const std::vector<std::string>& B) {
+  long long cellCount = 0;
+  if (A.size() != B.size()) {
+    SWARN("Mismatch between size of A ", A.size(), " and size of B ", B.size());
+  }
+  // count cells based on 1:1 comparisons
+  for (int i = 0; i < A.size(); ++i) {
+    cellCount += A[i].size() * B[i].size();
+  }
+  return cellCount;
+}
+
+
 int IPUAlgoConfig::getTotalNumberOfComparisons() {
   return tilesUsed * maxBatches;
 }
@@ -158,7 +171,7 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
   auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
   std::vector<program::Program> programs = buildGraph(graph, algoconfig.getVertexTypeString(), algoconfig.tilesUsed, algoconfig.maxAB, algoconfig.bufsize, algoconfig.maxBatches, "int", similarityMatrix);
 
-#ifdef POPLAR_DEBUG
+#ifdef IPUMA_DEBUG
   addCycleCount(graph, static_cast<program::Sequence&>(programs[0]));
 #endif
 
@@ -199,6 +212,7 @@ void SWAlgorithm::fillBuckets(const std::vector<std::string>& A, const std::vect
     bucket_pairs[curBucket]++;
   }
 }
+
 
 void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<std::string>& B) {
   upcxx_utils::AsyncTimer preprocessTimer("Preprocess");
@@ -251,12 +265,17 @@ void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<s
   engineTimer.stop();
   SLOG("Inner comparison time: ", preprocessTimer.get_elapsed(), " engine run: ", engineTimer.get_elapsed(), "\n");
 
-#ifdef POPLAR_DEBUG
+#ifdef IPUMA_DEBUG
   uint32_t cycles[2];
   engine->readTensor("cycles", &cycles, &cycles + 1);
   uint64_t totalCycles = (((uint64_t)cycles[1]) << 32) | cycles[0];
   float computedTime = (double) totalCycles / getTarget().getTileClockFrequency();
   SLOG("Poplar cycle count: ", totalCycles, " computed time (in s): ", computedTime, "\n");
+
+  // GCUPS computation
+  auto cellCount = getCellCount(A, B);
+  double GCUPS = (double)(cellCount / computedTime) / 1e9;
+  SLOG("Poplar estimated cells(", cellCount, ") GCUPS ", GCUPS, "\n");
 #endif
 }
 }  // namespace batchaffine

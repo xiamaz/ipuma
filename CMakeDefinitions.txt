@@ -83,7 +83,7 @@ add_definitions(-DKLIGN_UNALIGNED_THRES=1)
 add_definitions(-DKLIGN_GPU_BLOCK_SIZE=2000)
 # IPU
 add_definitions(-DKLIGN_IPU_TILES=8832)
-add_definitions(-DKLIGN_IPU_BUFSIZE=40000)
+add_definitions(-DKLIGN_IPU_BUFSIZE=45000)
 add_definitions(-DKLIGN_IPU_MAXAB_SIZE=200)
 add_definitions(-DKLIGN_IPU_MAX_BATCHES=300)
 
