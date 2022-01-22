@@ -88,6 +88,7 @@ void init_devices() {
 void done_init_devices() {
     Timer t("Waiting for IPU to be initialized (should be noop)");
     detect_ipu_fut.wait();
+    barrier();
     SWARN("IPU init is DONE");
     // if (gpu_utils::gpus_present()) {
     //   barrier(local_team());
