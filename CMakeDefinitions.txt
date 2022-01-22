@@ -86,7 +86,7 @@ add_definitions(-DKLIGN_IPU_TILES=8832)
 add_definitions(-DKLIGN_IPU_BUFSIZE=45000)
 add_definitions(-DKLIGN_IPU_MAXAB_SIZE=200)
 add_definitions(-DKLIGN_IPU_MAX_BATCHES=300)
-add_definitions(-DKLIGN_IPUS_LOCAL=4)
+add_definitions(-DKLIGN_IPUS_LOCAL=1)
 
 # turns off code used for kmer caches (i.e. disables --klign-kmer-cache option)
 add_definitions(-DUSE_KMER_CACHE)

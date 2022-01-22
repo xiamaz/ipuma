@@ -92,7 +92,7 @@ void check_alns_gpu(vector<Alignment> &alns, vector<int> qstart, vector<int> qen
 void test_aligns_ipu(vector<Alignment> &alns, vector<string> query, vector<string> ref, ipu::batchaffine::SWAlgorithm &algo) {
   alns.reserve(query.size());
 
-  algo.compare(query, ref);
+  algo.compare_local(query, ref);
   auto aln_results = algo.get_result();
 
   for (int i = 0; i < query.size(); i++) {

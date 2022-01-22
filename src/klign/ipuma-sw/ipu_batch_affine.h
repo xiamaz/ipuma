@@ -2,6 +2,7 @@
 #define IPU_BATCH_AFFINE_HPP
 
 #include "ipu_base.h"
+#include<vector>
 
 using namespace poplar;
 
@@ -69,15 +70,18 @@ class SWAlgorithm : public IPUAlgorithm {
   std::vector<int32_t> b_range_result;
 
   IPUAlgoConfig algoconfig;
-
-  void fillBuckets(const std::vector<std::string>& A, const std::vector<std::string>& B);
-
  public:
   SWAlgorithm(SWConfig config, IPUAlgoConfig algoconfig);
 
   BlockAlignmentResults get_result();
 
-  void compare(const std::vector<std::string>& A, const std::vector<std::string>& B);
+  // Local Buffers
+  void compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B);
+
+  // Remote bufffer
+  static std::vector<size_t> fillBuckets(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B);
+  void prepared_remote_compare(char* a,  int32_t* a_len,  char* b,  int32_t* b_len, int32_t * scores, int32_t *mismatches, int32_t * a_range_result, int32_t * b_range_result);
+  static void prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B,  char* a,  int32_t* a_len,  char* b,  int32_t* b_len);
 };
 }  // namespace batchaffine
 }  // namespace ipu

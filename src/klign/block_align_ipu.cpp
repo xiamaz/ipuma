@@ -8,6 +8,20 @@ using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
 
+upcxx::global_ptr<char> a;
+upcxx::global_ptr<char> b;
+upcxx::global_ptr<int32_t> a_len;
+upcxx::global_ptr<int32_t> b_len;
+
+upcxx::global_ptr<int32_t> scores;
+upcxx::global_ptr<int32_t> mismatches;
+upcxx::global_ptr<int32_t> a_range_result;
+upcxx::global_ptr<int32_t> b_range_result;
+
+ipu::batchaffine::IPUAlgoConfig algoconfig = {
+    KLIGN_IPU_TILES, KLIGN_IPU_MAXAB_SIZE, KLIGN_IPU_MAX_BATCHES, KLIGN_IPU_BUFSIZE, ipu::batchaffine::VertexType::assembly,
+};
+
 static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns, bool report_cigar,
                                        IntermittentTimer &aln_kernel_timer) {
   AsyncTimer t("ipu_align_block (thread)");
@@ -15,28 +29,32 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
     DBG_VERBOSE("Starting _ipu_align_block_kernel of ", aln_block_data->kernel_alns.size(), "\n");
     t.start();
     aln_kernel_timer.start();
-    ipu::batchaffine::BlockAlignmentResults aln_results{};
-    // if (local_team().rank_me() >= KLIGN_IPUS_LOCAL) {
-       auto [scores, mismatches, a_range_result, b_range_result] = rpc(local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL, [](vector<string> read_seqs, vector<string> ctg_seqs, int sender){
-        cout << "Run RPC on " <<  local_team().rank_me() << " from " << sender <<  endl;
-        getDriver()->compare(read_seqs, ctg_seqs);
-        auto alns = getDriver()->get_result();
-        return make_tuple(alns.scores, alns.mismatches, alns.a_range_result, alns.b_range_result);
-      }, aln_block_data->read_seqs, aln_block_data->ctg_seqs, local_team().rank_me()).wait();
-       aln_results = {scores, mismatches, a_range_result, b_range_result}; 
-    // } else {
-    //     cout << "Run local" << endl;
-    //     getDriver()->compare(aln_block_data->read_seqs, aln_block_data->ctg_seqs);
-    //     aln_results = getDriver()->get_result();
-    // }
+    ipu::batchaffine::SWAlgorithm::prepare_remote(algoconfig, aln_block_data->read_seqs, aln_block_data->ctg_seqs, a.local(),
+                                                  a_len.local(), b.local(), b_len.local());
+    rpc(
+        local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL,
+        [](int sender, upcxx::global_ptr<char> _a, upcxx::global_ptr<char> _b, upcxx::global_ptr<int32_t> _a_len,
+           upcxx::global_ptr<int32_t> _b_len, upcxx::global_ptr<int32_t> _scores, upcxx::global_ptr<int32_t> _mismatches,
+           upcxx::global_ptr<int32_t> _a_range_result, upcxx::global_ptr<int32_t> _b_range_result) {
+          cout << "Run RPC on " << local_team().rank_me() << " from " << sender << endl;
+          if (!_a.is_local() || !_a_len.is_local() || !_b.is_local() || !_b_len.is_local() || !_scores.is_local() ||
+              !_mismatches.is_local() || !_a_range_result.is_local() || !_b_range_result.is_local()) {
+              std::cout << "ONE GLOBAL POINTER CAN NOT BE DOWNCASTED, FATAL!" << std::endl;
+              exit(1);
+            }
+          getDriver()->prepared_remote_compare(_a.local(), _a_len.local(), _b.local(), _b_len.local(), _scores.local(),
+                                               _mismatches.local(), _a_range_result.local(), _b_range_result.local());
+        },
+        local_team().rank_me(), a, b, a_len, b_len, scores, mismatches, a_range_result, b_range_result)
+        .wait();
+
     aln_kernel_timer.stop();
-    // auto aln_results = getDriver()->get_result();
     for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
-      auto uda = aln_results.a_range_result[i];
+      auto uda = a_range_result.local()[i];
       int16_t query_begin = uda & 0xffff;
       int16_t query_end = uda >> 16;
 
-      auto udb = aln_results.b_range_result[i];
+      auto udb = b_range_result.local()[i];
       int16_t ref_begin = udb & 0xffff;
       int16_t ref_end = udb >> 16;
 
@@ -46,7 +64,7 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
       aln.cstop = aln.cstart + ref_end + 1;
       aln.cstart += ref_begin;
       if (aln.orient == '-') switch_orient(aln.rstart, aln.rstop, aln.rlen);
-      aln.score1 = aln_results.scores[i];
+      aln.score1 = scores.local()[i];
       // FIXME: needs to be set to the second best
       aln.score2 = 0;
       // aln.mismatches = aln_results.mismatches[i];  // ssw_aln.mismatches;
@@ -62,7 +80,7 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
   });
   fut = fut.then([alns = alns, t, aln_block_data]() {
     SLOG_VERBOSE("Finished IPU SSW aligning block of ", aln_block_data->kernel_alns.size(), " in ", t.get_elapsed(), "s (",
-               (t.get_elapsed() > 0 ? aln_block_data->kernel_alns.size() / t.get_elapsed() : 0.0), " aln/s)\n");
+                 (t.get_elapsed() > 0 ? aln_block_data->kernel_alns.size() / t.get_elapsed() : 0.0), " aln/s)\n");
 
     DBG_VERBOSE("appending and returning ", aln_block_data->alns->size(), "\n");
     alns->append(*(aln_block_data->alns));
@@ -73,22 +91,17 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
 
 void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
   SWARN("Assuming 1 IPU per rank, TODO change");
-  // if (upcxx::rank_me() > 64) {
-  //   SWARN("More ranks than IPUs");
-  //   exit(1);
-  // }
-  double init_time;
+  a = new_array<char>(algoconfig.getTotalBufferSize());
+  b = new_array<char>(algoconfig.getTotalBufferSize());
+  a_len = new_array<int32_t>(algoconfig.getTotalNumberOfComparisons());
+  b_len = new_array<int32_t>(algoconfig.getTotalNumberOfComparisons());
 
-  // ipu::SWConfig config = {aln_scoring.gap_opening, aln_scoring.gap_extending,        aln_scoring.match,
-  //                         -aln_scoring.mismatch,   swatlib::Similarity::nucleicAcid, swatlib::DataType::nucleicAcid};
-  // ipu::batchaffine::IPUAlgoConfig algoconfig = {
-  //   KLIGN_IPU_TILES,
-  //   KLIGN_IPU_MAXAB_SIZE,
-  //   KLIGN_IPU_MAX_BATCHES,
-  //   KLIGN_IPU_BUFSIZE,
-  //   ipu::batchaffine::VertexType::cpp,
-  // };
-  // init_single_ipu(config, algoconfig);
+  scores = new_array<int32_t>(algoconfig.getTotalNumberOfComparisons());
+  mismatches = new_array<int32_t>(algoconfig.getTotalNumberOfComparisons());
+  a_range_result = new_array<int32_t>(algoconfig.getTotalNumberOfComparisons());
+  b_range_result = new_array<int32_t>(algoconfig.getTotalNumberOfComparisons());
+
+  double init_time;
   SLOG_VERBOSE("Initialized ipuma driver in ", init_time, " s\n");
 }
 

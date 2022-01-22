@@ -77,9 +77,10 @@ void init_devices() {
        KLIGN_IPU_MAXAB_SIZE,
        KLIGN_IPU_MAX_BATCHES,
        KLIGN_IPU_BUFSIZE,
-       ipu::batchaffine::VertexType::cpp,
+       ipu::batchaffine::VertexType::assembly,
      };
      init_single_ipu(config, algoconfig);
+     std::cout << "Aquired IPU, rank " << local_team().rank_me() << std::endl;
     }
   });
 }

@@ -30,22 +30,17 @@ long long getCellCount(const std::vector<std::string>& A, const std::vector<std:
   return cellCount;
 }
 
-int IPUAlgoConfig::getTotalNumberOfComparisons() {
-  return tilesUsed * maxBatches;
-}
+int IPUAlgoConfig::getTotalNumberOfComparisons() { return tilesUsed * maxBatches; }
 
-int IPUAlgoConfig::getTotalBufferSize() {
-  return tilesUsed * bufsize;
-}
+int IPUAlgoConfig::getTotalBufferSize() { return tilesUsed * bufsize; }
 
-std::string vertexTypeToString(VertexType v) {
-  return typeString[static_cast<int>(v)];
-}
+std::string vertexTypeToString(VertexType v) { return typeString[static_cast<int>(v)]; }
 
 /**
  * Streamable IPU graph for SW
  */
-std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigned long activeTiles, unsigned long maxAB, unsigned long bufSize, unsigned long maxBatches,
+std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigned long activeTiles, unsigned long maxAB,
+                                         unsigned long bufSize, unsigned long maxBatches,
                                          const swatlib::Matrix<int8_t> similarityData, int gapInit, int gapExt) {
   program::Sequence prog;
   program::Sequence initProg;
@@ -63,14 +58,9 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
 
   poplar::Type sType;
   switch (vtype) {
-  case VertexType::cpp:
-    sType = INT;
-    break;
-  case VertexType::assembly:
-    sType = FLOAT;
-    break;
-  default:
-    break;
+    case VertexType::cpp: sType = INT; break;
+    case VertexType::assembly: sType = FLOAT; break;
+    default: break;
   }
 
   TypeTraits traits = typeToTrait(sType);
@@ -99,15 +89,15 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
     graph.setTileMapping(Mismatches[i], tileIndex);
   }
 
-  auto host_stream_a     = graph.addHostToDeviceFIFO(STREAM_A, UNSIGNED_CHAR,  As.numElements());
-  auto host_stream_b     = graph.addHostToDeviceFIFO(STREAM_B, UNSIGNED_CHAR, Bs.numElements());
+  auto host_stream_a = graph.addHostToDeviceFIFO(STREAM_A, UNSIGNED_CHAR, As.numElements());
+  auto host_stream_b = graph.addHostToDeviceFIFO(STREAM_B, UNSIGNED_CHAR, Bs.numElements());
   auto host_stream_a_len = graph.addHostToDeviceFIFO(STREAM_A_LEN, INT, Alens.numElements());
   auto host_stream_b_len = graph.addHostToDeviceFIFO(STREAM_B_LEN, INT, Blens.numElements());
 
-  auto device_stream_scores     = graph.addDeviceToHostFIFO(STREAM_SCORES, INT, Scores.numElements());
+  auto device_stream_scores = graph.addDeviceToHostFIFO(STREAM_SCORES, INT, Scores.numElements());
   auto device_stream_mismatches = graph.addDeviceToHostFIFO(STREAM_MISMATCHES, INT, Mismatches.numElements());
-  auto device_stream_a_range    = graph.addDeviceToHostFIFO(STREAM_A_RANGE, INT, ARanges.numElements());
-  auto device_stream_b_range    = graph.addDeviceToHostFIFO(STREAM_B_RANGE, INT, BRanges.numElements());
+  auto device_stream_a_range = graph.addDeviceToHostFIFO(STREAM_A_RANGE, INT, ARanges.numElements());
+  auto device_stream_b_range = graph.addDeviceToHostFIFO(STREAM_B_RANGE, INT, BRanges.numElements());
 
   std::cout << "MaxAB: " << maxAB << "\n";
 
@@ -136,18 +126,13 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
     graph.setTileMapping(vtx, tileIndex);
     graph.setPerfEstimate(vtx, 1);
   }
-  auto h2d_prog = program::Sequence({
-    poplar::program::Copy(host_stream_a    , As.flatten()),
-    poplar::program::Copy(host_stream_b    , Bs.flatten()),
-    poplar::program::Copy(host_stream_a_len, Alens.flatten()),
-    poplar::program::Copy(host_stream_b_len, Blens.flatten())}
-  );
-  auto d2h_prog =program::Sequence({
-    poplar::program::Copy(Scores.flatten()    , device_stream_scores    ),
-    poplar::program::Copy(Mismatches.flatten(), device_stream_mismatches),
-    poplar::program::Copy(ARanges.flatten()   , device_stream_a_range   ),
-    poplar::program::Copy(BRanges.flatten()   , device_stream_b_range   )}
-  );
+  auto h2d_prog = program::Sequence(
+      {poplar::program::Copy(host_stream_a, As.flatten()), poplar::program::Copy(host_stream_b, Bs.flatten()),
+       poplar::program::Copy(host_stream_a_len, Alens.flatten()), poplar::program::Copy(host_stream_b_len, Blens.flatten())});
+  auto d2h_prog = program::Sequence({poplar::program::Copy(Scores.flatten(), device_stream_scores),
+                                     poplar::program::Copy(Mismatches.flatten(), device_stream_mismatches),
+                                     poplar::program::Copy(ARanges.flatten(), device_stream_a_range),
+                                     poplar::program::Copy(BRanges.flatten(), device_stream_b_range)});
   prog.add(h2d_prog);
   prog.add(program::Execute(frontCs));
   prog.add(d2h_prog);
@@ -155,8 +140,8 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
 }
 
 SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
-    : IPUAlgorithm(config), algoconfig(algoconfig) {
-
+    : IPUAlgorithm(config)
+    , algoconfig(algoconfig) {
   const auto totalComparisonsCount = algoconfig.getTotalNumberOfComparisons();
   const auto inputBufferSize = algoconfig.getTotalBufferSize();
 
@@ -177,7 +162,9 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
   Graph graph = createGraph();
 
   auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
-  std::vector<program::Program> programs = buildGraph(graph, algoconfig.vtype, algoconfig.tilesUsed, algoconfig.maxAB, algoconfig.bufsize, algoconfig.maxBatches, similarityMatrix, config.gapInit, config.gapExtend);
+  std::vector<program::Program> programs =
+      buildGraph(graph, algoconfig.vtype, algoconfig.tilesUsed, algoconfig.maxAB, algoconfig.bufsize, algoconfig.maxBatches,
+                 similarityMatrix, config.gapInit, config.gapExtend);
 
 #ifdef IPUMA_DEBUG
   addCycleCount(graph, static_cast<program::Sequence&>(programs[0]));
@@ -185,21 +172,22 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
 
   createEngine(graph, programs);
 
-  engine->connectStream(STREAM_A, a.data());
-  engine->connectStream(STREAM_A_LEN, a_len.data());
-  engine->connectStream(STREAM_B, b.data());
-  engine->connectStream(STREAM_B_LEN, b_len.data());
+  // engine->connectStream(STREAM_A, a.data());
+  // engine->connectStream(STREAM_A_LEN, a_len.data());
+  // engine->connectStream(STREAM_B, b.data());
+  // engine->connectStream(STREAM_B_LEN, b_len.data());
 
-  engine->connectStream(STREAM_SCORES, scores.data());
-  engine->connectStream(STREAM_MISMATCHES, mismatches.data());
-  engine->connectStream(STREAM_A_RANGE, a_range_result.data());
-  engine->connectStream(STREAM_B_RANGE, b_range_result.data());
+  // engine->connectStream(STREAM_SCORES, scores.data());
+  // engine->connectStream(STREAM_MISMATCHES, mismatches.data());
+  // engine->connectStream(STREAM_A_RANGE, a_range_result.data());
+  // engine->connectStream(STREAM_B_RANGE, b_range_result.data());
 }
 
 BlockAlignmentResults SWAlgorithm::get_result() { return {scores, mismatches, a_range_result, b_range_result}; }
 
-void SWAlgorithm::fillBuckets(const std::vector<std::string>& A, const std::vector<std::string>& B) {
-  std::fill(bucket_pairs.begin(), bucket_pairs.end(), 0);
+vector<size_t> SWAlgorithm::fillBuckets(IPUAlgoConfig& algoconfig,const std::vector<std::string>& A, const std::vector<std::string>& B) {
+  // std::fill(bucket_pairs.begin(), bucket_pairs.end(), 0);
+  vector<size_t> bucket_pairs(algoconfig.tilesUsed, 0);
   int curBucket = 0;
   int curBucketASize = 0;
   int curBucketBSize = 0;
@@ -207,12 +195,14 @@ void SWAlgorithm::fillBuckets(const std::vector<std::string>& A, const std::vect
     const auto& a = A[i];
     const auto& b = B[i];
     if (a.size() > algoconfig.maxAB || b.size() > algoconfig.maxAB) {
-      std::cout << "sizes of sequences: a(" << a.size() << "), b(" << b.size() << ") larger than maxAB(" << algoconfig.maxAB << ")\n";
+      std::cout << "sizes of sequences: a(" << a.size() << "), b(" << b.size() << ") larger than maxAB(" << algoconfig.maxAB
+                << ")\n";
       exit(1);
     }
     int newBucketASize = curBucketASize + a.size();
     int newBucketBSize = curBucketBSize + b.size();
-    if ((newBucketASize > algoconfig.bufsize || newBucketBSize > algoconfig.bufsize) || bucket_pairs[curBucket] >= algoconfig.maxBatches) {
+    if ((newBucketASize > algoconfig.bufsize || newBucketBSize > algoconfig.bufsize) ||
+        bucket_pairs[curBucket] >= algoconfig.maxBatches) {
       curBucket++;
       curBucketASize = 0;
       curBucketBSize = 0;
@@ -223,12 +213,54 @@ void SWAlgorithm::fillBuckets(const std::vector<std::string>& A, const std::vect
     }
     bucket_pairs[curBucket]++;
   }
+  return bucket_pairs;
 }
 
+void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int32_t* b_len, int32_t* scores, int32_t* mismatches,
+                                          int32_t* a_range_result, int32_t* b_range_result) {
+  // We have to reconnect the streams to new memory locations as the destination will be in a shared memroy region.
+  engine->connectStream(STREAM_A, a);
+  engine->connectStream(STREAM_A_LEN, a_len);
+  engine->connectStream(STREAM_B, b);
+  engine->connectStream(STREAM_B_LEN, b_len);
 
-void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<std::string>& B) {
-  upcxx_utils::AsyncTimer preprocessTimer("Preprocess");
+  engine->connectStream(STREAM_SCORES, scores);
+  engine->connectStream(STREAM_MISMATCHES, mismatches);
+  engine->connectStream(STREAM_A_RANGE, a_range_result);
+  engine->connectStream(STREAM_B_RANGE, b_range_result);
+
   upcxx_utils::AsyncTimer engineTimer("Engine");
+  engineTimer.start();
+  engine->run(0);
+  engineTimer.stop();
+#ifdef IPUMA_DEBUG
+  uint32_t cycles[2];
+  engine->readTensor("cycles", &cycles, &cycles + 1);
+  uint64_t totalCycles = (((uint64_t)cycles[1]) << 32) | cycles[0];
+  float computedTime = (double)totalCycles / getTarget().getTileClockFrequency();
+  SLOG("Poplar cycle count: ", totalCycles, " computed time (in s): ", computedTime, "\n");
+
+  // GCUPS computation
+  // auto cellCount = getCellCount(A, B);
+  auto cellCount = 0;
+  for (size_t i = 0; i < algoconfig.getTotalNumberOfComparisons(); i++) {
+    cellCount += a_len[i] * b_len[i];
+  }
+  
+  double GCUPS = (double)(cellCount / computedTime) / 1e9;
+  SLOG("Poplar estimated cells(", cellCount, ") GCUPS ", GCUPS, "\n");
+#endif
+}
+
+void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B) {
+  prepare_remote(algoconfig, A, B, a.data(), a_len.data(), b.data(), b_len.data());
+  prepared_remote_compare(a.data(), a_len.data(), b.data(), b_len.data(), scores.data(), mismatches.data(), a_range_result.data(),
+                          b_range_result.data());
+}
+
+void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B, char* a, int32_t* a_len,
+                                 char* b, int32_t* b_len) {
+  upcxx_utils::AsyncTimer preprocessTimer("Preprocess");
   preprocessTimer.start();
   if (A.size() > algoconfig.maxBatches * algoconfig.tilesUsed) {
     std::cout << "A has more elements than the maxBatchsize" << std::endl;
@@ -245,10 +277,12 @@ void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<s
   size_t bucketIncr = 0;
   size_t index = 0;
 
-  fillBuckets(A, B);
+  auto bucket_pairs = fillBuckets(algoconfig, A, B);
 
-  std::fill(a_len.begin(), a_len.end(), 0);
-  std::fill(b_len.begin(), b_len.end(), 0);
+  memset(a_len, 0, algoconfig.getTotalNumberOfComparisons());
+  memset(b_len, 0, algoconfig.getTotalNumberOfComparisons());
+  // std::fill(a_len.begin(), a_len.end(), 0);
+  // std::fill(b_len.begin(), b_len.end(), 0);
   for (const auto& cmpCountBucket : bucket_pairs) {
     size_t bucketAOffset = 0;
     size_t bucketBOffset = 0;
@@ -271,24 +305,7 @@ void SWAlgorithm::compare(const std::vector<std::string>& A, const std::vector<s
     bucketIncr += algoconfig.maxBatches;
   }
   preprocessTimer.stop();
-
-  engineTimer.start();
-  engine->run(0);
-  engineTimer.stop();
-  SLOG("Inner comparison time: ", preprocessTimer.get_elapsed(), " engine run: ", engineTimer.get_elapsed(), "\n");
-
-#ifdef IPUMA_DEBUG
-  uint32_t cycles[2];
-  engine->readTensor("cycles", &cycles, &cycles + 1);
-  uint64_t totalCycles = (((uint64_t)cycles[1]) << 32) | cycles[0];
-  float computedTime = (double) totalCycles / getTarget().getTileClockFrequency();
-  SLOG("Poplar cycle count: ", totalCycles, " computed time (in s): ", computedTime, "\n");
-
-  // GCUPS computation
-  auto cellCount = getCellCount(A, B);
-  double GCUPS = (double)(cellCount / computedTime) / 1e9;
-  SLOG("Poplar estimated cells(", cellCount, ") GCUPS ", GCUPS, "\n");
-#endif
+  // SLOG("Inner comparison time: ", preprocessTimer.get_elapsed(), " engine run: ", engineTimer.get_elapsed(), "\n");
 }
 }  // namespace batchaffine
 }  // namespace ipu
