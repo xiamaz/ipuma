@@ -28,20 +28,6 @@
 using namespace poplar;
 namespace ipu {
 
-Type formatToType(const std::string& format) {
-    if (format == "int") {
-        return INT;
-    } else if (format == "float") {
-        return FLOAT;
-    } else if (format == "half") {
-        return HALF;
-    } else if (format == "short") {
-        return SHORT;
-    } else {
-        throw std::runtime_error("Unknown type format: " + format);
-    }
-}
-
 TypeTraits typeToTrait(const Type& t) {
     if (t == INT) {
         return TypeTraits::make<int32_t>();

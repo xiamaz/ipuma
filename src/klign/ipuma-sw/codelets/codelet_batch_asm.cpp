@@ -10,22 +10,22 @@
  * Single SW operations for cell i, j
  * based on Fig. 1, Wozniak et al 1997
  */
-class SWAsm : public poplar::Vertex {
+class SWAffineAsm : public poplar::Vertex {
 private:
-    poplar::Vector<int, poplar::VectorLayout::ONE_PTR> C;
-    poplar::Vector<int, poplar::VectorLayout::ONE_PTR> bG;
+    poplar::Vector<float, poplar::VectorLayout::ONE_PTR, 8> C;
+    poplar::Vector<float, poplar::VectorLayout::ONE_PTR, 8> bG;
 public:
     // Fields
-    poplar::Vector<poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>>> simMatrix;
+    poplar::Vector<poplar::Input<poplar::Vector<float, poplar::VectorLayout::ONE_PTR>>, poplar::VectorLayout::ONE_PTR> simMatrix;
     poplar::Input<size_t> maxNPerTile;
-    poplar::Input<int> gapInit;
-    poplar::Input<int> gapExt;
+    poplar::Input<float> gapInit;
+    poplar::Input<float> gapExt;
     poplar::Input<int> bufSize;
     poplar::Input<int> maxAB;
     poplar::Input<poplar::Vector<unsigned char, poplar::VectorLayout::ONE_PTR>> A;
     poplar::Input<poplar::Vector<unsigned char, poplar::VectorLayout::ONE_PTR>> B;
-    poplar::Input<poplar::Vector<size_t, poplar::VectorLayout::ONE_PTR>> Alen;
-    poplar::Input<poplar::Vector<size_t, poplar::VectorLayout::ONE_PTR>> Blen;
+    poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> Alen;
+    poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> Blen;
     poplar::Output<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> score;
     poplar::Output<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> mismatches;
     poplar::Output<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> ARange;
