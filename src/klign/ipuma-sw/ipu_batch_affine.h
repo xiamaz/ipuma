@@ -20,9 +20,10 @@ const std::string STREAM_B_RANGE = "b-range-read";
 const std::string IPU_AFFINE_CPP = "SWAffine";
 const std::string IPU_AFFINE_ASM = "SWAffineAsm";
 
-enum class VertexType {cpp, assembly};
+enum class VertexType { cpp, assembly };
 
 static const std::string typeString[] = {"SWAffine", "SWAffineAsm"};
+std::string vertexTypeToString(VertexType v);
 
 struct IPUAlgoConfig {
   int tilesUsed = 1; // number of active vertices
@@ -44,8 +45,6 @@ struct IPUAlgoConfig {
    * @return int 
    */
   int getTotalBufferSize();
-
-  std::string getVertexTypeString();
 };
 
 struct BlockAlignmentResults {

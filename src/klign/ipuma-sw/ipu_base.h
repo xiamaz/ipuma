@@ -27,8 +27,8 @@ using namespace poplar;
 namespace ipu {
 
 struct SWConfig {
-        int gapInit = 1;
-        int gapExtend = 1;
+        int gapInit = 0;
+        int gapExtend = -1;
         int matchValue = 1;
         int mismatchValue = -1;
         swatlib::Similarity similarity = swatlib::Similarity::nucleicAcid;

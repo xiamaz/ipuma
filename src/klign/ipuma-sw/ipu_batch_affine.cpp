@@ -30,7 +30,6 @@ long long getCellCount(const std::vector<std::string>& A, const std::vector<std:
   return cellCount;
 }
 
-
 int IPUAlgoConfig::getTotalNumberOfComparisons() {
   return tilesUsed * maxBatches;
 }
@@ -39,15 +38,15 @@ int IPUAlgoConfig::getTotalBufferSize() {
   return tilesUsed * bufsize;
 }
 
-std::string IPUAlgoConfig::getVertexTypeString() {
-  return typeString[static_cast<int>(vtype)];
+std::string vertexTypeToString(VertexType v) {
+  return typeString[static_cast<int>(v)];
 }
 
 /**
  * Streamable IPU graph for SW
  */
-std::vector<program::Program> buildGraph(Graph& graph, std::string vtype, unsigned long activeTiles, unsigned long maxAB, unsigned long bufSize, unsigned long maxBatches,
-                                         const std::string& format, const swatlib::Matrix<int8_t> similarityData) {
+std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigned long activeTiles, unsigned long maxAB, unsigned long bufSize, unsigned long maxBatches,
+                                         const swatlib::Matrix<int8_t> similarityData, int gapInit, int gapExt) {
   program::Sequence prog;
   program::Sequence initProg;
 
@@ -62,7 +61,18 @@ std::vector<program::Program> buildGraph(Graph& graph, std::string vtype, unsign
 
   auto [m, n] = similarityData.shape();
 
-  poplar::Type sType = formatToType(format);
+  poplar::Type sType;
+  switch (vtype) {
+  case VertexType::cpp:
+    sType = INT;
+    break;
+  case VertexType::assembly:
+    sType = FLOAT;
+    break;
+  default:
+    break;
+  }
+
   TypeTraits traits = typeToTrait(sType);
   void* similarityBuffer;
   convertSimilarityMatrix(target, sType, similarityData, &similarityBuffer);
@@ -99,15 +109,17 @@ std::vector<program::Program> buildGraph(Graph& graph, std::string vtype, unsign
   auto device_stream_a_range    = graph.addDeviceToHostFIFO(STREAM_A_RANGE, INT, ARanges.numElements());
   auto device_stream_b_range    = graph.addDeviceToHostFIFO(STREAM_B_RANGE, INT, BRanges.numElements());
 
+  std::cout << "MaxAB: " << maxAB << "\n";
+
   auto frontCs = graph.addComputeSet("SmithWaterman");
   for (int i = 0; i < activeTiles; ++i) {
     int tileIndex = i % tileCount;
-    VertexRef vtx = graph.addVertex(frontCs, vtype,
+    VertexRef vtx = graph.addVertex(frontCs, vertexTypeToString(vtype),
                                     {
                                         {"bufSize", bufSize},
                                         {"maxAB", maxAB},
-                                        {"gapInit", 0},
-                                        {"gapExt", -1},
+                                        {"gapInit", gapInit},
+                                        {"gapExt", gapExt},
                                         {"maxNPerTile", maxBatches},
                                         {"A", As[i]},
                                         {"Alen", Alens[i]},
@@ -144,10 +156,6 @@ std::vector<program::Program> buildGraph(Graph& graph, std::string vtype, unsign
 
 SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
     : IPUAlgorithm(config), algoconfig(algoconfig) {
-  // this->maxAB = maxAB;
-  // this->bufsize = bufsize;
-  // this->maxBatches = maxBatches;
-  // this->tilesUsed = activeTiles;
 
   const auto totalComparisonsCount = algoconfig.getTotalNumberOfComparisons();
   const auto inputBufferSize = algoconfig.getTotalBufferSize();
@@ -169,7 +177,7 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
   Graph graph = createGraph();
 
   auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
-  std::vector<program::Program> programs = buildGraph(graph, algoconfig.getVertexTypeString(), algoconfig.tilesUsed, algoconfig.maxAB, algoconfig.bufsize, algoconfig.maxBatches, "int", similarityMatrix);
+  std::vector<program::Program> programs = buildGraph(graph, algoconfig.vtype, algoconfig.tilesUsed, algoconfig.maxAB, algoconfig.bufsize, algoconfig.maxBatches, similarityMatrix, config.gapInit, config.gapExtend);
 
 #ifdef IPUMA_DEBUG
   addCycleCount(graph, static_cast<program::Sequence&>(programs[0]));
@@ -208,6 +216,10 @@ void SWAlgorithm::fillBuckets(const std::vector<std::string>& A, const std::vect
       curBucket++;
       curBucketASize = 0;
       curBucketBSize = 0;
+      if (curBucket > algoconfig.tilesUsed) {
+        std::cout << "More buckets needed than available (" << algoconfig.tilesUsed << ")\n";
+        exit(1);
+      }
     }
     bucket_pairs[curBucket]++;
   }
