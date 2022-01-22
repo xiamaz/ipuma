@@ -11,25 +11,24 @@ using namespace upcxx_utils;
 static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns, bool report_cigar,
                                        IntermittentTimer &aln_kernel_timer) {
   AsyncTimer t("ipu_align_block (thread)");
-  
   future<> fut = upcxx_utils::execute_in_thread_pool([aln_block_data, t, report_cigar, &aln_kernel_timer] {
     DBG_VERBOSE("Starting _ipu_align_block_kernel of ", aln_block_data->kernel_alns.size(), "\n");
     t.start();
     aln_kernel_timer.start();
     ipu::batchaffine::BlockAlignmentResults aln_results{};
-    if (local_team().rank_me() != 0) {
-       auto [scores, mismatches, a_range_result, b_range_result] = rpc(local_team(), 0, [](vector<string> read_seqs, vector<string> ctg_seqs, int sender){
+    // if (local_team().rank_me() >= KLIGN_IPUS_LOCAL) {
+       auto [scores, mismatches, a_range_result, b_range_result] = rpc(local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL, [](vector<string> read_seqs, vector<string> ctg_seqs, int sender){
         cout << "Run RPC on " <<  local_team().rank_me() << " from " << sender <<  endl;
         getDriver()->compare(read_seqs, ctg_seqs);
         auto alns = getDriver()->get_result();
         return make_tuple(alns.scores, alns.mismatches, alns.a_range_result, alns.b_range_result);
       }, aln_block_data->read_seqs, aln_block_data->ctg_seqs, local_team().rank_me()).wait();
        aln_results = {scores, mismatches, a_range_result, b_range_result}; 
-    } else {
-        cout << "Run local" << endl;
-        getDriver()->compare(aln_block_data->read_seqs, aln_block_data->ctg_seqs);
-        aln_results = getDriver()->get_result();
-    }
+    // } else {
+    //     cout << "Run local" << endl;
+    //     getDriver()->compare(aln_block_data->read_seqs, aln_block_data->ctg_seqs);
+    //     aln_results = getDriver()->get_result();
+    // }
     aln_kernel_timer.stop();
     // auto aln_results = getDriver()->get_result();
     for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
@@ -74,10 +73,10 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
 
 void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
   SWARN("Assuming 1 IPU per rank, TODO change");
-  if (upcxx::rank_me() > 64) {
-    SWARN("More ranks than IPUs");
-    exit(1);
-  }
+  // if (upcxx::rank_me() > 64) {
+  //   SWARN("More ranks than IPUs");
+  //   exit(1);
+  // }
   double init_time;
 
   // ipu::SWConfig config = {aln_scoring.gap_opening, aln_scoring.gap_extending,        aln_scoring.match,

@@ -67,7 +67,7 @@ static int num_gpus_on_node = 0;
 void init_devices() {
   // initialize the GPU and first-touch memory and functions in a new thread as this can take many seconds to complete
   detect_ipu_fut = execute_in_thread_pool([]() {
-    if (local_team().rank_me() == 0) {
+    if (local_team().rank_me() < KLIGN_IPUS_LOCAL) {
      CPUAligner cpu_aln(false);
      auto& aln_scoring = cpu_aln.aln_scoring;
      ipu::SWConfig config = {-(aln_scoring.gap_opening-aln_scoring.gap_extending), -aln_scoring.gap_extending,        aln_scoring.match,

@@ -426,6 +426,7 @@ class Aligner {
     auto num = kernel_alns.size();
     if (num) {
       SWARN("Flush Remaining, incomplete block.");
+      std::cout << "Flush Remaining, incomplete block." << std::endl;
       kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, max_clen, max_rlen,
                          aln_kernel_timer);
       clear_aln_bufs();
