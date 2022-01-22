@@ -67,18 +67,20 @@ static int num_gpus_on_node = 0;
 void init_devices() {
   // initialize the GPU and first-touch memory and functions in a new thread as this can take many seconds to complete
   detect_ipu_fut = execute_in_thread_pool([]() {
-    CPUAligner cpu_aln(false);
-    auto& aln_scoring = cpu_aln.aln_scoring;
-    ipu::SWConfig config = {aln_scoring.gap_opening, aln_scoring.gap_extending,        aln_scoring.match,
-                            -aln_scoring.mismatch,   swatlib::Similarity::nucleicAcid, swatlib::DataType::nucleicAcid};
-    ipu::batchaffine::IPUAlgoConfig algoconfig = {
-      KLIGN_IPU_TILES,
-      KLIGN_IPU_MAXAB_SIZE,
-      KLIGN_IPU_MAX_BATCHES,
-      KLIGN_IPU_BUFSIZE,
-      ipu::batchaffine::VertexType::cpp,
-    };
-    init_single_ipu(config, algoconfig);
+    if (local_team().rank_me() == 0) {
+     CPUAligner cpu_aln(false);
+     auto& aln_scoring = cpu_aln.aln_scoring;
+     ipu::SWConfig config = {aln_scoring.gap_opening, aln_scoring.gap_extending,        aln_scoring.match,
+                             -aln_scoring.mismatch,   swatlib::Similarity::nucleicAcid, swatlib::DataType::nucleicAcid};
+     ipu::batchaffine::IPUAlgoConfig algoconfig = {
+       KLIGN_IPU_TILES,
+       KLIGN_IPU_MAXAB_SIZE,
+       KLIGN_IPU_MAX_BATCHES,
+       KLIGN_IPU_BUFSIZE,
+       ipu::batchaffine::VertexType::cpp,
+     };
+     init_single_ipu(config, algoconfig);
+    }
   });
 }
 

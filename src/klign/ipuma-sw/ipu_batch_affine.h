@@ -49,10 +49,10 @@ struct IPUAlgoConfig {
 };
 
 struct BlockAlignmentResults {
-  std::vector<int32_t> &scores;
-  std::vector<int32_t> &mismatches;
-  std::vector<int32_t> &a_range_result;
-  std::vector<int32_t> &b_range_result;
+  std::vector<int32_t> scores;
+  std::vector<int32_t> mismatches;
+  std::vector<int32_t> a_range_result;
+  std::vector<int32_t> b_range_result;
 };
 
 class SWAlgorithm : public IPUAlgorithm {
