@@ -45,3 +45,5 @@ install(TARGETS ${BINARY} DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 # enable "make check"
 add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} -V)
 add_dependencies(check ${BINARY})
+
+add_subdirectory(perf)
