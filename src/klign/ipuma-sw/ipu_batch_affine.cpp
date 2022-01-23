@@ -92,17 +92,16 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
     graph.setTileMapping(Mismatches[i], tileIndex);
   }
 
-  auto host_stream_a = graph.addHostToDeviceFIFO(STREAM_A, UNSIGNED_CHAR, As.numElements());
-  auto host_stream_b = graph.addHostToDeviceFIFO(STREAM_B, UNSIGNED_CHAR, Bs.numElements());
-  auto host_stream_a_len = graph.addHostToDeviceFIFO(STREAM_A_LEN, INT, Alens.numElements());
-  auto host_stream_b_len = graph.addHostToDeviceFIFO(STREAM_B_LEN, INT, Blens.numElements());
+  OptionFlags streamOptions({{"bufferingDepth", "2"}, {"splitLimit", "0"}});
+  auto host_stream_a = graph.addHostToDeviceFIFO(STREAM_A, UNSIGNED_CHAR, As.numElements(), ReplicatedStreamMode::REPLICATE, streamOptions);
+  auto host_stream_b = graph.addHostToDeviceFIFO(STREAM_B, UNSIGNED_CHAR, Bs.numElements(), ReplicatedStreamMode::REPLICATE, streamOptions);
+  auto host_stream_a_len = graph.addHostToDeviceFIFO(STREAM_A_LEN, INT, Alens.numElements(), ReplicatedStreamMode::REPLICATE, streamOptions);
+  auto host_stream_b_len = graph.addHostToDeviceFIFO(STREAM_B_LEN, INT, Blens.numElements(), ReplicatedStreamMode::REPLICATE, streamOptions);
 
   auto device_stream_scores = graph.addDeviceToHostFIFO(STREAM_SCORES, INT, Scores.numElements());
   auto device_stream_mismatches = graph.addDeviceToHostFIFO(STREAM_MISMATCHES, INT, Mismatches.numElements());
   auto device_stream_a_range = graph.addDeviceToHostFIFO(STREAM_A_RANGE, INT, ARanges.numElements());
   auto device_stream_b_range = graph.addDeviceToHostFIFO(STREAM_B_RANGE, INT, BRanges.numElements());
-
-  std::cout << "MaxAB: " << maxAB << "\n";
 
   auto frontCs = graph.addComputeSet("SmithWaterman");
   for (int i = 0; i < activeTiles; ++i) {
@@ -252,12 +251,19 @@ void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int3
   // GCUPS computation
   // auto cellCount = getCellCount(A, B);
   uint64_t cellCount = 0;
+  uint64_t dataCount = 0;
   for (size_t i = 0; i < algoconfig.getTotalNumberOfComparisons(); i++) {
     cellCount += a_len[i] * b_len[i];
+    dataCount += a_len[i] + b_len[i];
   }
   
-  // double GCUPSOuter = static_cast<double>(cellCount) / computedTime / 1e9;
-  // SLOG("Poplar estimated cells(", cellCount, ") GCUPS ", GCUPS, "\n");
+  double GCUPSOuter = static_cast<double>(cellCount) / timeOuter / 1e9;
+  double GCUPSInner = static_cast<double>(cellCount) / timeInner / 1e9;
+  SLOG("Poplar estimated cells(", cellCount, ") GCUPS ", GCUPSInner, "/", GCUPSOuter, "\n");
+
+  auto transferTime = timeOuter - timeInner;
+  auto transferBandwidth = static_cast<double>(dataCount) / transferTime / 1e6;
+  SLOG("Transfer time: ", transferTime, "s estimated bandwidth: ", transferBandwidth, "mb/s, per vertex: ", transferBandwidth / algoconfig.tilesUsed, "mb/s\n");
 #endif
 }
 
