@@ -28,6 +28,22 @@
 using namespace poplar;
 namespace ipu {
 
+void addCycleCount(Graph& graph, program::Sequence& mainProgram, const std::string handle) {
+    Tensor cycles = cycleCount(graph, mainProgram, 1, SyncType::EXTERNAL);
+    graph.createHostRead(handle, cycles);
+}
+
+uint64_t getTotalCycles(Engine& engine, const std::string handle) {
+  uint32_t cycles[2];
+  engine.readTensor(handle, &cycles, &cycles + 1);
+  uint64_t totalCycles = (((uint64_t)cycles[1]) << 32) | cycles[0];
+  return totalCycles;
+}
+
+double calculateGCUPS(uint64_t cellCount, double elapsedSeconds) {
+    return static_cast<double>(cellCount) / elapsedSeconds;
+}
+
 TypeTraits typeToTrait(const Type& t) {
     if (t == INT) {
         return TypeTraits::make<int32_t>();
@@ -125,11 +141,6 @@ IPUAlgorithm::IPUAlgorithm(SWConfig config) : config(config) {
 
     device = std::move(*it);
     target = device.getTarget();
-}
-
-void IPUAlgorithm::addCycleCount(Graph& graph, program::Sequence& mainProgram) {
-    Tensor cycles = cycleCount(graph, mainProgram, 1, SyncType::EXTERNAL);
-    graph.createHostRead("cycles", cycles);
 }
 
 Graph IPUAlgorithm::createGraph() {

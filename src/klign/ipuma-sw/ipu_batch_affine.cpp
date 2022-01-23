@@ -18,6 +18,9 @@
 namespace ipu {
 namespace batchaffine {
 
+static const std::string CYCLE_COUNT_OUTER = "cycle-count-outer";
+static const std::string CYCLE_COUNT_INNER = "cycle-count-inner";
+
 long long getCellCount(const std::vector<std::string>& A, const std::vector<std::string>& B) {
   long long cellCount = 0;
   if (A.size() != B.size()) {
@@ -133,9 +136,19 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
                                      poplar::program::Copy(Mismatches.flatten(), device_stream_mismatches),
                                      poplar::program::Copy(ARanges.flatten(), device_stream_a_range),
                                      poplar::program::Copy(BRanges.flatten(), device_stream_b_range)});
+#ifdef IPUMA_DEBUG
+  auto main_prog = program::Sequence(program::Execute(frontCs));
+  addCycleCount(graph, main_prog, CYCLE_COUNT_INNER);
+#else
+  auto main_prog = program::Execute(frontCs);
+#endif
   prog.add(h2d_prog);
-  prog.add(program::Execute(frontCs));
+  prog.add(main_prog);
   prog.add(d2h_prog);
+
+#ifdef IPUMA_DEBUG
+  addCycleCount(graph, prog, CYCLE_COUNT_OUTER);
+#endif
   return {prog, initProg};
 }
 
@@ -165,10 +178,6 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
   std::vector<program::Program> programs =
       buildGraph(graph, algoconfig.vtype, algoconfig.tilesUsed, algoconfig.maxAB, algoconfig.bufsize, algoconfig.maxBatches,
                  similarityMatrix, config.gapInit, config.gapExtend);
-
-#ifdef IPUMA_DEBUG
-  addCycleCount(graph, static_cast<program::Sequence&>(programs[0]));
-#endif
 
   createEngine(graph, programs);
 
@@ -206,7 +215,7 @@ vector<size_t> SWAlgorithm::fillBuckets(IPUAlgoConfig& algoconfig,const std::vec
       curBucket++;
       curBucketASize = 0;
       curBucketBSize = 0;
-      if (curBucket > algoconfig.tilesUsed) {
+      if (curBucket >= algoconfig.tilesUsed) {
         std::cout << "More buckets needed than available (" << algoconfig.tilesUsed << ")\n";
         exit(1);
       }
@@ -234,21 +243,21 @@ void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int3
   engine->run(0);
   engineTimer.stop();
 #ifdef IPUMA_DEBUG
-  uint32_t cycles[2];
-  engine->readTensor("cycles", &cycles, &cycles + 1);
-  uint64_t totalCycles = (((uint64_t)cycles[1]) << 32) | cycles[0];
-  float computedTime = (double)totalCycles / getTarget().getTileClockFrequency();
-  SLOG("Poplar cycle count: ", totalCycles, " computed time (in s): ", computedTime, "\n");
+  auto cyclesOuter = getTotalCycles(*engine, CYCLE_COUNT_OUTER);
+  auto cyclesInner = getTotalCycles(*engine, CYCLE_COUNT_INNER);
+  auto timeOuter = static_cast<double>(cyclesOuter) / getTarget().getTileClockFrequency();
+  auto timeInner = static_cast<double>(cyclesInner) / getTarget().getTileClockFrequency();
+  SLOG("Poplar cycle count: ", cyclesInner, "/", cyclesOuter, " computed time (in s): ", timeInner, "/", timeOuter, "\n");
 
   // GCUPS computation
   // auto cellCount = getCellCount(A, B);
-  auto cellCount = 0;
+  uint64_t cellCount = 0;
   for (size_t i = 0; i < algoconfig.getTotalNumberOfComparisons(); i++) {
     cellCount += a_len[i] * b_len[i];
   }
   
-  double GCUPS = (double)(cellCount / computedTime) / 1e9;
-  SLOG("Poplar estimated cells(", cellCount, ") GCUPS ", GCUPS, "\n");
+  // double GCUPSOuter = static_cast<double>(cellCount) / computedTime / 1e9;
+  // SLOG("Poplar estimated cells(", cellCount, ") GCUPS ", GCUPS, "\n");
 #endif
 }
 
