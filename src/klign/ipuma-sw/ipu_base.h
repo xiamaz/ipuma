@@ -30,6 +30,10 @@
 using namespace poplar;
 namespace ipu {
 
+void addCycleCount(Graph& graph, program::Sequence& mainProgram, const std::string handle);
+uint64_t getTotalCycles(Engine& engine, const std::string handle);
+double calculateGCUPS(uint64_t cellCount, double elapsedSeconds);
+
 struct SWConfig {
         int gapInit = 0;
         int gapExtend = -1;
@@ -58,8 +62,6 @@ protected:
     std::unique_ptr<Engine> engine;
 public:
     IPUAlgorithm(SWConfig config);
-
-    void addCycleCount(Graph& graph, program::Sequence& mainProgram);
 
     Graph createGraph();
 

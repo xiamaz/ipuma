@@ -40,8 +40,8 @@ AlnScoring cigar_aln_scoring = {.match = 2, .mismatch = 4, .gap_opening = 4, .ga
 #ifdef ENABLE_IPUS
 TEST(MHMTest, ipumaperfasm) {
   int numWorkers = 8832;
-  int numCmps = 100;
-  int strlen = 300;
+  int numCmps = 200;
+  int strlen = 150;
   auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, 40000, ipu::batchaffine::VertexType::assembly});
   vector<string> refs, queries;
 
@@ -50,13 +50,13 @@ TEST(MHMTest, ipumaperfasm) {
     refs.push_back(string(strlen, 'A'));
     queries.push_back(string(strlen, 'T'));
   }
-  driver.compare(queries, refs);
+  driver.compare_local(queries, refs);
 }
 
 TEST(MHMTest, ipumaperfcpp) {
   int numWorkers = 8832;
-  int numCmps = 100;
-  int strlen = 300;
+  int numCmps = 200;
+  int strlen = 150;
   auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, 40000, ipu::batchaffine::VertexType::cpp});
   vector<string> refs, queries;
 
@@ -65,6 +65,6 @@ TEST(MHMTest, ipumaperfcpp) {
     refs.push_back(string(strlen, 'A'));
     queries.push_back(string(strlen, 'T'));
   }
-  driver.compare(queries, refs);
+  driver.compare_local(queries, refs);
 }
 #endif
