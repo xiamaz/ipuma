@@ -195,6 +195,7 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
   }
 
   OptionFlags streamOptions({/*{"bufferingDepth", "2"}, {"splitLimit", "0"}*/});
+  // OptionFlags streamOptions({{"bufferingDepth", "2"}, {"splitLimit", "0"}});
   auto host_stream_a = graph.addHostToDeviceFIFO(STREAM_A, UNSIGNED_CHAR, As.numElements(), ReplicatedStreamMode::REPLICATE, streamOptions);
   auto host_stream_b = graph.addHostToDeviceFIFO(STREAM_B, UNSIGNED_CHAR, Bs.numElements(), ReplicatedStreamMode::REPLICATE, streamOptions);
   auto host_stream_a_len = graph.addHostToDeviceFIFO(STREAM_A_LEN, INT, Alens.numElements(), ReplicatedStreamMode::REPLICATE, streamOptions);

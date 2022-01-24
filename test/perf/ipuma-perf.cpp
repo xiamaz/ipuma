@@ -84,27 +84,12 @@ INSTANTIATE_TEST_SUITE_P(
   testing::Values(ipu::batchaffine::VertexType::cpp, ipu::batchaffine::VertexType::assembly)
   );
 
-TEST(MHMTest, DISABLED_ipumaperfcpp) {
-  int numWorkers = 8832;
-  int numCmps = 40;
-  int strlen = 150;
-  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, ipu::batchaffine::VertexType::cpp});
-  vector<string> refs, queries;
-
-  // generate input strings
-  for (int i = 0; i < numCmps * numWorkers; ++i) {
-    refs.push_back(string(strlen, 'A'));
-    queries.push_back(string(strlen, 'T'));
-  }
-  driver.compare_local(queries, refs);
-}
-
 class PartitionPerformance : public PerformanceBase, public ::testing::WithParamInterface<ipu::batchaffine::partition::Algorithm> {
 };
 
 TEST_P(PartitionPerformance, RealBatches) {
   int numWorkers = 8832;
-  int numCmps = 30;
+  int numCmps = 40;
   int strlen = 200;
 
   auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, ipu::batchaffine::VertexType::assembly, GetParam()});
