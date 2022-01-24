@@ -1,6 +1,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <tuple>
 
 #include "ssw.hpp"
 #include "gtest/gtest.h"
@@ -17,6 +18,7 @@ using std::max;
 using std::min;
 using std::string;
 using std::vector;
+using std::tuple;
 
 using namespace StripedSmithWaterman;
 
@@ -37,8 +39,18 @@ AlnScoring aln_scoring = {.match = ALN_MATCH_SCORE,
                           .ambiguity = ALN_AMBIGUITY_COST};
 AlnScoring cigar_aln_scoring = {.match = 2, .mismatch = 4, .gap_opening = 4, .gap_extending = 2, .ambiguity = 1};
 
+std::vector<std::string> loadSequences(const std::string& path) {
+  std::vector<std::string> sequences;
+  std::ifstream seqFile(path);
+  string line;
+  while (std::getline(seqFile, line)) {
+    sequences.push_back(line);
+  }
+  return sequences;
+}
+
 #ifdef ENABLE_IPUS
-TEST(MHMTest, ipumaperfasm) {
+TEST(MHMTest, DISABLED_ipumaperfasm) {
   int numWorkers = 8832;
   int numCmps = 40;
   int strlen = 150;
@@ -53,7 +65,7 @@ TEST(MHMTest, ipumaperfasm) {
   driver.compare_local(queries, refs);
 }
 
-TEST(MHMTest, ipumaperfcpp) {
+TEST(MHMTest, DISABLED_ipumaperfcpp) {
   int numWorkers = 8832;
   int numCmps = 40;
   int strlen = 150;
@@ -66,5 +78,56 @@ TEST(MHMTest, ipumaperfcpp) {
     queries.push_back(string(strlen, 'T'));
   }
   driver.compare_local(queries, refs);
+}
+
+TEST(MHMTest, DISABLED_ipupartitionfill) {
+  int numWorkers = 8832;
+  int numCmps = 30;
+  int strlen = 200;
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, ipu::batchaffine::VertexType::assembly, ipu::batchaffine::partition::Algorithm::fillFirst});
+  vector<string> refs, queries;
+  vector<tuple<string, string>> paths = {
+    {"/global/D1/projects/ipumer/inputs_ab/batch_0_A.txt", "/global/D1/projects/ipumer/inputs_ab/batch_0_B.txt"} 
+  };
+  for (auto& [path_a, path_b] : paths) {
+    refs = loadSequences(path_a);
+    queries = loadSequences(path_b);
+  }
+  std::cout << "Len A: " << refs.size() << " Len B: " << queries.size() << "\n";
+  driver.compare_local(refs, queries);
+}
+
+TEST(MHMTest, DISABLED_ipupartitionroundrobin) {
+  int numWorkers = 8832;
+  int numCmps = 30;
+  int strlen = 200;
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, ipu::batchaffine::VertexType::assembly, ipu::batchaffine::partition::Algorithm::roundRobin});
+  vector<string> refs, queries;
+  vector<tuple<string, string>> paths = {
+    {"/global/D1/projects/ipumer/inputs_ab/batch_0_A.txt", "/global/D1/projects/ipumer/inputs_ab/batch_0_B.txt"} 
+  };
+  for (auto& [path_a, path_b] : paths) {
+    refs = loadSequences(path_a);
+    queries = loadSequences(path_b);
+  }
+  std::cout << "Len A: " << refs.size() << " Len B: " << queries.size() << "\n";
+  driver.compare_local(refs, queries);
+}
+
+TEST(MHMTest, ipupartitiongreedy) {
+  int numWorkers = 8832;
+  int numCmps = 30;
+  int strlen = 200;
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, ipu::batchaffine::VertexType::assembly, ipu::batchaffine::partition::Algorithm::greedy});
+  vector<string> refs, queries;
+  vector<tuple<string, string>> paths = {
+    {"/global/D1/projects/ipumer/inputs_ab/batch_0_A.txt", "/global/D1/projects/ipumer/inputs_ab/batch_0_B.txt"} 
+  };
+  for (auto& [path_a, path_b] : paths) {
+    refs = loadSequences(path_a);
+    queries = loadSequences(path_b);
+  }
+  std::cout << "Len A: " << refs.size() << " Len B: " << queries.size() << "\n";
+  driver.compare_local(refs, queries);
 }
 #endif

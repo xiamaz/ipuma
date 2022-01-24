@@ -18,6 +18,107 @@
 namespace ipu {
 namespace batchaffine {
 
+namespace partition {
+
+  std::vector<std::tuple<int, int>> fillFirst(const std::vector<std::string>& A, const std::vector<std::string>& B, int bucketCount, int bucketCapacity, int bucketCountCapacity) {
+    std::vector<std::tuple<int, int>> mapping(A.size(), {0, 0});
+    std::vector<std::tuple<int, int, int>> buckets(bucketCount, {0, 0, 0});
+    int bucketIndex = 0;
+    for (int i = 0; i < A.size(); ++i) {
+      const auto& a = A[i];
+      const auto& b = B[i];
+
+      // find next empty bucket
+      while (bucketIndex <= bucketCount) {
+        auto& [bN, bA, bB] = buckets[bucketIndex];
+        if (bN + 1 >= bucketCountCapacity || bA + a.size() > bucketCapacity || bB + b.size() > bucketCapacity) {
+          bucketIndex++;
+        } else {
+          mapping[i] = {bucketIndex, i};
+          bN++;
+          bA += a.size();
+          bB += b.size();
+          break;
+        }
+      }
+      if (bucketIndex >= bucketCount) {
+          std::cout << "More buckets needed than available (" << buckets.size() << ")\n";
+          exit(1);
+      }
+    }
+
+    return mapping;
+  }
+
+  std::vector<std::tuple<int, int>> roundRobin(const std::vector<std::string>& A, const std::vector<std::string>& B, int bucketCount, int bucketCapacity, int bucketCountCapacity) {
+    std::vector<std::tuple<int, int>> mapping(A.size(), {0, 0});
+    std::vector<std::tuple<int, int, int>> buckets(bucketCount, {0, 0, 0});
+    int bucketIndex = 0;
+    for (int i = 0; i < A.size(); ++i) {
+      const auto& a = A[i];
+      const auto& b = B[i];
+
+      // find next empty bucket
+      int boff = 0;
+      for (; boff < bucketCount; ++boff) {
+        int bi = (bucketIndex + boff) % bucketCount;
+        auto& [bN, bA, bB] = buckets[bi];
+        if (bN + 1 >= bucketCountCapacity || bA + a.size() > bucketCapacity || bB + b.size() > bucketCapacity) {
+          continue;
+        } else {
+          mapping[i] = {bucketIndex, i};
+          bN++;
+          bA += a.size();
+          bB += b.size();
+          break;
+        }
+      }
+      if (boff >= bucketCount) {
+          std::cout << "More buckets needed than available (" << buckets.size() << ")\n";
+          exit(1);
+      }
+      bucketIndex = (bucketIndex + 1) % bucketCount;
+    }
+    return mapping;
+  }
+
+  // Greedy approach in which we always put current sequence into one with lowest weight
+  std::vector<std::tuple<int, int>> greedy(const std::vector<std::string>& A, const std::vector<std::string>& B, int bucketCount, int bucketCapacity, int bucketCountCapacity) {
+    std::vector<std::tuple<int, int>> mapping(A.size(), {0, 0});
+    std::vector<std::tuple<int, int, int, int>> buckets(bucketCount, {0, 0, 0, 0});
+    for (int i = 0; i < A.size(); ++i) {
+      const auto& a = A[i];
+      const auto& b = B[i];
+
+      auto weight = a.size() * b.size();
+      int smallestBucket = -1;
+      int smallestBucketWeight = 0;
+      for (int bi = 0; bi < bucketCount; ++bi) {
+        auto [bN, bA, bB, bW] = buckets[bi];
+        if (!(bN + 1 >= bucketCountCapacity || bA + a.size() > bucketCapacity || bB + b.size() > bucketCapacity)) {
+          if (smallestBucket == -1 || smallestBucketWeight > bW) {
+            smallestBucket = bi;
+            smallestBucketWeight = bW;
+          }
+        }
+      }
+
+      if (smallestBucket == -1) {
+        std::cout << "Out of buckets\n";
+        exit(1);
+      }
+
+      auto& [bN, bA, bB, bW] = buckets[smallestBucket];
+      bN++;
+      bA += a.size();
+      bB += b.size();
+      bW += weight;
+      mapping[i] = {smallestBucket, i};
+    }
+    return mapping;
+  }
+}
+
 static const std::string CYCLE_COUNT_OUTER = "cycle-count-outer";
 static const std::string CYCLE_COUNT_INNER = "cycle-count-inner";
 
@@ -170,7 +271,6 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
   mismatches.resize(totalComparisonsCount);
   a_range_result.resize(totalComparisonsCount);
   b_range_result.resize(totalComparisonsCount);
-  bucket_pairs.resize(algoconfig.tilesUsed);
 
   Graph graph = createGraph();
 
@@ -194,33 +294,44 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
 
 BlockAlignmentResults SWAlgorithm::get_result() { return {scores, mismatches, a_range_result, b_range_result}; }
 
-vector<size_t> SWAlgorithm::fillBuckets(IPUAlgoConfig& algoconfig,const std::vector<std::string>& A, const std::vector<std::string>& B) {
-  // std::fill(bucket_pairs.begin(), bucket_pairs.end(), 0);
-  vector<size_t> bucket_pairs(algoconfig.tilesUsed, 0);
-  int curBucket = 0;
-  int curBucketASize = 0;
-  int curBucketBSize = 0;
-  for (int i = 0; i < A.size(); ++i) {
-    const auto& a = A[i];
-    const auto& b = B[i];
-    if (a.size() > algoconfig.maxAB || b.size() > algoconfig.maxAB) {
-      std::cout << "sizes of sequences: a(" << a.size() << "), b(" << b.size() << ") larger than maxAB(" << algoconfig.maxAB
-                << ")\n";
+void SWAlgorithm::checkSequenceSizes(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B) {
+  if (A.size() != B.size()) {
+    std::cout << "Mismatched size A " << A.size() << " != B " << B.size() << "\n";
+    exit(1);
+  }
+  if (A.size() > algoconfig.maxBatches * algoconfig.tilesUsed) {
+    std::cout << "A has more elements than the maxBatchsize" << std::endl;
+    std::cout << "A.size() = " << A.size() << std::endl;
+    std::cout << "max comparisons = " << algoconfig.tilesUsed << " * " << algoconfig.maxBatches << std::endl;
+    exit(1);
+  }
+
+  for (const auto& a : A) {
+    if (a.size() > algoconfig.maxAB) {
+      std::cout << "Sequence size in a " << a.size() << " > " << algoconfig.maxAB << "\n";
       exit(1);
     }
-    int newBucketASize = curBucketASize + a.size();
-    int newBucketBSize = curBucketBSize + b.size();
-    if ((newBucketASize > algoconfig.bufsize || newBucketBSize > algoconfig.bufsize) ||
-        bucket_pairs[curBucket] >= algoconfig.maxBatches) {
-      curBucket++;
-      curBucketASize = 0;
-      curBucketBSize = 0;
-      if (curBucket >= algoconfig.tilesUsed) {
-        std::cout << "More buckets needed than available (" << algoconfig.tilesUsed << ")\n";
-        exit(1);
-      }
+  }
+  for (const auto& b : B) {
+    if (b.size() > algoconfig.maxAB) {
+      std::cout << "Sequence size in a " << b.size() << " > " << algoconfig.maxAB << "\n";
+      exit(1);
     }
-    bucket_pairs[curBucket]++;
+  }
+}
+
+vector<std::tuple<int, int>> SWAlgorithm::fillBuckets(IPUAlgoConfig& algoconfig,const std::vector<std::string>& A, const std::vector<std::string>& B) {
+  vector<std::tuple<int, int>> bucket_pairs;
+  switch (algoconfig.fillAlgo) {
+  case partition::Algorithm::fillFirst:
+    bucket_pairs = partition::fillFirst(A, B, algoconfig.tilesUsed, algoconfig.bufsize, algoconfig.maxBatches);
+    break;
+  case partition::Algorithm::roundRobin:
+    bucket_pairs = partition::roundRobin(A, B, algoconfig.tilesUsed, algoconfig.bufsize, algoconfig.maxBatches);
+    break;
+  case partition::Algorithm::greedy:
+    bucket_pairs = partition::greedy(A, B, algoconfig.tilesUsed, algoconfig.bufsize, algoconfig.maxBatches);
+    break;
   }
   return bucket_pairs;
 }
@@ -242,6 +353,7 @@ void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int3
   engineTimer.start();
   engine->run(0);
   engineTimer.stop();
+
 #ifdef IPUMA_DEBUG
   auto cyclesOuter = getTotalCycles(*engine, CYCLE_COUNT_OUTER);
   auto cyclesInner = getTotalCycles(*engine, CYCLE_COUNT_INNER);
@@ -269,34 +381,33 @@ void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int3
 }
 
 void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B) {
-  prepare_remote(algoconfig, A, B, a.data(), a_len.data(), b.data(), b_len.data());
-  prepared_remote_compare(a.data(), a_len.data(), b.data(), b_len.data(), scores.data(), mismatches.data(), a_range_result.data(),
-                          b_range_result.data());
+  std::vector<int> mapping;
+  prepare_remote(algoconfig, A, B, a.data(), a_len.data(), b.data(), b_len.data(), mapping);
+  std::vector<int32_t> unord_scores(scores), unord_mismatches(mismatches), unord_a_range(a_range_result), unord_b_range(b_range_result);
+  prepared_remote_compare(a.data(), a_len.data(), b.data(), b_len.data(), unord_scores.data(), unord_mismatches.data(), unord_a_range.data(),
+                          unord_b_range.data());
+  // reorder results based on mapping
+  for (int i = 0; i < mapping.size(); ++i) {
+    scores[i] = unord_scores[mapping[i]];
+    mismatches[i] = unord_mismatches[mapping[i]];
+    a_range_result[i] = unord_a_range[mapping[i]];
+    b_range_result[i] = unord_b_range[mapping[i]];
+  }
 }
 
 void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B, char* a, int32_t* a_len,
-                                 char* b, int32_t* b_len) {
+                                 char* b, int32_t* b_len, std::vector<int>& seqMapping) {
   upcxx_utils::AsyncTimer preprocessTimer("Preprocess");
   preprocessTimer.start();
-  if (A.size() > algoconfig.maxBatches * algoconfig.tilesUsed) {
-    std::cout << "A has more elements than the maxBatchsize" << std::endl;
-    std::cout << "A.size() = " << A.size() << std::endl;
-    std::cout << "max comparisons = " << algoconfig.tilesUsed << " * " << algoconfig.maxBatches << std::endl;
-    exit(1);
-  }
+  checkSequenceSizes(algoconfig, A, B);
 
   auto encoder = swatlib::getEncoder(swatlib::DataType::nucleicAcid);
   auto vA = encoder.encode(A);
   auto vB = encoder.encode(B);
 
-  size_t bufferOffset = 0;
-  size_t bucketIncr = 0;
-  size_t index = 0;
+  memset(a_len, 0, algoconfig.getTotalNumberOfComparisons() * sizeof(*a_len));
+  memset(b_len, 0, algoconfig.getTotalNumberOfComparisons() * sizeof(*b_len));
 
-  auto bucket_pairs = fillBuckets(algoconfig, A, B);
-
-  memset(a_len, 0, algoconfig.getTotalNumberOfComparisons());
-  memset(b_len, 0, algoconfig.getTotalNumberOfComparisons());
   #ifdef IPUMA_DEBUG
   for (size_t i = 0; i < algoconfig.getTotalNumberOfComparisons(); i++) {
     if (a_len[i] != 0 || b_len[i] != 0) {
@@ -305,30 +416,49 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
     }
   }
   #endif
-  // std::fill(a_len.begin(), a_len.end(), 0);
-  // std::fill(b_len.begin(), b_len.end(), 0);
-  for (const auto& cmpCountBucket : bucket_pairs) {
-    size_t bucketAOffset = 0;
-    size_t bucketBOffset = 0;
-    for (int cmpIndex = 0; cmpIndex < cmpCountBucket; ++cmpIndex) {
-      // Copy strings A[index] and B[index] to a and b
-      const auto& curA = vA[index];
-      const auto& curB = vB[index];
-      for (int i = 0; i < curA.size(); ++i) {
-        a[bufferOffset + bucketAOffset++] = curA[i];
-      }
-      for (int i = 0; i < curB.size(); ++i) {
-        b[bufferOffset + bucketBOffset++] = curB[i];
-      }
-      a_len[bucketIncr + cmpIndex] = curA.size();
-      b_len[bucketIncr + cmpIndex] = curB.size();
-      index++;
-    }
 
-    bufferOffset += algoconfig.bufsize;
-    bucketIncr += algoconfig.maxBatches;
+  auto mapping = fillBuckets(algoconfig, A, B);
+  std::vector<std::tuple<int, int, int>> buckets(algoconfig.tilesUsed, {0, 0, 0});
+
+  seqMapping = std::vector<int>(A.size(), 0);
+  for (const auto [bucket, i] : mapping) {
+    auto& [bN, bA, bB] = buckets[bucket];
+    auto aSize = vA[i].size();
+    auto bSize = vB[i].size();
+
+    size_t offsetBuffer = bucket * algoconfig.bufsize;
+    size_t offsetLength = bucket * algoconfig.maxBatches;
+
+    a_len[offsetLength + bN] = aSize;
+    b_len[offsetLength + bN] = bSize;
+    seqMapping[i] = offsetLength + bN;
+
+    memcpy(a + offsetBuffer + bA, vA[i].data(), aSize);
+    memcpy(b + offsetBuffer + bB, vB[i].data(), bSize);
+
+    bN++;
+    bA += aSize;
+    bB += bSize;
   }
+
   preprocessTimer.stop();
+
+#ifdef IPUMA_DEBUG
+  int emptyBuckets = 0;
+  std::map<int, int> occurence;
+  for (auto [n, bA, bB] : buckets) {
+    if (n == 0) emptyBuckets++;
+    occurence[n]++;
+  }
+  std::stringstream ss;
+  ss << "Map[";
+  for (auto [k ,v] : occurence) {
+    ss << k << ": " << v << ",";
+  }
+  ss << "]";
+  SLOG("Total number of buckets: ", buckets.size(), " empty buckets: ", emptyBuckets, "\n");
+  SLOG("Bucket size occurence: ", ss.str(), "\n");
+#endif
   // SLOG("Inner comparison time: ", preprocessTimer.get_elapsed(), " engine run: ", engineTimer.get_elapsed(), "\n");
 }
 }  // namespace batchaffine

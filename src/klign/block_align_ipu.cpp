@@ -29,8 +29,9 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
     DBG_VERBOSE("Starting _ipu_align_block_kernel of ", aln_block_data->kernel_alns.size(), "\n");
     t.start();
     aln_kernel_timer.start();
+    std::vector<int> mapping;
     ipu::batchaffine::SWAlgorithm::prepare_remote(algoconfig, aln_block_data->read_seqs, aln_block_data->ctg_seqs, a.local(),
-                                                  a_len.local(), b.local(), b_len.local());
+                                                  a_len.local(), b.local(), b_len.local(), mapping);
     rpc(
         local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL,
         [](int sender, upcxx::global_ptr<char> _a, upcxx::global_ptr<char> _b, upcxx::global_ptr<int32_t> _a_len,
@@ -50,11 +51,12 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
 
     aln_kernel_timer.stop();
     for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
-      auto uda = a_range_result.local()[i];
+      auto i_mapped = mapping[i];
+      auto uda = a_range_result.local()[i_mapped];
       int16_t query_begin = uda & 0xffff;
       int16_t query_end = uda >> 16;
 
-      auto udb = b_range_result.local()[i];
+      auto udb = b_range_result.local()[i_mapped];
       int16_t ref_begin = udb & 0xffff;
       int16_t ref_end = udb >> 16;
 
@@ -64,7 +66,7 @@ static upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data
       aln.cstop = aln.cstart + ref_end + 1;
       aln.cstart += ref_begin;
       if (aln.orient == '-') switch_orient(aln.rstart, aln.rstop, aln.rlen);
-      aln.score1 = scores.local()[i];
+      aln.score1 = scores.local()[i_mapped];
       // FIXME: needs to be set to the second best
       aln.score2 = 0;
       // aln.mismatches = aln_results.mismatches[i];  // ssw_aln.mismatches;

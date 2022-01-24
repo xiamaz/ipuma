@@ -740,7 +740,14 @@ TEST(MHMTest, ipuma) {
   double time_to_initialize;
   int device_count;
   size_t total_mem;
-  auto driver = ipu::batchaffine::SWAlgorithm({}, {});
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {
+    .tilesUsed = 2,
+    .maxAB = 300,
+    .maxBatches = 20,
+    .bufsize = 3000,
+    .vtype = ipu::batchaffine::VertexType::cpp,
+    .fillAlgo = ipu::batchaffine::partition::Algorithm::roundRobin
+  });
   std::cout << "Initialized IPU\n";
 
   vector<Alignment> alns;

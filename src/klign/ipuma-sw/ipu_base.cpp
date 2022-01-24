@@ -156,7 +156,7 @@ void IPUAlgorithm::createEngine(Graph& graph, std::vector<program::Program> prog
     auto& device = getDevice();
     poplar::OptionFlags engineOptions;
 
-    engineOptions.set("exchange.streamBufferOverlap", "hostRearrangeOnly");
+    engineOptions.set("exchange.streamBufferOverlap", "none");
     engineOptions.set("exchange.enablePrefetch", "true");
     engine = std::make_unique<Engine>(graph, programs, engineOptions);
     engine->load(device);

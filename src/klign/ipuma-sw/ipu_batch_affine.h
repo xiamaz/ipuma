@@ -9,6 +9,10 @@ using namespace poplar;
 namespace ipu {
 namespace batchaffine {
 
+  namespace partition {
+    enum class Algorithm {fillFirst, roundRobin, greedy};
+  }
+
 const std::string STREAM_A = "a-write";
 const std::string STREAM_A_LEN = "a-len-write";
 const std::string STREAM_B = "b-write";
@@ -32,6 +36,7 @@ struct IPUAlgoConfig {
   int maxBatches = 20; // maximum number of comparisons in a single batch
   int bufsize = 3000; // total size of buffer for A and B individually
   VertexType vtype = VertexType::cpp;
+  partition::Algorithm fillAlgo = partition::Algorithm::fillFirst;
 
   /**
    * @brief This calculates the total number of comparisons that can be computed in a single engine run on the IPU.
@@ -57,8 +62,6 @@ struct BlockAlignmentResults {
 
 class SWAlgorithm : public IPUAlgorithm {
  private:
-  std::vector<size_t> bucket_pairs;
-
   std::vector<char> a;
   std::vector<int32_t> a_len;
   std::vector<char> b;
@@ -73,15 +76,17 @@ class SWAlgorithm : public IPUAlgorithm {
  public:
   SWAlgorithm(SWConfig config, IPUAlgoConfig algoconfig);
 
+  static std::vector<std::tuple<int, int>> fillBuckets(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B);
+  static void checkSequenceSizes(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B);
+
   BlockAlignmentResults get_result();
 
   // Local Buffers
   void compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B);
 
   // Remote bufffer
-  static std::vector<size_t> fillBuckets(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B);
   void prepared_remote_compare(char* a,  int32_t* a_len,  char* b,  int32_t* b_len, int32_t * scores, int32_t *mismatches, int32_t * a_range_result, int32_t * b_range_result);
-  static void prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B,  char* a,  int32_t* a_len,  char* b,  int32_t* b_len);
+  static void prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B,  char* a,  int32_t* a_len,  char* b,  int32_t* b_len, std::vector<int>& deviceMapping);
 };
 }  // namespace batchaffine
 }  // namespace ipu
