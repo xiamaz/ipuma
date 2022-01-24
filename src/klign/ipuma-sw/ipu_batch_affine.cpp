@@ -29,16 +29,17 @@ namespace partition {
       const auto& b = B[i];
 
       // find next empty bucket
-      while (bucketIndex <= bucketCount) {
+      while (bucketIndex < bucketCount) {
         auto& [bN, bA, bB] = buckets[bucketIndex];
-        if (bN + 1 >= bucketCountCapacity || bA + a.size() > bucketCapacity || bB + b.size() > bucketCapacity) {
-          bucketIndex++;
-        } else {
+        if (bN + 1 <= bucketCountCapacity && bA + a.size() <= bucketCapacity && bB + b.size() <= bucketCapacity) {
           mapping[i] = {bucketIndex, i};
           bN++;
           bA += a.size();
           bB += b.size();
+          // std::cout << "i: " << i << " bucket index: " << bucketIndex << " cap: " << bA << "/" << bucketCapacity << " n: " << bN << "/" << bucketCountCapacity << "\n";
           break;
+        } else {
+          bucketIndex++;
         }
       }
       if (bucketIndex >= bucketCount) {
@@ -63,7 +64,7 @@ namespace partition {
       for (; boff < bucketCount; ++boff) {
         int bi = (bucketIndex + boff) % bucketCount;
         auto& [bN, bA, bB] = buckets[bi];
-        if (bN + 1 >= bucketCountCapacity || bA + a.size() > bucketCapacity || bB + b.size() > bucketCapacity) {
+        if (bN + 1 > bucketCountCapacity || bA + a.size() > bucketCapacity || bB + b.size() > bucketCapacity) {
           continue;
         } else {
           mapping[i] = {bucketIndex, i};
@@ -95,7 +96,7 @@ namespace partition {
       int smallestBucketWeight = 0;
       for (int bi = 0; bi < bucketCount; ++bi) {
         auto [bN, bA, bB, bW] = buckets[bi];
-        if (!(bN + 1 >= bucketCountCapacity || bA + a.size() > bucketCapacity || bB + b.size() > bucketCapacity)) {
+        if (!(bN + 1 > bucketCountCapacity || bA + a.size() > bucketCapacity || bB + b.size() > bucketCapacity)) {
           if (smallestBucket == -1 || smallestBucketWeight > bW) {
             smallestBucket = bi;
             smallestBucketWeight = bW;

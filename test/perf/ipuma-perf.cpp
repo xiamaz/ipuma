@@ -21,6 +21,11 @@ using std::vector;
 using std::tuple;
 
 using namespace StripedSmithWaterman;
+vector<tuple<string, string>> INPUT_BATCHS = {
+  {"/global/D1/projects/ipumer/inputs_ab/batch_0_A.txt", "/global/D1/projects/ipumer/inputs_ab/batch_0_B.txt"},
+  {"/global/D1/projects/ipumer/inputs_ab/batch_1_A.txt", "/global/D1/projects/ipumer/inputs_ab/batch_1_B.txt"},
+  {"/global/D1/projects/ipumer/inputs_ab/batch_2_A.txt", "/global/D1/projects/ipumer/inputs_ab/batch_2_B.txt"},
+};
 
 string aln2string(Alignment &aln) {
   std::stringstream ss;
@@ -50,12 +55,20 @@ std::vector<std::string> loadSequences(const std::string& path) {
 }
 
 #ifdef ENABLE_IPUS
-TEST(MHMTest, DISABLED_ipumaperfasm) {
+
+class PerformanceBase : public ::testing::Test {
+protected:
+  vector<string> refs, queries;
+};
+
+class AlgoPerformance : public PerformanceBase, public ::testing::WithParamInterface<ipu::batchaffine::VertexType> {
+};
+
+TEST_P(AlgoPerformance, RunOptimal) {
   int numWorkers = 8832;
   int numCmps = 40;
   int strlen = 150;
-  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, ipu::batchaffine::VertexType::assembly});
-  vector<string> refs, queries;
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, GetParam()});
 
   // generate input strings
   for (int i = 0; i < numCmps * numWorkers; ++i) {
@@ -64,6 +77,12 @@ TEST(MHMTest, DISABLED_ipumaperfasm) {
   }
   driver.compare_local(queries, refs);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+  VertexTypePerformance,
+  AlgoPerformance,
+  testing::Values(ipu::batchaffine::VertexType::cpp, ipu::batchaffine::VertexType::assembly)
+  );
 
 TEST(MHMTest, DISABLED_ipumaperfcpp) {
   int numWorkers = 8832;
@@ -80,54 +99,26 @@ TEST(MHMTest, DISABLED_ipumaperfcpp) {
   driver.compare_local(queries, refs);
 }
 
-TEST(MHMTest, DISABLED_ipupartitionfill) {
+class PartitionPerformance : public PerformanceBase, public ::testing::WithParamInterface<ipu::batchaffine::partition::Algorithm> {
+};
+
+TEST_P(PartitionPerformance, RealBatches) {
   int numWorkers = 8832;
   int numCmps = 30;
   int strlen = 200;
-  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, ipu::batchaffine::VertexType::assembly, ipu::batchaffine::partition::Algorithm::fillFirst});
-  vector<string> refs, queries;
-  vector<tuple<string, string>> paths = {
-    {"/global/D1/projects/ipumer/inputs_ab/batch_0_A.txt", "/global/D1/projects/ipumer/inputs_ab/batch_0_B.txt"} 
-  };
-  for (auto& [path_a, path_b] : paths) {
+
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, ipu::batchaffine::VertexType::assembly, GetParam()});
+  for (auto& [path_a, path_b] : INPUT_BATCHS) {
     refs = loadSequences(path_a);
     queries = loadSequences(path_b);
+    std::cout << "Len A: " << refs.size() << " Len B: " << queries.size() << "\n";
+    driver.compare_local(refs, queries);
   }
-  std::cout << "Len A: " << refs.size() << " Len B: " << queries.size() << "\n";
-  driver.compare_local(refs, queries);
 }
 
-TEST(MHMTest, DISABLED_ipupartitionroundrobin) {
-  int numWorkers = 8832;
-  int numCmps = 30;
-  int strlen = 200;
-  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, ipu::batchaffine::VertexType::assembly, ipu::batchaffine::partition::Algorithm::roundRobin});
-  vector<string> refs, queries;
-  vector<tuple<string, string>> paths = {
-    {"/global/D1/projects/ipumer/inputs_ab/batch_0_A.txt", "/global/D1/projects/ipumer/inputs_ab/batch_0_B.txt"} 
-  };
-  for (auto& [path_a, path_b] : paths) {
-    refs = loadSequences(path_a);
-    queries = loadSequences(path_b);
-  }
-  std::cout << "Len A: " << refs.size() << " Len B: " << queries.size() << "\n";
-  driver.compare_local(refs, queries);
-}
-
-TEST(MHMTest, ipupartitiongreedy) {
-  int numWorkers = 8832;
-  int numCmps = 30;
-  int strlen = 200;
-  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, ipu::batchaffine::VertexType::assembly, ipu::batchaffine::partition::Algorithm::greedy});
-  vector<string> refs, queries;
-  vector<tuple<string, string>> paths = {
-    {"/global/D1/projects/ipumer/inputs_ab/batch_0_A.txt", "/global/D1/projects/ipumer/inputs_ab/batch_0_B.txt"} 
-  };
-  for (auto& [path_a, path_b] : paths) {
-    refs = loadSequences(path_a);
-    queries = loadSequences(path_b);
-  }
-  std::cout << "Len A: " << refs.size() << " Len B: " << queries.size() << "\n";
-  driver.compare_local(refs, queries);
-}
+INSTANTIATE_TEST_SUITE_P(
+  PartitionTests,
+  PartitionPerformance,
+  testing::Values(ipu::batchaffine::partition::Algorithm::fillFirst, ipu::batchaffine::partition::Algorithm::roundRobin, ipu::batchaffine::partition::Algorithm::greedy)
+  );
 #endif
