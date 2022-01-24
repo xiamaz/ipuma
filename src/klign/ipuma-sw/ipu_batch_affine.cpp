@@ -92,7 +92,7 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
     graph.setTileMapping(Mismatches[i], tileIndex);
   }
 
-  OptionFlags streamOptions({{"bufferingDepth", "2"}, {"splitLimit", "0"}});
+  OptionFlags streamOptions({/*{"bufferingDepth", "2"}, {"splitLimit", "0"}*/});
   auto host_stream_a = graph.addHostToDeviceFIFO(STREAM_A, UNSIGNED_CHAR, As.numElements(), ReplicatedStreamMode::REPLICATE, streamOptions);
   auto host_stream_b = graph.addHostToDeviceFIFO(STREAM_B, UNSIGNED_CHAR, Bs.numElements(), ReplicatedStreamMode::REPLICATE, streamOptions);
   auto host_stream_a_len = graph.addHostToDeviceFIFO(STREAM_A_LEN, INT, Alens.numElements(), ReplicatedStreamMode::REPLICATE, streamOptions);
@@ -136,7 +136,8 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
                                      poplar::program::Copy(ARanges.flatten(), device_stream_a_range),
                                      poplar::program::Copy(BRanges.flatten(), device_stream_b_range)});
 #ifdef IPUMA_DEBUG
-  auto main_prog = program::Sequence(program::Execute(frontCs));
+ program::Sequence  main_prog;
+  main_prog.add(program::Execute(frontCs));
   addCycleCount(graph, main_prog, CYCLE_COUNT_INNER);
 #else
   auto main_prog = program::Execute(frontCs);
@@ -296,6 +297,14 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
 
   memset(a_len, 0, algoconfig.getTotalNumberOfComparisons());
   memset(b_len, 0, algoconfig.getTotalNumberOfComparisons());
+  #ifdef IPUMA_DEBUG
+  for (size_t i = 0; i < algoconfig.getTotalNumberOfComparisons(); i++) {
+    if (a_len[i] != 0 || b_len[i] != 0) {
+      cout << "A/B_len is non-zero" << std::endl;
+      exit(1);
+    }
+  }
+  #endif
   // std::fill(a_len.begin(), a_len.end(), 0);
   // std::fill(b_len.begin(), b_len.end(), 0);
   for (const auto& cmpCountBucket : bucket_pairs) {
