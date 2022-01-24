@@ -5,6 +5,7 @@ add_gp_library(
   CPP_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/codelets/codelet_batch_affine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/codelets/codelet_batch_asm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/codelets/codelet_multi_affine.cpp
   HEADERS
 )
 

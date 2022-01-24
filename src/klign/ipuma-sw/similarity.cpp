@@ -7,13 +7,18 @@ int swatlib::simpleSimilarity(char a, char b) {
 }
 
 template <typename T>
-swatlib::Matrix<T> swatlib::scaleMatrix(swatlib::Matrix<T> mat, T pos, T neg) {
+swatlib::Matrix<T> swatlib::scaleMatrix(swatlib::Matrix<T> mat, T pos, T neg, T ambig) {
     auto [m, n] = mat.shape();
     int size = m * n;
     std::vector<T> scaled(size);
     int8_t* mv = mat.data();
     for (int i = 0; i < size; ++i) {
         scaled[i] = mv[i] ? pos : neg;
+    }
+    // insert ambiguity for N values
+    for (int i = 0; i < m; ++i) {
+        scaled[i] = ambig;
+        scaled[i*n] = ambig;
     }
     return swatlib::Matrix<T>(m, n, scaled);
 }
@@ -72,10 +77,10 @@ swatlib::Matrix<T> convertMatrix(swatlib::Matrix<int8_t> om) {
     return cm;
 }
 
-swatlib::Matrix<int8_t> swatlib::selectMatrix(swatlib::Similarity s, int8_t matchValue, int8_t mismatchValue){
+swatlib::Matrix<int8_t> swatlib::selectMatrix(swatlib::Similarity s, int8_t matchValue, int8_t mismatchValue, int8_t ambiguityValue){
     switch(s) {
     case swatlib::Similarity::nucleicAcid:
-        return swatlib::scaleMatrix<int8_t>(swatlib::NA_MATRIX.copy(), matchValue, mismatchValue);
+        return swatlib::scaleMatrix<int8_t>(swatlib::NA_MATRIX.copy(), matchValue, mismatchValue, ambiguityValue);
         break;
     case swatlib::Similarity::blosum50:
         return swatlib::BLOSUM50_MATRIX.copy();

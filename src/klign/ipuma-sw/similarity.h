@@ -100,7 +100,7 @@ const swatlib::Matrix<int8_t> BLOSUM62_MATRIX(25, 25, BLOSUM62);
  * Scale a 1-0 matrix to the given positive and negative values.
  */
 template<typename T>
-swatlib::Matrix<T> scaleMatrix(swatlib::Matrix<T>, T pos, T neg);
+swatlib::Matrix<T> scaleMatrix(swatlib::Matrix<T>, T pos, T neg, T ambig);
 
 Matrix<int8_t> createQueryProfile(const std::vector<uint8_t>&, const swatlib::Matrix<int8_t>&);
 
@@ -120,7 +120,7 @@ swatlib::Matrix<T> convertMatrix(swatlib::Matrix<int8_t>);
 /**
  * Select Matrix while automatically applying match and mismatch values for nucleicAcid similarity table.
  */
-swatlib::Matrix<int8_t> selectMatrix(Similarity, int8_t matchValue, int8_t mismatchValue);
+swatlib::Matrix<int8_t> selectMatrix(Similarity, int8_t matchValue, int8_t mismatchValue, int8_t ambiguityValue);
 
 }
 

@@ -39,6 +39,7 @@ struct SWConfig {
         int gapExtend = -1;
         int matchValue = 1;
         int mismatchValue = -1;
+        int ambiguityValue = -1;
         swatlib::Similarity similarity = swatlib::Similarity::nucleicAcid;
         swatlib::DataType datatype = swatlib::DataType::nucleicAcid;
 };

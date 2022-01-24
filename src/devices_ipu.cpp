@@ -71,7 +71,7 @@ void init_devices() {
      CPUAligner cpu_aln(false);
      auto& aln_scoring = cpu_aln.aln_scoring;
      ipu::SWConfig config = {-(aln_scoring.gap_opening-aln_scoring.gap_extending), -aln_scoring.gap_extending,        aln_scoring.match,
-                          -aln_scoring.mismatch,   swatlib::Similarity::nucleicAcid, swatlib::DataType::nucleicAcid};
+                          -aln_scoring.mismatch, -aln_scoring.ambiguity, swatlib::Similarity::nucleicAcid, swatlib::DataType::nucleicAcid};
      ipu::batchaffine::IPUAlgoConfig algoconfig = {
        KLIGN_IPU_TILES,
        KLIGN_IPU_MAXAB_SIZE,

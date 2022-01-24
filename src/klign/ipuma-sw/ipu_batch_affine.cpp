@@ -165,7 +165,7 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
   switch (vtype) {
     case VertexType::cpp: sType = INT; break;
     case VertexType::assembly: sType = FLOAT; break;
-    default: break;
+    case VertexType::multi: sType = INT; break;
   }
 
   TypeTraits traits = typeToTrait(sType);
@@ -276,7 +276,7 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
 
   Graph graph = createGraph();
 
-  auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue);
+  auto similarityMatrix = swatlib::selectMatrix(config.similarity, config.matchValue, config.mismatchValue, config.ambiguityValue);
   std::vector<program::Program> programs =
       buildGraph(graph, algoconfig.vtype, algoconfig.tilesUsed, algoconfig.maxAB, algoconfig.bufsize, algoconfig.maxBatches,
                  similarityMatrix, config.gapInit, config.gapExtend);
@@ -388,6 +388,7 @@ void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::ve
   std::vector<int32_t> unord_scores(scores), unord_mismatches(mismatches), unord_a_range(a_range_result), unord_b_range(b_range_result);
   prepared_remote_compare(a.data(), a_len.data(), b.data(), b_len.data(), unord_scores.data(), unord_mismatches.data(), unord_a_range.data(),
                           unord_b_range.data());
+  // std::cout << swatlib::printVector(unord_scores) << "\n";
   // reorder results based on mapping
   for (int i = 0; i < mapping.size(); ++i) {
     scores[i] = unord_scores[mapping[i]];
