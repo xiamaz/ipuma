@@ -142,7 +142,7 @@ TEST(MHMTest, ipuparity) {
   }
 }
 
-TEST(MHMTest, DISABLED_ipumultivert) {
+TEST(IPUDev, MultiVertexSeparate) {
   int numWorkers = 1;
   int numCmps = 30;
   int strlen = 20;
@@ -158,8 +158,12 @@ TEST(MHMTest, DISABLED_ipumultivert) {
   }, {numWorkers, strlen, numCmps, bufsize, ipu::batchaffine::VertexType::multi});
 
   vector<string> queries, refs;
-  queries.push_back("AAAAAA");
-  refs.push_back("AAAAAA");
+  for (int i = 0; i < 6; ++i) {
+    queries.push_back("AAAAAA");
+    refs.push_back("AAAAAA");
+  }
+  refs[1] = "TTAAAA";
+  refs[4] = "TTTTTT";
   driver.compare_local(queries, refs);
   auto aln_results = driver.get_result();
   std::cout << "Aln results:\n";
@@ -231,6 +235,21 @@ TEST_F(SimpleCorrectnessTest, UseCppVertex) {
     .maxBatches = 20,
     .bufsize = 3000,
     .vtype = ipu::batchaffine::VertexType::cpp,
+    .fillAlgo = ipu::batchaffine::partition::Algorithm::roundRobin
+  });
+
+  driver.compare_local(queries, refs);
+  auto aln_results = driver.get_result();
+  checkResults(aln_results);
+}
+
+TEST_F(SimpleCorrectnessTest, UseCppMultiVertex) {
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {
+    .tilesUsed = 2,
+    .maxAB = 300,
+    .maxBatches = 20,
+    .bufsize = 3000,
+    .vtype = ipu::batchaffine::VertexType::multi,
     .fillAlgo = ipu::batchaffine::partition::Algorithm::roundRobin
   });
 

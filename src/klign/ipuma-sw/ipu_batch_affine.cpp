@@ -156,16 +156,17 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
   Tensor As = graph.addVariable(UNSIGNED_CHAR, {activeTiles, bufSize}, "A");
   Tensor Bs = graph.addVariable(UNSIGNED_CHAR, {activeTiles, bufSize}, "B");
 
-  Tensor Alens = graph.addVariable(INT, {activeTiles, maxBatches}, "Alen");
-  Tensor Blens = graph.addVariable(INT, {activeTiles, maxBatches}, "Blen");
+  Tensor Alens = graph.addVariable(INT, {activeTiles, maxBatches * 2}, "Alen");
+  Tensor Blens = graph.addVariable(INT, {activeTiles, maxBatches * 2}, "Blen");
 
   auto [m, n] = similarityData.shape();
 
   poplar::Type sType;
+  int workerMultiplier = 1;
   switch (vtype) {
     case VertexType::cpp: sType = INT; break;
     case VertexType::assembly: sType = FLOAT; break;
-    case VertexType::multi: sType = INT; break;
+    case VertexType::multi: sType = INT; workerMultiplier = target.getNumWorkerContexts(); break;
   }
 
   TypeTraits traits = typeToTrait(sType);
@@ -226,8 +227,8 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
                                         {"ARange", ARanges[i]},
                                         {"BRange", BRanges[i]},
                                     });
-    graph.setFieldSize(vtx["C"], maxAB + 1);
-    graph.setFieldSize(vtx["bG"], maxAB + 1);
+    graph.setFieldSize(vtx["C"], maxAB * workerMultiplier);
+    graph.setFieldSize(vtx["bG"], maxAB * workerMultiplier);
     graph.setTileMapping(vtx, tileIndex);
     graph.setPerfEstimate(vtx, 1);
   }
@@ -262,11 +263,11 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
   const auto inputBufferSize = algoconfig.getTotalBufferSize();
 
   a.resize(inputBufferSize);
-  a_len.resize(totalComparisonsCount);
+  a_len.resize(totalComparisonsCount * 2);
   std::fill(a_len.begin(), a_len.end(), 0);
 
   b.resize(inputBufferSize);
-  b_len.resize(totalComparisonsCount);
+  b_len.resize(totalComparisonsCount * 2);
   std::fill(b_len.begin(), b_len.end(), 0);
 
   scores.resize(totalComparisonsCount);
@@ -280,6 +281,7 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
   std::vector<program::Program> programs =
       buildGraph(graph, algoconfig.vtype, algoconfig.tilesUsed, algoconfig.maxAB, algoconfig.bufsize, algoconfig.maxBatches,
                  similarityMatrix, config.gapInit, config.gapExtend);
+
 
   createEngine(graph, programs);
 
@@ -368,8 +370,8 @@ void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int3
   uint64_t cellCount = 0;
   uint64_t dataCount = 0;
   for (size_t i = 0; i < algoconfig.getTotalNumberOfComparisons(); i++) {
-    cellCount += a_len[i] * b_len[i];
-    dataCount += a_len[i] + b_len[i];
+    cellCount += a_len[2*i] * b_len[2*i];
+    dataCount += a_len[2*i] + b_len[2*i];
   }
   
   double GCUPSOuter = static_cast<double>(cellCount) / timeOuter / 1e9;
@@ -408,8 +410,8 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
   auto vA = encoder.encode(A);
   auto vB = encoder.encode(B);
 
-  memset(a_len, 0, algoconfig.getTotalNumberOfComparisons() * sizeof(*a_len));
-  memset(b_len, 0, algoconfig.getTotalNumberOfComparisons() * sizeof(*b_len));
+  memset(a_len, 0, algoconfig.getTotalNumberOfComparisons() * sizeof(*a_len) * 2);
+  memset(b_len, 0, algoconfig.getTotalNumberOfComparisons() * sizeof(*b_len) * 2);
 
   #ifdef IPUMA_DEBUG
   for (size_t i = 0; i < algoconfig.getTotalNumberOfComparisons(); i++) {
@@ -432,8 +434,10 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
     size_t offsetBuffer = bucket * algoconfig.bufsize;
     size_t offsetLength = bucket * algoconfig.maxBatches;
 
-    a_len[offsetLength + bN] = aSize;
-    b_len[offsetLength + bN] = bSize;
+    a_len[(offsetLength + bN)*2] = aSize;
+    b_len[(offsetLength + bN)*2] = bSize;
+    a_len[(offsetLength + bN)*2+1] = bA;
+    b_len[(offsetLength + bN)*2+1] = bB;
     seqMapping[i] = offsetLength + bN;
 
     memcpy(a + offsetBuffer + bA, vA[i].data(), aSize);

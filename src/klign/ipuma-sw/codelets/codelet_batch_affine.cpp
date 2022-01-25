@@ -40,9 +40,6 @@ public:
 
         int gI = *gapInit;
         int gE = *gapExt;
-
-        int i_offset = 0;
-        int j_offset = 0;
         
         for (int n = 0; n < maxNPerTile; ++n) {
             int lastNoGap, prevNoGap;
@@ -52,8 +49,12 @@ public:
             uint16_t Aend = 0;
             uint16_t Bend = 0;
 
-            auto a_len = Alen[n];
-            auto b_len = Blen[n];
+            auto a_len = Alen[2 * n];
+            auto b_len = Blen[2 * n];
+
+            int i_offset = Blen[2 * n + 1];
+            int j_offset = Alen[2 * n + 1];
+
             if (a_len == 0 || b_len == 0) break;
 
             memset(&(C[0]), 0, maxAB * sizeof(int));
@@ -80,6 +81,7 @@ public:
                     }
                 }
             }
+            
             score[n] = s;
 
             s = 0;
@@ -116,8 +118,6 @@ public:
             range[1] = Bend;
             BRange[n] = *reinterpret_cast<uint32_t*>(range);
 
-            i_offset += b_len;
-            j_offset += a_len;
         }
         return true;
     }

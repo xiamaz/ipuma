@@ -65,10 +65,15 @@ class AlgoPerformance : public PerformanceBase, public ::testing::WithParamInter
 };
 
 TEST_P(AlgoPerformance, RunOptimal) {
+  auto algotype = GetParam();
   int numWorkers = 8832;
   int numCmps = 40;
   int strlen = 150;
-  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, GetParam()});
+  if (algotype == ipu::batchaffine::VertexType::multi) {
+    numWorkers = numWorkers / 6;
+    numCmps = numCmps * 6;
+  }
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, algotype});
 
   // generate input strings
   for (int i = 0; i < numCmps * numWorkers; ++i) {
@@ -76,12 +81,17 @@ TEST_P(AlgoPerformance, RunOptimal) {
     queries.push_back(string(strlen, 'T'));
   }
   driver.compare_local(queries, refs);
+  // auto alns = driver.get_result();
+  // for (int i = 0; i < numWorkers * numCmps; ++i) {
+  //   std::cout << alns.scores[i] << " ";
+  // }
+  // std::cout << "\n";
 }
 
 INSTANTIATE_TEST_SUITE_P(
   VertexTypePerformance,
   AlgoPerformance,
-  testing::Values(ipu::batchaffine::VertexType::cpp, ipu::batchaffine::VertexType::assembly)
+  testing::Values(ipu::batchaffine::VertexType::cpp, ipu::batchaffine::VertexType::assembly, ipu::batchaffine::VertexType::multi)
   );
 
 class PartitionPerformance : public PerformanceBase, public ::testing::WithParamInterface<ipu::batchaffine::partition::Algorithm> {
