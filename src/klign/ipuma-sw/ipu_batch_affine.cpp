@@ -448,10 +448,12 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
 
 #ifdef IPUMA_DEBUG
   int emptyBuckets = 0;
+  std::vector<int> bucketCmps;
   std::map<int, int> occurence;
   for (auto [n, bA, bB] : buckets) {
     if (n == 0) emptyBuckets++;
     occurence[n]++;
+    bucketCmps.push_back(n);
   }
   std::stringstream ss;
   ss << "Map[";
@@ -459,6 +461,7 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
     ss << k << ": " << v << ",";
   }
   ss << "]";
+  // SLOG(swatlib::printVector(bucketCmps), "\n");
   SLOG("Total number of buckets: ", buckets.size(), " empty buckets: ", emptyBuckets, "\n");
   SLOG("Bucket size occurence: ", ss.str(), "\n");
 #endif
