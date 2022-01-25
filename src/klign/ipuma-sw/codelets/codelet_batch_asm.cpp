@@ -17,7 +17,7 @@ private:
 public:
     // Fields
     poplar::Vector<poplar::Input<poplar::Vector<float, poplar::VectorLayout::ONE_PTR>>, poplar::VectorLayout::ONE_PTR> simMatrix;
-    poplar::Input<size_t> maxNPerTile;
+    poplar::Input<int> maxNPerTile;
     poplar::Input<float> gapInit;
     poplar::Input<float> gapExt;
     poplar::Input<int> bufSize;
