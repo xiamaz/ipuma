@@ -32,6 +32,7 @@
 
 #define SOFF_C 1
 #define SOFF_BG 2
+#define SOFF_SSCORE 3
 
 #define STACK_SIZE (20)
 
@@ -110,8 +111,6 @@
 	}
 2:
 	.align 4
-	// ld32 $c, $mzero, $sp, SOFF_C
-	// ld32 $bg, $mzero, $sp, SOFF_BG
 .endm
 
 .macro offsetBuffer VOFF SOFF
@@ -142,7 +141,6 @@ SWASM:
 
 	workerId $n
 	shl $n, $n, 1
-	// setzi $n, 0
 compN_start:
  	zeroCbG
 	
@@ -158,11 +156,6 @@ compN_start:
 	brz $m0, compN_end // check if length of B is zero
 
 loopB:
-	// {
-	// 	// ld32 $m0, $mzero, $sp, SOFF_B // load B
-	// 	ld32 $m0, $mv, $sp, SOFF_B // load B
-	// }
-
 	offsetLoadN $m0, VOFF_Blen, 1
 	ld32 $m1, $mzero, $mvertex_base, VOFF_B
 	ldz8 $bi, $m1, $m0, $i
@@ -196,7 +189,12 @@ loopB:
 	ld32 $m0, $mzero, $mvertex_base, VOFF_Alen
 	ld32 $m0, $mzero, $m0, $n
 
-	rpt $m0, (loopA_end - loopA_start)/8 - 1;
+	st32 $sscore, $mzero, $sp, SOFF_SSCORE
+
+	{
+		rpt $m0, (loopA_end - loopA_start)/8 - 1;
+		fnop
+	}
 loopA_start:
 	{
 		ldz8step $m0, $mzero, $a+=, 1 // m0 = a[j]
@@ -247,14 +245,15 @@ loopA_start:
 		fnop
 	}
 	{
-		movz $bpos, $m0, $i
-		fnop
-	}
-	{
 		add $j, $j, 1
 		fnop
 	}
 loopA_end:
+
+	ld32 $a0, $mzero, $sp, SOFF_SSCORE
+	f32cmpgt $a0, $sscore, $a0
+	mov $m0, $a0
+	movz $bpos, $m0, $i
 
 	add $i, $i, 1
 	ld32 $m0, $mzero, $mvertex_base, VOFF_Blen
@@ -325,10 +324,8 @@ loopBrev:
 	// repeats is endpos + 1
 	ld32 $j, $mzero, $sp, 0
 	add $m0, $j, 1
-	{
-		rpt $m0, (loopArev_end - loopArev_start)/8 - 1
-		fnop
-	}
+	st32 $sscore, $mzero, $sp, SOFF_SSCORE
+	rpt $m0, (loopArev_end - loopArev_start)/8 - 1
 loopArev_start:
 	{
 		ldz8 $m0, $mzero, $a, $j // m0 = a[j]
@@ -379,14 +376,15 @@ loopArev_start:
 		fnop
 	}
 	{
-		movz $bpos, $m0, $i
-		fnop
-	}
-	{
 		sub $j, $j, 1
 		fnop
 	}
 loopArev_end:
+	ld32 $a0, $mzero, $sp, SOFF_SSCORE
+	f32cmpgt $a0, $sscore, $a0
+	mov $m0, $a0
+	movz $bpos, $m0, $i
+
 	sub $i, $i, 1
 	cmpslt $m0, $i, $mzero
 	brz $m0, loopBrev // check if length of B is zero
