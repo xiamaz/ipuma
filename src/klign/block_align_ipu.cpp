@@ -95,8 +95,8 @@ void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
   SWARN("Assuming 1 IPU per rank, TODO change");
   a = new_array<char>(algoconfig.getTotalBufferSize());
   b = new_array<char>(algoconfig.getTotalBufferSize());
-  a_len = new_array<int32_t>(algoconfig.getTotalNumberOfComparisons());
-  b_len = new_array<int32_t>(algoconfig.getTotalNumberOfComparisons());
+  a_len = new_array<int32_t>(algoconfig.getTotalNumberOfComparisons() * 2);
+  b_len = new_array<int32_t>(algoconfig.getTotalNumberOfComparisons() * 2);
 
   scores = new_array<int32_t>(algoconfig.getTotalNumberOfComparisons());
   mismatches = new_array<int32_t>(algoconfig.getTotalNumberOfComparisons());

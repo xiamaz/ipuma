@@ -155,7 +155,7 @@ TEST(IPUDev, MultiVertexSeparate) {
     .ambiguityValue = -ALN_AMBIGUITY_COST,
     .similarity = swatlib::Similarity::nucleicAcid,
     .datatype = swatlib::DataType::nucleicAcid,
-  }, {numWorkers, strlen, numCmps, bufsize, ipu::batchaffine::VertexType::multi});
+  }, {numWorkers, strlen, numCmps, bufsize, ipu::batchaffine::VertexType::multiasm});
 
   vector<string> queries, refs;
   for (int i = 0; i < 6; ++i) {
@@ -250,6 +250,21 @@ TEST_F(SimpleCorrectnessTest, UseCppMultiVertex) {
     .maxBatches = 20,
     .bufsize = 3000,
     .vtype = ipu::batchaffine::VertexType::multi,
+    .fillAlgo = ipu::batchaffine::partition::Algorithm::roundRobin
+  });
+
+  driver.compare_local(queries, refs);
+  auto aln_results = driver.get_result();
+  checkResults(aln_results);
+}
+
+TEST_F(SimpleCorrectnessTest, UseAsmMultiVertex) {
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {
+    .tilesUsed = 2,
+    .maxAB = 300,
+    .maxBatches = 20,
+    .bufsize = 3000,
+    .vtype = ipu::batchaffine::VertexType::multiasm,
     .fillAlgo = ipu::batchaffine::partition::Algorithm::roundRobin
   });
 

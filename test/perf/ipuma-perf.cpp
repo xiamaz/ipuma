@@ -69,7 +69,7 @@ TEST_P(AlgoPerformance, RunOptimal) {
   int numWorkers = 8832;
   int numCmps = 40;
   int strlen = 150;
-  if (algotype == ipu::batchaffine::VertexType::multi) {
+  if (algotype == ipu::batchaffine::VertexType::multi || algotype == ipu::batchaffine::VertexType::multiasm) {
     numWorkers = numWorkers / 6;
     numCmps = numCmps * 6;
   }
@@ -91,7 +91,7 @@ TEST_P(AlgoPerformance, RunOptimal) {
 INSTANTIATE_TEST_SUITE_P(
   VertexTypePerformance,
   AlgoPerformance,
-  testing::Values(ipu::batchaffine::VertexType::cpp, ipu::batchaffine::VertexType::assembly, ipu::batchaffine::VertexType::multi)
+  testing::Values(ipu::batchaffine::VertexType::cpp, ipu::batchaffine::VertexType::assembly, ipu::batchaffine::VertexType::multi, ipu::batchaffine::VertexType::multiasm)
   );
 
 class PartitionPerformance : public PerformanceBase, public ::testing::WithParamInterface<ipu::batchaffine::partition::Algorithm> {
@@ -99,7 +99,7 @@ class PartitionPerformance : public PerformanceBase, public ::testing::WithParam
 
 TEST_P(PartitionPerformance, RealBatches) {
   int numWorkers = 8832;
-  int numCmps = 40;
+  int numCmps = 20;
   int strlen = 200;
 
   auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, ipu::batchaffine::VertexType::assembly, GetParam()});

@@ -167,6 +167,7 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
     case VertexType::cpp: sType = INT; break;
     case VertexType::assembly: sType = FLOAT; break;
     case VertexType::multi: sType = INT; workerMultiplier = target.getNumWorkerContexts(); break;
+    case VertexType::multiasm: sType = FLOAT; workerMultiplier = target.getNumWorkerContexts(); break;
   }
 
   TypeTraits traits = typeToTrait(sType);
@@ -378,9 +379,14 @@ void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int3
   double GCUPSInner = static_cast<double>(cellCount) / timeInner / 1e9;
   SLOG("Poplar estimated cells(", cellCount, ") GCUPS ", GCUPSInner, "/", GCUPSOuter, "\n");
 
+  // dataCount - actual data content transferred
+  // totalTransferSize - size of buffer being transferred
+  double totalTransferSize = algoconfig.getTotalBufferSize() * 2;
+
   auto transferTime = timeOuter - timeInner;
-  auto transferBandwidth = static_cast<double>(dataCount) / transferTime / 1e6;
-  SLOG("Transfer time: ", transferTime, "s estimated bandwidth: ", transferBandwidth, "mb/s, per vertex: ", transferBandwidth / algoconfig.tilesUsed, "mb/s\n");
+  auto transferInfoRatio = static_cast<double>(dataCount) / totalTransferSize * 100;
+  auto transferBandwidth = totalTransferSize / transferTime / 1e6;
+  SLOG("Transfer time: ", transferTime, "s transfer ratio: ", transferInfoRatio, "% estimated bandwidth: ", transferBandwidth, "mb/s, per vertex: ", transferBandwidth / algoconfig.tilesUsed, "mb/s\n");
 #endif
 }
 
