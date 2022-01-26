@@ -91,8 +91,10 @@ inline string aln2string(Alignment &aln) {
   return ss.str();
 }
 
-TEST(MHMTest, ipuparity) {
-  vector<string> queries = {
+class ParityTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+  queries = {
     "AATGAGAATGATGTCGTTCGAAATTTGACCAGTCAAACCGCGGGCAATAAGGTCTTCGTTCAGGGCATAGACCTTAATGGGGGCATTACGCAGACTTTCA",
     "ATCTGGCAGGTAAAGATGAGCTCAACAAAGTGATCCAGCATTTTGGCAAAGGAGGCTTTGATGTGATTACTCGCGGTCAGGTGCCACCTAACCCGTCTGA",
     "GATTACGCAAGGCCTGCAAATACGCATCCAGTTGCTGGCTCTCTTTTTCCGCCAGCTCTGAGCGTAAGCGCGCTAATTCCTGGCGGGTATTGGGAGCACG",
@@ -112,7 +114,7 @@ TEST(MHMTest, ipuparity) {
     "CATCGCCCGATTTTCACGTTCGAGAGCGGCGGAGCGGATCGCTCCTTGTTCTTTTTGCCAGGCCCGTAGTTCTTCACCCGTTTTGAATTCGGGTTTGTAT",
     "GCCAGGCAAAATCGGCGTTTCTGGCGGCGATGAGCCATGAGATCCGCACACCGCTGTACGGTATTCTCGGCACTGCTCACTTGATGGCAGATAACGCGCC",
   };
-  vector<string> refs = {
+  refs = {
     "AATGAGAATGATGTCNTTCNAAATTTGACCAGTCAAACCGCGGGCAATAAGGTCTTCGTTCAGGGCATAGACCTTAATGGGGGCATTACGCAGACTTTCA",
     "ATCTGGCAGGTAAAGATGAGCTCAACAAAGTGATCCAGCATTTTGGCAAAGGAGGCTTTGATGTGATTACTCGCGGTCAGGTGCCACCTAANNCGTCTGA",
     "GATTACGCAAGGCCTGCAAATACGCATCCAGTTGCTGGCTCTCTTTTTCCGCCAGCTCTGAGCGTAAGCGCGCTAATTCCTGGCGGTTATTGGCAGACAG",
@@ -132,16 +134,37 @@ TEST(MHMTest, ipuparity) {
     "CATCGCCCGATTTTCACGTTCGAGAGCGGCGGAGCGGATCGCTCCTTGTTCTTTTTGCCAGGCCAGTAGTTCTTCACCCGTTTTGAATGCGGGTTTGATA",
     "GCCAGGCAAAATCGGCGTTTCTGGCGGCGATGAGCCATGAGATCCGCACACCGCTGTACGGTATTCTCGGCACTGCTCAACTGCTGGCAGATAACCCCGC",
   };
-  AlnScoring aln_scoring = {.match = ALN_MATCH_SCORE,
+  }
+
+  vector<string> queries, refs;
+  
+  void checkResults(const vector<Alignment>& alns_ipu) {
+    AlnScoring aln_scoring = {.match = ALN_MATCH_SCORE,
                             .mismatch = ALN_MISMATCH_COST,
                             .gap_opening = ALN_GAP_OPENING_COST,
                             .gap_extending = ALN_GAP_EXTENDING_COST,
                             .ambiguity = ALN_AMBIGUITY_COST};
 
-  Aligner cpu_aligner(aln_scoring.match, aln_scoring.mismatch, aln_scoring.gap_opening, aln_scoring.gap_extending,
-                            aln_scoring.ambiguity);
-  Filter ssw_filter(true, false, 0, 32767);
+    vector<Alignment> alns(queries.size());
+    for (int i = 0; i < queries.size(); ++i) {
+      auto reflen = refs[i].size();
+      auto qlen = queries[i].size();
+      auto masklen = max((int)min(reflen, qlen) / 2, 15);
+      Aligner cpu_aligner(aln_scoring.match, aln_scoring.mismatch, aln_scoring.gap_opening, aln_scoring.gap_extending,
+                          aln_scoring.ambiguity);
+      Filter ssw_filter(true, false, 0, 32767);
+      cpu_aligner.Align(queries[i].c_str(), refs[i].c_str(), reflen, ssw_filter, &alns[i], masklen);
 
+      EXPECT_EQ(alns[i].sw_score, alns_ipu[i].sw_score) << i << ": IPU score result does not match CPU SSW";
+      EXPECT_EQ(alns[i].ref_begin, alns_ipu[i].ref_begin) << i << ": IPU reference start result does not match CPU SSW";
+      EXPECT_EQ(alns[i].ref_end, alns_ipu[i].ref_end) << i << ": IPU reference end result does not match CPU SSW";
+      EXPECT_EQ(alns[i].query_begin, alns_ipu[i].query_begin) << i << ": IPU query start result does not match CPU SSW";
+      EXPECT_EQ(alns[i].query_end, alns_ipu[i].query_end) << i << ": IPU query end result does not match CPU SSW";
+    }
+  }
+};
+
+TEST_F(ParityTest, UseAssembly) {
   int numWorkers = 10;
   int numCmps = 10;
   int strlen = 120;
@@ -159,19 +182,28 @@ TEST(MHMTest, ipuparity) {
   vector<Alignment> alns_ipu(queries.size());
   test_aligns_ipu(alns_ipu, queries, refs, driver);
 
-  vector<Alignment> alns(queries.size());
-  for (int i = 0; i < queries.size(); ++i) {
-    auto reflen = refs[i].size();
-    auto qlen = queries[i].size();
-    auto masklen = max((int)min(reflen, qlen) / 2, 15);
-    cpu_aligner.Align(queries[i].c_str(), refs[i].c_str(), qlen, ssw_filter, &alns[i], masklen);
+  checkResults(alns_ipu);
+}
 
-    EXPECT_EQ(alns[i].sw_score, alns_ipu[i].sw_score) << i << ": IPU score result does not match CPU SSW";
-    EXPECT_EQ(alns[i].ref_begin, alns_ipu[i].ref_begin) << i << ": IPU reference start result does not match CPU SSW";
-    EXPECT_EQ(alns[i].ref_end, alns_ipu[i].ref_end) << i << ": IPU reference end result does not match CPU SSW";
-    EXPECT_EQ(alns[i].query_begin, alns_ipu[i].query_begin) << i << ": IPU query start result does not match CPU SSW";
-    EXPECT_EQ(alns[i].query_end, alns_ipu[i].query_end) << i << ": IPU query end result does not match CPU SSW";
-  }
+TEST_F(ParityTest, UseMultiAssembly) {
+  int numWorkers = 10;
+  int numCmps = 10;
+  int strlen = 120;
+  int bufsize = 1000;
+  auto driver = ipu::batchaffine::SWAlgorithm({
+    .gapInit = -(ALN_GAP_OPENING_COST-ALN_GAP_EXTENDING_COST),
+    .gapExtend = -ALN_GAP_EXTENDING_COST,
+    .matchValue = ALN_MATCH_SCORE,
+    .mismatchValue = -ALN_MISMATCH_COST,
+    .ambiguityValue = -ALN_AMBIGUITY_COST,
+    .similarity = swatlib::Similarity::nucleicAcid,
+    .datatype = swatlib::DataType::nucleicAcid,
+  }, {numWorkers, strlen, numCmps, bufsize, ipu::batchaffine::VertexType::multiasm, ipu::batchaffine::partition::Algorithm::greedy});
+
+  vector<Alignment> alns_ipu(queries.size());
+  test_aligns_ipu(alns_ipu, queries, refs, driver);
+
+  checkResults(alns_ipu);
 }
 
 TEST(IPUDev, MultiVertexSeparate) {
