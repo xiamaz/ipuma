@@ -52,9 +52,9 @@
 #define bi m2
 
 #define sscore a7
-#define lastnogap a6
-#define agap a5
-#define prevnogap a4
+#define prevnogap a6
+#define lastnogap a5
+#define agap a4
 #define gige a3
 #define ge a2
 
@@ -197,19 +197,15 @@ loopB:
 	}
 loopA_start:
 	{
-		ldz8step $m0, $mzero, $a+=, 1 // m0 = a[j]
-	 	f32add $agap, $agap, $ge
-	}
-	{
 		ld32 $a0, $mzero, $bg, 0
-		f32add $a1, $lastnogap, $gige
+		f32v2add $a4:5, $a4:5, $a2:3
 	}
 	{
 		ld32 $a1, $mzero, $c, 0
-		f32max $agap, $agap, $a1 // agap calculation
+		f32max $agap, $agap, $lastnogap
 	}
 	{
-		nop
+		ldz8step $m0, $mzero, $a+=, 1 // m0 = a[j]
 		f32v2add $a0:1, $a0:1, $a2:3 // calc bg + ge and c[j] + gi + ge
 	}
 	{
@@ -328,19 +324,15 @@ loopBrev:
 	rpt $m0, (loopArev_end - loopArev_start)/8 - 1
 loopArev_start:
 	{
-		ldz8 $m0, $mzero, $a, $j // m0 = a[j]
-	 	f32add $agap, $agap, $ge
-	}
-	{
 		ld32 $a0, $mzero, $bg, $j
-		f32add $a1, $lastnogap, $gige
+		f32v2add $a4:5, $a4:5, $a2:3
 	}
 	{
 		ld32 $a1, $mzero, $c, $j
-		f32max $agap, $agap, $a1 // agap calculation
+		f32max $agap, $agap, $lastnogap
 	}
 	{
-		nop
+		ldz8 $m0, $mzero, $a, $j // m0 = a[j]
 		f32v2add $a0:1, $a0:1, $a2:3 // calc bg + ge and c[j] + gi + ge
 	}
 	{
