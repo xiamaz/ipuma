@@ -68,59 +68,66 @@ void init_devices() {
   // initialize the GPU and first-touch memory and functions in a new thread as this can take many seconds to complete
   detect_ipu_fut = execute_in_thread_pool([]() {
     if (local_team().rank_me() < KLIGN_IPUS_LOCAL) {
-     CPUAligner cpu_aln(false);
-     auto& aln_scoring = cpu_aln.aln_scoring;
-     ipu::SWConfig config = {-(aln_scoring.gap_opening-aln_scoring.gap_extending), -aln_scoring.gap_extending,        aln_scoring.match,
-                          -aln_scoring.mismatch, -aln_scoring.ambiguity, swatlib::Similarity::nucleicAcid, swatlib::DataType::nucleicAcid};
-     ipu::batchaffine::IPUAlgoConfig algoconfig = {
-       KLIGN_IPU_TILES,
-       KLIGN_IPU_MAXAB_SIZE,
-       KLIGN_IPU_MAX_BATCHES,
-       KLIGN_IPU_BUFSIZE,
-       ipu::batchaffine::VertexType::assembly,
-     };
-     init_single_ipu(config, algoconfig);
-     std::cout << "Aquired IPU, rank " << local_team().rank_me() << std::endl;
+      CPUAligner cpu_aln(false);
+      auto& aln_scoring = cpu_aln.aln_scoring;
+      init_single_ipu(
+          {
+              .gapInit = -(ALN_GAP_OPENING_COST - ALN_GAP_EXTENDING_COST),
+              .gapExtend = -ALN_GAP_EXTENDING_COST,
+              .matchValue = ALN_MATCH_SCORE,
+              .mismatchValue = -ALN_MISMATCH_COST,
+              .ambiguityValue = -ALN_AMBIGUITY_COST,
+              .similarity = swatlib::Similarity::nucleicAcid,
+              .datatype = swatlib::DataType::nucleicAcid,
+          },
+          {
+            KLIGN_IPU_TILES,
+            KLIGN_IPU_MAXAB_SIZE,
+            KLIGN_IPU_MAX_BATCHES,
+            KLIGN_IPU_BUFSIZE,
+            ipu::batchaffine::VertexType::cpp,
+            ipu::batchaffine::partition::Algorithm::fillFirst});
+      std::cout << "Aquired IPU, rank " << local_team().rank_me() << std::endl;
     }
   });
 }
 
 void done_init_devices() {
-    Timer t("Waiting for IPU to be initialized (should be noop)");
-    detect_ipu_fut.wait();
-    barrier();
-    SWARN("IPU init is DONE");
-    // if (gpu_utils::gpus_present()) {
-    //   barrier(local_team());
-    //   int num_uuids = 0;
-    //   unordered_set<string> unique_ids;
-    //   dist_object<vector<string>> gpu_uuids(gpu_utils::get_gpu_uuids(), local_team());
-    //   for (auto uuid : *gpu_uuids) unique_ids.insert(uuid);
-    //   if (!local_team().rank_me()) {
-    //     for (int i = 1; i < local_team().rank_n(); i++) {
-    //       auto gpu_uuids_i = gpu_uuids.fetch(i).wait();
-    //       num_uuids += gpu_uuids_i.size();
-    //       for (auto uuid : gpu_uuids_i) {
-    //         unique_ids.insert(uuid);
-    //       }
-    //     }
-    //     num_gpus_on_node = unique_ids.size();
-    //     SLOG_GPU("Found UUIDs:\n");
-    //     for (auto uuid : unique_ids) {
-    //       SLOG_GPU(uuid, "\n");
-    //     }
-    //   }
-    //   num_gpus_on_node = broadcast(num_gpus_on_node, 0, local_team()).wait();
-    //   // gpu_utils::set_gpu_device(rank_me());
-    //   // WARN("Num GPUs on node ", num_gpus_on_node, " gpu avail mem per rank is ", get_size_str(get_avail_gpu_mem_per_rank()),
-    //   //     " memory for gpu ", gpu_utils::get_gpu_uuid(), " is ", gpu_utils::get_gpu_avail_mem());
-    //   SLOG_GPU("Available number of GPUs on this node ", num_gpus_on_node, "\n");
-    //   SLOG_GPU("Rank 0 is using GPU ", gpu_utils::get_gpu_device_name(), " on node 0, with ",
-    //            get_size_str(gpu_utils::get_gpu_avail_mem()), " available memory (", get_size_str(get_avail_gpu_mem_per_rank()),
-    //            " per rank). Detected in ", gpu_startup_duration, " s\n");
-    //   SLOG_GPU(gpu_utils::get_gpu_device_descriptions());
-    //   barrier(local_team());
-    // } else {
-    //   SDIE("No GPUs available - this build requires GPUs");
-    // }
+  Timer t("Waiting for IPU to be initialized (should be noop)");
+  detect_ipu_fut.wait();
+  barrier();
+  SWARN("IPU init is DONE");
+  // if (gpu_utils::gpus_present()) {
+  //   barrier(local_team());
+  //   int num_uuids = 0;
+  //   unordered_set<string> unique_ids;
+  //   dist_object<vector<string>> gpu_uuids(gpu_utils::get_gpu_uuids(), local_team());
+  //   for (auto uuid : *gpu_uuids) unique_ids.insert(uuid);
+  //   if (!local_team().rank_me()) {
+  //     for (int i = 1; i < local_team().rank_n(); i++) {
+  //       auto gpu_uuids_i = gpu_uuids.fetch(i).wait();
+  //       num_uuids += gpu_uuids_i.size();
+  //       for (auto uuid : gpu_uuids_i) {
+  //         unique_ids.insert(uuid);
+  //       }
+  //     }
+  //     num_gpus_on_node = unique_ids.size();
+  //     SLOG_GPU("Found UUIDs:\n");
+  //     for (auto uuid : unique_ids) {
+  //       SLOG_GPU(uuid, "\n");
+  //     }
+  //   }
+  //   num_gpus_on_node = broadcast(num_gpus_on_node, 0, local_team()).wait();
+  //   // gpu_utils::set_gpu_device(rank_me());
+  //   // WARN("Num GPUs on node ", num_gpus_on_node, " gpu avail mem per rank is ", get_size_str(get_avail_gpu_mem_per_rank()),
+  //   //     " memory for gpu ", gpu_utils::get_gpu_uuid(), " is ", gpu_utils::get_gpu_avail_mem());
+  //   SLOG_GPU("Available number of GPUs on this node ", num_gpus_on_node, "\n");
+  //   SLOG_GPU("Rank 0 is using GPU ", gpu_utils::get_gpu_device_name(), " on node 0, with ",
+  //            get_size_str(gpu_utils::get_gpu_avail_mem()), " available memory (", get_size_str(get_avail_gpu_mem_per_rank()),
+  //            " per rank). Detected in ", gpu_startup_duration, " s\n");
+  //   SLOG_GPU(gpu_utils::get_gpu_device_descriptions());
+  //   barrier(local_team());
+  // } else {
+  //   SDIE("No GPUs available - this build requires GPUs");
+  // }
 }

@@ -58,10 +58,10 @@ class IPUAlgorithm {
     poplar::Device device;
     poplar::Target target;
 protected:
-    SWConfig config;
 
     std::unique_ptr<Engine> engine;
 public:
+    SWConfig config;
     IPUAlgorithm(SWConfig config);
 
     Graph createGraph();

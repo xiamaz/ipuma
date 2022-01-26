@@ -5,6 +5,7 @@
 static ipu::batchaffine::SWAlgorithm *ipu_driver = nullptr;
 
 ipu::batchaffine::SWAlgorithm* getDriver() {
+      assert(ipu_driver != nullptr);
         return ipu_driver;
 }
 
