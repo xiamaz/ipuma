@@ -1,5 +1,3 @@
-// Copyright (c) 2019 Graphcore Ltd. All rights reserved.
-
 #ifdef __POPC__
 
 #include <poplar/Vertex.hpp>
@@ -32,7 +30,6 @@ public:
 #include <poplar/Engine.hpp>
 #include <poplar/SyncType.hpp>
 #include <poplar/CycleCount.hpp>
-// #include <poplar/IPUModel.hpp>
 #include <poplar/Program.hpp>
 #include <poplar/DeviceManager.hpp>
 #include <poplar/IPUModel.hpp>
