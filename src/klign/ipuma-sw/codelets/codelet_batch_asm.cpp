@@ -22,8 +22,8 @@ public:
     poplar::Input<float> gapExt;
     poplar::Input<int> bufSize;
     poplar::Input<int> maxAB;
-    poplar::Input<poplar::Vector<unsigned char, poplar::VectorLayout::ONE_PTR>> A;
-    poplar::Input<poplar::Vector<unsigned char, poplar::VectorLayout::ONE_PTR>> B;
+    poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> A;
+    poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> B;
     poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR, 8>> Alen;
     poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR, 8>> Blen;
     poplar::Output<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> score;

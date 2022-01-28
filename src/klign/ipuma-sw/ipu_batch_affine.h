@@ -21,7 +21,8 @@ const std::string STREAM_SCORES = "scores-read";
 const std::string STREAM_MISMATCHES = "mismatches-read";
 const std::string STREAM_A_RANGE = "a-range-read";
 const std::string STREAM_B_RANGE = "b-range-read";
-const std::string STREAM_CONCAT_ALL = "cocat-read-all";
+const std::string STREAM_CONCAT_ALL = "concat-read-all";
+const std::string HOST_STREAM_CONCAT = "host-stream-concat";
 
 const std::string IPU_AFFINE_CPP = "SWAffine";
 const std::string IPU_AFFINE_ASM = "SWAffineAsm";
@@ -52,6 +53,8 @@ struct IPUAlgoConfig {
    * @return int 
    */
   int getTotalBufferSize();
+
+  int getInputBufferSize();
 };
 
 struct BlockAlignmentResults {
@@ -62,11 +65,6 @@ struct BlockAlignmentResults {
 
 class SWAlgorithm : public IPUAlgorithm {
  private:
-  std::vector<char> a;
-  std::vector<int32_t> a_len;
-  std::vector<char> b;
-  std::vector<int32_t> b_len;
-
   // std::vector<int32_t> results;
   std::vector<int32_t> scores;
   std::vector<int32_t> a_range_result;
@@ -74,9 +72,11 @@ class SWAlgorithm : public IPUAlgorithm {
 
   IPUAlgoConfig algoconfig;
  public:
+
   SWAlgorithm(SWConfig config, IPUAlgoConfig algoconfig);
 
   static std::vector<std::tuple<int, int>> fillBuckets(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B);
+  std::vector<std::tuple<int, int>> fillBuckets(const std::vector<std::string>& A, const std::vector<std::string>& B);
   static void checkSequenceSizes(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B);
 
   BlockAlignmentResults get_result();
@@ -85,8 +85,8 @@ class SWAlgorithm : public IPUAlgorithm {
   void compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B);
 
   // Remote bufffer
-  void prepared_remote_compare(char* a,  int32_t* a_len,  char* b,  int32_t* b_len, int32_t* results_begin, int32_t* results_end);
-  static void prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B,  char* a,  int32_t* a_len,  char* b,  int32_t* b_len, std::vector<int>& deviceMapping);
+  void prepared_remote_compare(int32_t* inputs_begin,  int32_t* inputs_end, int32_t* results_begin, int32_t* results_end);
+  static void prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B,  int32_t* inputs_begin,  int32_t* inputs_end, std::vector<int>& deviceMapping);
 };
 }  // namespace batchaffine
 }  // namespace ipu

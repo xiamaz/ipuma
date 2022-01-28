@@ -27,8 +27,8 @@ public:
     poplar::Input<int> gapExt;
     poplar::Input<int> bufSize;
     poplar::Input<int> maxAB;
-    poplar::Input<poplar::Vector<unsigned char, poplar::VectorLayout::ONE_PTR>> A;
-    poplar::Input<poplar::Vector<unsigned char, poplar::VectorLayout::ONE_PTR>> B;
+    poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> A;
+    poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> B;
     poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> Alen;
     poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> Blen;
     poplar::Output<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> score;
@@ -40,6 +40,9 @@ public:
 
         int gI = *gapInit;
         int gE = *gapExt;
+
+        uint8_t* cA = (uint8_t*) &(A[0]);
+        uint8_t* cB = (uint8_t*) &(B[0]);
         
         for (int n = 0; n < maxNPerTile; ++n) {
             int lastNoGap, prevNoGap;
@@ -69,7 +72,7 @@ public:
                     aGap = max(lastNoGap + gI + gE, aGap + gE);
                     bG[j] = max(C[j] + gI + gE, bG[j] + gE);
 
-                    lastNoGap = max(prevNoGap + simMatrix[A[j_offset + j]][B[i_offset + i]], aGap);
+                    lastNoGap = max(prevNoGap + simMatrix[cA[j_offset + j]][cB[i_offset + i]], aGap);
                     lastNoGap = max(lastNoGap, bG[j]);
                     lastNoGap = max(lastNoGap, 0);
                     prevNoGap = C[j];
@@ -97,7 +100,7 @@ public:
                 for (int j = Aend; j >= 0; --j) {
                     aGap = max(lastNoGap + gI + gE, aGap + gE);
                     bG[j] = max(C[j] + gI + gE, bG[j] + gE);
-                    lastNoGap = max(prevNoGap + simMatrix[A[j_offset + j]][B[i_offset + i]], aGap);
+                    lastNoGap = max(prevNoGap + simMatrix[cA[j_offset + j]][cB[i_offset + i]], aGap);
                     lastNoGap = max(lastNoGap, bG[j]);
                     lastNoGap = max(lastNoGap, 0);
                     prevNoGap = C[j];

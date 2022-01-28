@@ -29,8 +29,8 @@ public:
     poplar::Input<int> gapExt;
     poplar::Input<int> bufSize;
     poplar::Input<int> maxAB;
-    poplar::Input<poplar::Vector<unsigned char, poplar::VectorLayout::ONE_PTR>> A;
-    poplar::Input<poplar::Vector<unsigned char, poplar::VectorLayout::ONE_PTR>> B;
+    poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> A;
+    poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> B;
     poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> Alen;
     poplar::Input<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> Blen;
     poplar::Output<poplar::Vector<int, poplar::VectorLayout::ONE_PTR>> score;
@@ -44,6 +44,9 @@ public:
 
         auto* wC = &(C[0]) + workerId * maxAB;
         auto* wbG = &(bG[0]) + workerId * maxAB;
+
+        uint8_t* cA = (uint8_t*) &(A[0]);
+        uint8_t* cB = (uint8_t*) &(B[0]);
 
         for (int n = workerId; n < maxNPerTile; n += MultiVertex::numWorkers()) {
             int lastNoGap, prevNoGap;
@@ -71,7 +74,7 @@ public:
                     aGap = max(lastNoGap + gI + gE, aGap + gE);
                     wbG[j] = max(wC[j] + gI + gE, wbG[j] + gE);
 
-                    lastNoGap = max(prevNoGap + simMatrix[A[j_offset + j]][B[i_offset + i]], aGap);
+                    lastNoGap = max(prevNoGap + simMatrix[cA[j_offset + j]][cB[i_offset + i]], aGap);
                     lastNoGap = max(lastNoGap, wbG[j]);
                     lastNoGap = max(lastNoGap, 0);
                     prevNoGap = wC[j];
@@ -98,7 +101,7 @@ public:
                 for (int j = Aend; j >= 0; --j) {
                     aGap = max(lastNoGap + gI + gE, aGap + gE);
                     wbG[j] = max(wC[j] + gI + gE, wbG[j] + gE);
-                    lastNoGap = max(prevNoGap + simMatrix[A[j_offset + j]][B[i_offset + i]], aGap);
+                    lastNoGap = max(prevNoGap + simMatrix[cA[j_offset + j]][cB[i_offset + i]], aGap);
                     lastNoGap = max(lastNoGap, wbG[j]);
                     lastNoGap = max(lastNoGap, 0);
                     prevNoGap = wC[j];

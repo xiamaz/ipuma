@@ -355,4 +355,59 @@ TEST_F(SimpleCorrectnessTest, UseAsmMultiVertex) {
   auto aln_results = driver.get_result();
   checkResults(aln_results);
 }
+
+TEST(PartitioningTest, FillFull) {
+  int tilesUsed = 10;
+  int maxBatches = 2;
+  int maxAB = 10;
+  int bufsize = maxBatches * maxAB;
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {
+    .tilesUsed = tilesUsed,
+    .maxAB = maxAB,
+    .maxBatches = maxBatches,
+    .bufsize = bufsize,
+    .vtype = ipu::batchaffine::VertexType::cpp,
+    .fillAlgo = ipu::batchaffine::partition::Algorithm::fillFirst
+  });
+
+  std::vector<std::string> a, b;
+  for (int i = 0; i < tilesUsed * maxBatches; ++i) {
+    a.push_back(std::string("A", maxAB));
+    b.push_back(std::string("A", maxAB));
+  }
+
+  auto buckets = driver.fillBuckets(a, b);
+}
+
+TEST(PrepareTest, simple) {
+  int tilesUsed = 10;
+  int maxBatches = 2;
+  int maxAB = 10;
+  int bufsize = maxBatches * maxAB;
+  ipu::batchaffine::IPUAlgoConfig config = {
+    .tilesUsed = tilesUsed,
+    .maxAB = maxAB,
+    .maxBatches = maxBatches,
+    .bufsize = bufsize,
+    .vtype = ipu::batchaffine::VertexType::cpp,
+    .fillAlgo = ipu::batchaffine::partition::Algorithm::fillFirst
+  };
+
+  std::vector<std::string> A, B;
+  for (int i = 0; i < tilesUsed * maxBatches; ++i) {
+    A.push_back(std::string("A", maxAB));
+    B.push_back(std::string("A", maxAB));
+  }
+
+  std::vector<int32_t> inputs(config.getInputBufferSize() + 2);
+  std::vector<int> mapping;
+
+  inputs[0] = 0xDEADBEEF;
+  inputs[inputs.size() - 1] = 0xDEADBEEF;
+  ipu::batchaffine::SWAlgorithm::prepare_remote(config, A, B, &*inputs.begin() + 1, &*inputs.end() - 1, mapping);
+  std::vector<int32_t> slice_begin(inputs.begin(), inputs.begin() + 10);
+  std::vector<int32_t> slice_end(inputs.end() - 10, inputs.end());
+  EXPECT_EQ(*inputs.begin(), 0xDEADBEEF) << "Start overwritten: " << swatlib::printVector(slice_begin);
+  EXPECT_EQ(*(inputs.end() - 1), 0xDEADBEEF) << "End overwritten: " << swatlib::printVector(slice_end);
+}
 #endif
