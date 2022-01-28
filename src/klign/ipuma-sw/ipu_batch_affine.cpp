@@ -204,10 +204,12 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
   auto host_stream_a_len = graph.addHostToDeviceFIFO(STREAM_A_LEN, INT, Alens.numElements(), ReplicatedStreamMode::REPLICATE, streamOptions);
   auto host_stream_b_len = graph.addHostToDeviceFIFO(STREAM_B_LEN, INT, Blens.numElements(), ReplicatedStreamMode::REPLICATE, streamOptions);
 
-  auto device_stream_scores = graph.addDeviceToHostFIFO(STREAM_SCORES, INT, Scores.numElements());
-  auto device_stream_mismatches = graph.addDeviceToHostFIFO(STREAM_MISMATCHES, INT, Mismatches.numElements());
-  auto device_stream_a_range = graph.addDeviceToHostFIFO(STREAM_A_RANGE, INT, ARanges.numElements());
-  auto device_stream_b_range = graph.addDeviceToHostFIFO(STREAM_B_RANGE, INT, BRanges.numElements());
+  // auto device_stream_scores = graph.addDeviceToHostFIFO(STREAM_SCORES, INT, Scores.numElements());
+  // auto device_stream_mismatches = graph.addDeviceToHostFIFO(STREAM_MISMATCHES, INT, Mismatches.numElements());
+  // auto device_stream_a_range = graph.addDeviceToHostFIFO(STREAM_A_RANGE, INT, ARanges.numElements());
+  // auto device_stream_b_range = graph.addDeviceToHostFIFO(STREAM_B_RANGE, INT, BRanges.numElements());
+  // 
+  auto device_stream_concat = graph.addDeviceToHostFIFO(STREAM_CONCAT_ALL, INT, Scores.numElements() + ARanges.numElements() + BRanges.numElements());
 
   auto frontCs = graph.addComputeSet("SmithWaterman");
   for (int i = 0; i < activeTiles; ++i) {
@@ -237,10 +239,12 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
   auto h2d_prog = program::Sequence(
       {poplar::program::Copy(host_stream_a, As.flatten()), poplar::program::Copy(host_stream_b, Bs.flatten()),
        poplar::program::Copy(host_stream_a_len, Alens.flatten()), poplar::program::Copy(host_stream_b_len, Blens.flatten())});
-  auto d2h_prog = program::Sequence({poplar::program::Copy(Scores.flatten(), device_stream_scores),
-                                     poplar::program::Copy(Mismatches.flatten(), device_stream_mismatches),
-                                     poplar::program::Copy(ARanges.flatten(), device_stream_a_range),
-                                     poplar::program::Copy(BRanges.flatten(), device_stream_b_range)});
+  // auto d2h_prog = program::Sequence({poplar::program::Copy(Scores.flatten(), device_stream_scores),
+  //                                    poplar::program::Copy(Mismatches.flatten(), device_stream_mismatches),
+  //                                    poplar::program::Copy(ARanges.flatten(), device_stream_a_range),
+  //                                    poplar::program::Copy(BRanges.flatten(), device_stream_b_range)});
+
+  auto d2h_prog_concat = program::Sequence({poplar::program::Copy(concat({Scores.flatten(), ARanges.flatten(), BRanges.flatten()}), device_stream_concat)});
 #ifdef IPUMA_DEBUG
  program::Sequence  main_prog;
   main_prog.add(program::Execute(frontCs));
@@ -250,7 +254,7 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
 #endif
   prog.add(h2d_prog);
   prog.add(main_prog);
-  prog.add(d2h_prog);
+  prog.add(d2h_prog_concat);
 
 #ifdef IPUMA_DEBUG
   addCycleCount(graph, prog, CYCLE_COUNT_OUTER);
@@ -273,7 +277,6 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
   std::fill(b_len.begin(), b_len.end(), 0);
 
   scores.resize(totalComparisonsCount);
-  mismatches.resize(totalComparisonsCount);
   a_range_result.resize(totalComparisonsCount);
   b_range_result.resize(totalComparisonsCount);
 
@@ -298,7 +301,7 @@ SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig)
   // engine->connectStream(STREAM_B_RANGE, b_range_result.data());
 }
 
-BlockAlignmentResults SWAlgorithm::get_result() { return {scores, mismatches, a_range_result, b_range_result}; }
+BlockAlignmentResults SWAlgorithm::get_result() { return {scores, a_range_result, b_range_result}; }
 
 void SWAlgorithm::checkSequenceSizes(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B) {
   if (A.size() != B.size()) {
@@ -342,18 +345,17 @@ std::vector<std::tuple<int, int>> SWAlgorithm::fillBuckets(IPUAlgoConfig& algoco
   return bucket_pairs;
 }
 
-void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int32_t* b_len, int32_t* scores, int32_t* mismatches,
-                                          int32_t* a_range_result, int32_t* b_range_result) {
+void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int32_t* b_len, int32_t* results_begin, int32_t* results_end) {
   // We have to reconnect the streams to new memory locations as the destination will be in a shared memroy region.
   engine->connectStream(STREAM_A, a);
   engine->connectStream(STREAM_A_LEN, a_len);
   engine->connectStream(STREAM_B, b);
   engine->connectStream(STREAM_B_LEN, b_len);
 
-  engine->connectStream(STREAM_SCORES, scores);
-  engine->connectStream(STREAM_MISMATCHES, mismatches);
-  engine->connectStream(STREAM_A_RANGE, a_range_result);
-  engine->connectStream(STREAM_B_RANGE, b_range_result);
+  engine->connectStream(STREAM_CONCAT_ALL, results_begin);
+  // engine->connectStream(STREAM_SCORES, scores);
+  // engine->connectStream(STREAM_A_RANGE, a_range_result);
+  // engine->connectStream(STREAM_B_RANGE, b_range_result);
 
   swatlib::TickTock t;
   t.tick();
@@ -394,17 +396,60 @@ void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int3
 void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B) {
   std::vector<int> mapping;
   prepare_remote(algoconfig, A, B, a.data(), a_len.data(), b.data(), b_len.data(), mapping);
-  std::vector<int32_t> unord_scores(scores), unord_mismatches(mismatches), unord_a_range(a_range_result), unord_b_range(b_range_result);
-  prepared_remote_compare(a.data(), a_len.data(), b.data(), b_len.data(), unord_scores.data(), unord_mismatches.data(), unord_a_range.data(),
-                          unord_b_range.data());
+  // std::vector<int32_t> unord_scores(scores), unord_mismatches(mismatches), unord_a_range(a_range_result), unord_b_range(b_range_result);
+  size_t results_size = scores.size() + a_range_result.size() + b_range_result.size();
+  std::vector<int32_t> results(results_size + 4);
+  results[0] = 0xDEADBEEF;
+  results[1] = 0xDEADBEEF;
+  results[results_size + (1) + 1] = 0xFEEBDAED;
+  results[results_size + (1) + 2] = 0xFEEBDAED;
+  // prepared_remote_compare(a.data(), a_len.data(), b.data(), b_len.data(), unord_scores.data(), unord_mismatches.data(), unord_a_range.data(),
+  //                         unord_b_range.data());
+  prepared_remote_compare(a.data(), a_len.data(), b.data(), b_len.data(), &*results.begin() + 2, &*results.end() - 2);
+
+  // check canaries
+  if (results[0] != 0xDEADBEEF || results[1] != 0xDEADBEEF) {
+    std::vector<int32_t> subset(results.begin(), results.begin() + 10);
+    std::cout << "Canary begin overwritten " << swatlib::printVector(subset) << "\n";
+    exit(1);
+  }
+  if (results[results_size + 2] != 0xFEEBDAED || results[results_size + 3] != 0xFEEBDAED) {
+    std::vector<int32_t> subset(results.end() - 10, results.end());
+    std::cout << "Canary end overwritten " << swatlib::printVector(subset) << "\n";
+    exit(1);
+  }
+
   // std::cout << swatlib::printVector(unord_scores) << "\n";
   // reorder results based on mapping
-  for (int i = 0; i < mapping.size(); ++i) {
-    scores[i] = unord_scores[mapping[i]];
-    mismatches[i] = unord_mismatches[mapping[i]];
-    a_range_result[i] = unord_a_range[mapping[i]];
-    b_range_result[i] = unord_b_range[mapping[i]];
+  for (size_t i = 0; i < mapping.size(); ++i) {
+    size_t mapped_i = mapping[i];
+    scores[i] = results[mapped_i + 2];
+    if (scores[i] >= KLIGN_IPU_MAXAB_SIZE) {
+      printf("Thread %d received wrong data FIRST, try again data=%d, map_translate=%d\n", -1, scores[i], mapping[i]);
+      exit(1);
+      // goto retry;
+    }
+    size_t a_range_offset = scores.size();
+    size_t b_range_offset = a_range_offset + a_range_result.size();
+    a_range_result[i] = results[a_range_offset + mapped_i + 2];
+    b_range_result[i] = results[b_range_offset + mapped_i + 2];
   }
+  // return;
+// retry:
+//   prepared_remote_compare(a.data(), a_len.data(), b.data(), b_len.data(), unord_scores.data(), unord_mismatches.data(), unord_a_range.data(),
+//                           unord_b_range.data());
+//   // std::cout << swatlib::printVector(unord_scores) << "\n";
+//   // reorder results based on mapping
+//   for (int i = 0; i < mapping.size(); ++i) {
+//     scores[i] = unord_scores[mapping[i]];
+//     if (scores[i] >= KLIGN_IPU_MAXAB_SIZE) {
+//       printf("Thread %d received wrong data AGAIN, FATAL data=%d, map_translate=%d\n", -1, scores[i], mapping[i]);
+//       exit(1);
+//     }
+//     mismatches[i] = unord_mismatches[mapping[i]];
+//     a_range_result[i] = unord_a_range[mapping[i]];
+//     b_range_result[i] = unord_b_range[mapping[i]];
+//   }
 }
 
 void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B, char* a, int32_t* a_len,

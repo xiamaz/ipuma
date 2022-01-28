@@ -21,6 +21,7 @@ const std::string STREAM_SCORES = "scores-read";
 const std::string STREAM_MISMATCHES = "mismatches-read";
 const std::string STREAM_A_RANGE = "a-range-read";
 const std::string STREAM_B_RANGE = "b-range-read";
+const std::string STREAM_CONCAT_ALL = "cocat-read-all";
 
 const std::string IPU_AFFINE_CPP = "SWAffine";
 const std::string IPU_AFFINE_ASM = "SWAffineAsm";
@@ -55,7 +56,6 @@ struct IPUAlgoConfig {
 
 struct BlockAlignmentResults {
   std::vector<int32_t> scores;
-  std::vector<int32_t> mismatches;
   std::vector<int32_t> a_range_result;
   std::vector<int32_t> b_range_result;
 };
@@ -67,8 +67,8 @@ class SWAlgorithm : public IPUAlgorithm {
   std::vector<char> b;
   std::vector<int32_t> b_len;
 
+  // std::vector<int32_t> results;
   std::vector<int32_t> scores;
-  std::vector<int32_t> mismatches;
   std::vector<int32_t> a_range_result;
   std::vector<int32_t> b_range_result;
 
@@ -85,7 +85,7 @@ class SWAlgorithm : public IPUAlgorithm {
   void compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B);
 
   // Remote bufffer
-  void prepared_remote_compare(char* a,  int32_t* a_len,  char* b,  int32_t* b_len, int32_t * scores, int32_t *mismatches, int32_t * a_range_result, int32_t * b_range_result);
+  void prepared_remote_compare(char* a,  int32_t* a_len,  char* b,  int32_t* b_len, int32_t* results_begin, int32_t* results_end);
   static void prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B,  char* a,  int32_t* a_len,  char* b,  int32_t* b_len, std::vector<int>& deviceMapping);
 };
 }  // namespace batchaffine

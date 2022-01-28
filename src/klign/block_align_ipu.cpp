@@ -109,18 +109,18 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
   // CPUAligner cpu(false);
   // auto fu = cpu.ssw_align_block(aln_block_data, alns);
   // fu.wait();
-  auto [sc, mis, ar, br] = rpc(
+  auto [sc, ar, br] = rpc(
                                local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL,
                                [](int sender_rank, vector<string> A, vector<string> B) {
                                  cout << "Launching rpc on " << rank_me() << " from " << sender_rank << endl;
                                  getDriver()->compare_local(A, B);
                                  auto res = getDriver()->get_result();
                                  vector<int32_t> sc(res.scores);
-                                 vector<int32_t> mis(res.mismatches);
+                                 // vector<int32_t> mis(res.mismatches);
                                  vector<int32_t> ar(res.a_range_result);
                                  vector<int32_t> br(res.b_range_result);
                                  cout << "Exiting rpc on " << rank_me() << " from " << sender_rank << endl;
-                                 return make_tuple(sc, mis, ar, br);
+                                 return make_tuple(sc, ar, br);
                                },
                                local_team().rank_me(), aln_block_data->ctg_seqs, aln_block_data->read_seqs)
                                .wait();
@@ -202,6 +202,7 @@ void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vecto
     assert(aa_CPU->size() == N);
     assert(aa_IPU->size() == N);
     // if (rank_me() == 70) 
+    bool errors = false;
     for (int i = 0; i < aa_CPU->size(); i++) {
       // Same score
       assert(aa_CPU->get_aln(i).score1 == aa_IPU->get_aln(i).score1);
@@ -210,7 +211,8 @@ void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vecto
       assert(aa_CPU->get_aln(i).clen == aa_IPU->get_aln(i).clen);
 
       if (aa_CPU->get_aln(i).cstart != aa_IPU->get_aln(i).cstart || aa_CPU->get_aln(i).cstop != aa_IPU->get_aln(i).cstop ||
-          aa_CPU->get_aln(i).rstart != aa_IPU->get_aln(i).rstart || aa_CPU->get_aln(i).rstop != aa_IPU->get_aln(i).rstop) {
+          aa_CPU->get_aln(i).rstart != aa_IPU->get_aln(i).rstart || aa_CPU->get_aln(i).rstop != aa_IPU->get_aln(i).rstop || 
+          aa_CPU->get_aln(i).identity != aa_IPU->get_aln(i).identity) {
         printf("mismatch A/B: %s / %s\n", read_seqs_copy[i].c_str(), ctg_seqs_copy[i].c_str());
         if (aa_CPU->get_aln(i).cstart != aa_IPU->get_aln(i).cstart) {
           printf("\tmismatch want %d cstart %d got %d\n", i, aa_CPU->get_aln(i).cstart, aa_IPU->get_aln(i).cstart);
@@ -228,6 +230,9 @@ void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vecto
           printf("\tmismatch want %d identity %d got %d\n", i, aa_CPU->get_aln(i).identity, aa_IPU->get_aln(i).identity);
         }
       }
+    }
+    if (errors) {
+      exit(1);
     }
   }
 }

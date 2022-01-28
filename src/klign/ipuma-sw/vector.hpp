@@ -28,7 +28,7 @@ inline std::string printVector(std::vector<T> v) {
     std::stringstream ss;
     ss << "Vector[";
     for (auto& vv : v) {
-        ss << vv << ",";
+        ss << std::hex << vv << ",";
     }
     ss << "]";
     return ss.str();
