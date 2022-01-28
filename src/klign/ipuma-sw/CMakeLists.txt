@@ -14,5 +14,5 @@ add_gp_library(
 )
 
 add_library(IPUMA_LIBRARY "ipu_batch_affine.cpp" "matrix.cpp" "ipu_base.cpp" "similarity.cpp" "encoding.cpp" "driver.cpp")
-target_link_libraries(IPUMA_LIBRARY poplar popops poputil ${UPCXX_LIBRARIES} ${UPCXX_UTILS_LIBRARIES})
+target_link_libraries(IPUMA_LIBRARY poplar popops poputil)
 add_dependencies(IPUMA_LIBRARY  algoipu.gp_codelets)

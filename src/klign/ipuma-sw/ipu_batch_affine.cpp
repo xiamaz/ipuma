@@ -2,7 +2,7 @@
 #include <cmath>
 #include <iostream>
 
-#include "upcxx_utils/timers.hpp"
+#include "timing.hpp"
 
 #include <poplar/Graph.hpp>
 #include <poputil/TileMapping.hpp>
@@ -126,7 +126,7 @@ static const std::string CYCLE_COUNT_INNER = "cycle-count-inner";
 long long getCellCount(const std::vector<std::string>& A, const std::vector<std::string>& B) {
   long long cellCount = 0;
   if (A.size() != B.size()) {
-    SWARN("Mismatch between size of A ", A.size(), " and size of B ", B.size());
+    std::cout << "Mismatch between size of A " << A.size() << " and size of B " << B.size() << "\n";
   }
   // count cells based on 1:1 comparisons
   for (int i = 0; i < A.size(); ++i) {
@@ -326,8 +326,8 @@ void SWAlgorithm::checkSequenceSizes(IPUAlgoConfig& algoconfig, const std::vecto
   }
 }
 
-vector<std::tuple<int, int>> SWAlgorithm::fillBuckets(IPUAlgoConfig& algoconfig,const std::vector<std::string>& A, const std::vector<std::string>& B) {
-  vector<std::tuple<int, int>> bucket_pairs;
+std::vector<std::tuple<int, int>> SWAlgorithm::fillBuckets(IPUAlgoConfig& algoconfig,const std::vector<std::string>& A, const std::vector<std::string>& B) {
+  std::vector<std::tuple<int, int>> bucket_pairs;
   switch (algoconfig.fillAlgo) {
   case partition::Algorithm::fillFirst:
     bucket_pairs = partition::fillFirst(A, B, algoconfig.tilesUsed, algoconfig.bufsize, algoconfig.maxBatches);
@@ -355,17 +355,17 @@ void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int3
   engine->connectStream(STREAM_A_RANGE, a_range_result);
   engine->connectStream(STREAM_B_RANGE, b_range_result);
 
-  upcxx_utils::AsyncTimer engineTimer("Engine");
-  engineTimer.start();
+  swatlib::TickTock t;
+  t.tick();
   engine->run(0);
-  engineTimer.stop();
+  t.tock();
 
 #ifdef IPUMA_DEBUG
   auto cyclesOuter = getTotalCycles(*engine, CYCLE_COUNT_OUTER);
   auto cyclesInner = getTotalCycles(*engine, CYCLE_COUNT_INNER);
   auto timeOuter = static_cast<double>(cyclesOuter) / getTarget().getTileClockFrequency();
   auto timeInner = static_cast<double>(cyclesInner) / getTarget().getTileClockFrequency();
-  SLOG("Poplar cycle count: ", cyclesInner, "/", cyclesOuter, " computed time (in s): ", timeInner, "/", timeOuter, "\n");
+  std::cout << "Poplar cycle count: " << cyclesInner << "/" << cyclesOuter << " computed time (in s): " << timeInner << "/" << timeOuter << "\n";
 
   // GCUPS computation
   // auto cellCount = getCellCount(A, B);
@@ -378,7 +378,7 @@ void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int3
   
   double GCUPSOuter = static_cast<double>(cellCount) / timeOuter / 1e9;
   double GCUPSInner = static_cast<double>(cellCount) / timeInner / 1e9;
-  SLOG("Poplar estimated cells(", cellCount, ") GCUPS ", GCUPSInner, "/", GCUPSOuter, "\n");
+  std::cout << "Poplar estimated cells(" << cellCount << ") GCUPS " << GCUPSInner << "/" << GCUPSOuter << "\n";
 
   // dataCount - actual data content transferred
   // totalTransferSize - size of buffer being transferred
@@ -387,7 +387,7 @@ void SWAlgorithm::prepared_remote_compare(char* a, int32_t* a_len, char* b, int3
   auto transferTime = timeOuter - timeInner;
   auto transferInfoRatio = static_cast<double>(dataCount) / totalTransferSize * 100;
   auto transferBandwidth = totalTransferSize / transferTime / 1e6;
-  SLOG("Transfer time: ", transferTime, "s transfer ratio: ", transferInfoRatio, "% estimated bandwidth: ", transferBandwidth, "mb/s, per vertex: ", transferBandwidth / algoconfig.tilesUsed, "mb/s\n");
+  std::cout << "Transfer time: " << transferTime << "s transfer ratio: " << transferInfoRatio << "% estimated bandwidth: " << transferBandwidth << "mb/s, per vertex: " << transferBandwidth / algoconfig.tilesUsed << "mb/s\n";
 #endif
 }
 
@@ -409,8 +409,8 @@ void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::ve
 
 void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B, char* a, int32_t* a_len,
                                  char* b, int32_t* b_len, std::vector<int>& seqMapping) {
-  upcxx_utils::AsyncTimer preprocessTimer("Preprocess");
-  preprocessTimer.start();
+  swatlib::TickTock preprocessTimer;
+  preprocessTimer.tick();
   checkSequenceSizes(algoconfig, A, B);
 
   auto encoder = swatlib::getEncoder(swatlib::DataType::nucleicAcid);
@@ -423,7 +423,7 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
   #ifdef IPUMA_DEBUG
   for (size_t i = 0; i < algoconfig.getTotalNumberOfComparisons(); i++) {
     if (a_len[i] != 0 || b_len[i] != 0) {
-      cout << "A/B_len is non-zero" << std::endl;
+      std::cout << "A/B_len is non-zero" << std::endl;
       exit(1);
     }
   }
@@ -455,7 +455,7 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
     bB += bSize;
   }
 
-  preprocessTimer.stop();
+  preprocessTimer.tock();
 
 #ifdef IPUMA_DEBUG
   int emptyBuckets = 0;
@@ -473,8 +473,8 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
   }
   ss << "]";
   // SLOG(swatlib::printVector(bucketCmps), "\n");
-  SLOG("Total number of buckets: ", buckets.size(), " empty buckets: ", emptyBuckets, "\n");
-  SLOG("Bucket size occurence: ", ss.str(), "\n");
+  std::cout << "Total number of buckets: " << buckets.size() << " empty buckets: " << emptyBuckets << "\n";
+  std::cout << "Bucket size occurence: " << ss.str() << "\n";
 #endif
   // SLOG("Inner comparison time: ", preprocessTimer.get_elapsed(), " engine run: ", engineTimer.get_elapsed(), "\n");
 }
