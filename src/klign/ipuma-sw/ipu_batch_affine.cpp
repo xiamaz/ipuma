@@ -168,6 +168,7 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
     case VertexType::assembly: sType = FLOAT; break;
     case VertexType::multi: sType = INT; workerMultiplier = target.getNumWorkerContexts(); break;
     case VertexType::multiasm: sType = FLOAT; workerMultiplier = target.getNumWorkerContexts(); break;
+    case VertexType::stripedasm: sType = HALF; break;
   }
 
   TypeTraits traits = typeToTrait(sType);

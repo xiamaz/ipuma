@@ -25,9 +25,9 @@ const std::string STREAM_B_RANGE = "b-range-read";
 const std::string IPU_AFFINE_CPP = "SWAffine";
 const std::string IPU_AFFINE_ASM = "SWAffineAsm";
 
-enum class VertexType { cpp, assembly, multi, multiasm };
+enum class VertexType { cpp, assembly, multi, multiasm, stripedasm };
 
-static const std::string typeString[] = {"SWAffine", "SWAffineAsm", "MultiSWAffine", "MultiSWAffineAsm"};
+static const std::string typeString[] = {"SWAffine", "SWAffineAsm", "MultiSWAffine", "MultiSWAffineAsm", "StripedSWAffineAsm"};
 std::string vertexTypeToString(VertexType v);
 
 struct IPUAlgoConfig {

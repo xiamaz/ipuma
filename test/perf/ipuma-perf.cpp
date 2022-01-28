@@ -76,11 +76,20 @@ TEST_P(AlgoPerformance, RunOptimal) {
   auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, algotype});
 
   // generate input strings
-  for (int i = 0; i < numCmps * numWorkers; ++i) {
-    refs.push_back(string(strlen, 'A'));
-    queries.push_back(string(strlen, 'T'));
+  int numBatches = 10;
+  for (int n = 0; n < numBatches; ++n) {
+    refs = {};
+    queries = {};
+    for (int i = 0; i < numCmps * numWorkers; ++i) {
+      refs.push_back(string(strlen, 'A'));
+      queries.push_back(string(strlen, 'T'));
+    }
+    driver.compare_local(queries, refs);
+    auto results = driver.get_result();
+    for (int i = 0; i < numCmps * numWorkers; ++i) {
+      EXPECT_EQ(results.scores[i], 0) << "n: " << n << " mismatching score";
+    }
   }
-  driver.compare_local(queries, refs);
   // auto alns = driver.get_result();
   // for (int i = 0; i < numWorkers * numCmps; ++i) {
   //   std::cout << alns.scores[i] << " ";
