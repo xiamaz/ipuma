@@ -146,7 +146,6 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
                                          unsigned long bufSize, unsigned long maxBatches,
                                          const swatlib::Matrix<int8_t> similarityData, int gapInit, int gapExt) {
   program::Sequence prog;
-  program::Sequence initProg;
 
   auto target = graph.getTarget();
   int tileCount = target.getTilesPerIPU();
@@ -245,7 +244,7 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
 #ifdef IPUMA_DEBUG
   addCycleCount(graph, prog, CYCLE_COUNT_OUTER);
 #endif
-  return {prog, initProg};
+  return {prog, d2h_prog_concat};
 }
 
 SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig, int thread_id) : IPUAlgorithm(config), algoconfig(algoconfig), thread_id(thread_id) {
@@ -375,7 +374,6 @@ void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::ve
   inputs[1] = 0xDEADBEEF;
   inputs[inputs_size + (1) + 1] = 0xFEEBDAED;
   inputs[inputs_size + (1) + 2] = 0xFEEBDAED;
-
   prepare_remote(algoconfig, A, B, &*inputs.begin() + 2, &*inputs.end() - 2, mapping);
 
   if (inputs[0] != 0xDEADBEEF || inputs[1] != 0xDEADBEEF) {
@@ -411,19 +409,30 @@ void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::ve
   }
 
   // reorder results based on mapping
+  int nthTry = 0;
+  int sc;
+  retry:
+  nthTry++;
+  sc = 0;
   for (size_t i = 0; i < mapping.size(); ++i) {
     size_t mapped_i = mapping[i];
     scores[i] = results[mapped_i + 2];
     if (scores[i] >= KLIGN_IPU_MAXAB_SIZE) {
-      PLOGW << "Expected " << A.size() << " valid comparisons. But got " << i << " instead.";
-      PLOGW.printf("Thread %d received wrong data FIRST, try again data=%d, map_translate=%d\n", thread_id, scores[i], mapping[i]);
-      exit(1);
-      // goto retry;
+      PLOGW << "ERROR Expected " << A.size() << " valid comparisons. But got " << i << " instead.";
+      PLOGW.printf("ERROR Thread %d received wrong data FIRST, try again data=%d, map_translate=%d\n", thread_id, scores[i], mapping[i] + 2);
+      engine->run(1);
+      goto retry;
     }
+    sc += scores[i] > 0;
     size_t a_range_offset = scores.size();
     size_t b_range_offset = a_range_offset + a_range_result.size();
     a_range_result[i] = results[a_range_offset + mapped_i + 2];
     b_range_result[i] = results[b_range_offset + mapped_i + 2];
+  }
+  if ((double)sc/A.size() < 0.5) {
+    PLOGW << "ERROR Too many scores are 0, retry number " << (nthTry - 1);
+    engine->run(1);
+    goto retry;
   }
   // return;
 // retry:
