@@ -9,9 +9,20 @@ using namespace poplar;
 namespace ipu {
 namespace batchaffine {
 
-  namespace partition {
-    enum class Algorithm {fillFirst, roundRobin, greedy};
-  }
+namespace partition {
+  enum class Algorithm {fillFirst, roundRobin, greedy};
+
+  struct BucketData {
+    int count;
+    int lenA;
+    int lenB;
+    int weight;
+  };
+
+  int fillFirst(std::vector<std::tuple<int, int>>& mapping, const std::vector<std::string>& A, const std::vector<std::string>& B, int bucketCount, int bucketCapacity, int bucketCountCapacity);
+  int roundRobin(std::vector<std::tuple<int, int>>& mapping, const std::vector<std::string>& A, const std::vector<std::string>& B, int bucketCount, int bucketCapacity, int bucketCountCapacity);
+  int greedy(std::vector<std::tuple<int, int>>& mapping, const std::vector<std::string>& A, const std::vector<std::string>& B, int bucketCount, int bucketCapacity, int bucketCountCapacity);
+}
 
 const std::string STREAM_A = "a-write";
 const std::string STREAM_A_LEN = "a-len-write";
@@ -75,8 +86,8 @@ class SWAlgorithm : public IPUAlgorithm {
 
   SWAlgorithm(SWConfig config, IPUAlgoConfig algoconfig);
 
-  static std::vector<std::tuple<int, int>> fillBuckets(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B);
-  std::vector<std::tuple<int, int>> fillBuckets(const std::vector<std::string>& A, const std::vector<std::string>& B);
+  static std::vector<std::tuple<int, int>> fillBuckets(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B, int& err);
+  std::vector<std::tuple<int, int>> fillBuckets(const std::vector<std::string>& A, const std::vector<std::string>& B, int& err);
   static void checkSequenceSizes(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B);
 
   BlockAlignmentResults get_result();

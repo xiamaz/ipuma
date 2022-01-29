@@ -17,12 +17,10 @@
 
 namespace ipu {
 namespace batchaffine {
-
 namespace partition {
-
-  std::vector<std::tuple<int, int>> fillFirst(const std::vector<std::string>& A, const std::vector<std::string>& B, int bucketCount, int bucketCapacity, int bucketCountCapacity) {
-    std::vector<std::tuple<int, int>> mapping(A.size(), {0, 0});
-    std::vector<std::tuple<int, int, int>> buckets(bucketCount, {0, 0, 0});
+  int fillFirst(std::vector<std::tuple<int, int>>& mapping, const std::vector<std::string>& A, const std::vector<std::string>& B, int bucketCount, int bucketCapacity, int bucketCountCapacity) {
+    mapping = std::vector<std::tuple<int, int>>(A.size(), {0, 0});
+    std::vector<BucketData> buckets(bucketCount, {0, 0, 0, 0});
     int bucketIndex = 0;
     for (int i = 0; i < A.size(); ++i) {
       const auto& a = A[i];
@@ -30,7 +28,7 @@ namespace partition {
 
       // find next empty bucket
       while (bucketIndex < bucketCount) {
-        auto& [bN, bA, bB] = buckets[bucketIndex];
+        auto& [bN, bA, bB, _] = buckets[bucketIndex];
         if (bN + 1 <= bucketCountCapacity && bA + a.size() <= bucketCapacity && bB + b.size() <= bucketCapacity) {
           mapping[i] = {bucketIndex, i};
           bN++;
@@ -43,17 +41,16 @@ namespace partition {
         }
       }
       if (bucketIndex >= bucketCount) {
-          std::cout << "More buckets needed than available (" << buckets.size() << ")\n";
-          exit(1);
+          return 1;
       }
     }
 
-    return mapping;
+    return 0;
   }
 
-  std::vector<std::tuple<int, int>> roundRobin(const std::vector<std::string>& A, const std::vector<std::string>& B, int bucketCount, int bucketCapacity, int bucketCountCapacity) {
-    std::vector<std::tuple<int, int>> mapping(A.size(), {0, 0});
-    std::vector<std::tuple<int, int, int>> buckets(bucketCount, {0, 0, 0});
+  int roundRobin(std::vector<std::tuple<int, int>>& mapping, const std::vector<std::string>& A, const std::vector<std::string>& B, int bucketCount, int bucketCapacity, int bucketCountCapacity) {
+    mapping = std::vector<std::tuple<int, int>>(A.size(), {0, 0});
+    std::vector<BucketData> buckets(bucketCount, {0, 0, 0, 0});
     int bucketIndex = 0;
     for (int i = 0; i < A.size(); ++i) {
       const auto& a = A[i];
@@ -63,7 +60,7 @@ namespace partition {
       int boff = 0;
       for (; boff < bucketCount; ++boff) {
         int bi = (bucketIndex + boff) % bucketCount;
-        auto& [bN, bA, bB] = buckets[bi];
+        auto& [bN, bA, bB, _] = buckets[bi];
         if (bN + 1 > bucketCountCapacity || bA + a.size() > bucketCapacity || bB + b.size() > bucketCapacity) {
           continue;
         } else {
@@ -75,18 +72,17 @@ namespace partition {
         }
       }
       if (boff >= bucketCount) {
-          std::cout << "More buckets needed than available (" << buckets.size() << ")\n";
-          exit(1);
+          return 1;
       }
       bucketIndex = (bucketIndex + 1) % bucketCount;
     }
-    return mapping;
+    return 0;
   }
 
   // Greedy approach in which we always put current sequence into one with lowest weight
-  std::vector<std::tuple<int, int>> greedy(const std::vector<std::string>& A, const std::vector<std::string>& B, int bucketCount, int bucketCapacity, int bucketCountCapacity) {
-    std::vector<std::tuple<int, int>> mapping(A.size(), {0, 0});
-    std::vector<std::tuple<int, int, int, int>> buckets(bucketCount, {0, 0, 0, 0});
+  int greedy(std::vector<std::tuple<int, int>>& mapping, const std::vector<std::string>& A, const std::vector<std::string>& B, int bucketCount, int bucketCapacity, int bucketCountCapacity) {
+    mapping = std::vector<std::tuple<int, int>>(A.size(), {0, 0});
+    std::vector<BucketData> buckets(bucketCount, {0, 0, 0, 0});
     for (int i = 0; i < A.size(); ++i) {
       const auto& a = A[i];
       const auto& b = B[i];
@@ -105,8 +101,7 @@ namespace partition {
       }
 
       if (smallestBucket == -1) {
-        std::cout << "Out of buckets\n";
-        exit(1);
+        return 1;
       }
 
       auto& [bN, bA, bB, bW] = buckets[smallestBucket];
@@ -116,7 +111,8 @@ namespace partition {
       bW += weight;
       mapping[i] = {smallestBucket, i};
     }
-    return mapping;
+    return 0;
+    // return mapping;
   }
 }
 
@@ -301,21 +297,21 @@ void SWAlgorithm::checkSequenceSizes(IPUAlgoConfig& algoconfig, const std::vecto
   }
 }
 
-std::vector<std::tuple<int, int>> SWAlgorithm::fillBuckets(const std::vector<std::string>& A, const std::vector<std::string>& B) {
-  return fillBuckets(algoconfig, A, B);
+std::vector<std::tuple<int, int>> SWAlgorithm::fillBuckets(const std::vector<std::string>& A, const std::vector<std::string>& B, int& err) {
+  return fillBuckets(algoconfig, A, B, err);
 }
 
-std::vector<std::tuple<int, int>> SWAlgorithm::fillBuckets(IPUAlgoConfig& algoconfig,const std::vector<std::string>& A, const std::vector<std::string>& B) {
+std::vector<std::tuple<int, int>> SWAlgorithm::fillBuckets(IPUAlgoConfig& algoconfig,const std::vector<std::string>& A, const std::vector<std::string>& B, int& err) {
   std::vector<std::tuple<int, int>> bucket_pairs;
   switch (algoconfig.fillAlgo) {
   case partition::Algorithm::fillFirst:
-    bucket_pairs = partition::fillFirst(A, B, algoconfig.tilesUsed, algoconfig.bufsize, algoconfig.maxBatches);
+    err = partition::fillFirst(bucket_pairs, A, B, algoconfig.tilesUsed, algoconfig.bufsize, algoconfig.maxBatches);
     break;
   case partition::Algorithm::roundRobin:
-    bucket_pairs = partition::roundRobin(A, B, algoconfig.tilesUsed, algoconfig.bufsize, algoconfig.maxBatches);
+    err = partition::roundRobin(bucket_pairs, A, B, algoconfig.tilesUsed, algoconfig.bufsize, algoconfig.maxBatches);
     break;
   case partition::Algorithm::greedy:
-    bucket_pairs = partition::greedy(A, B, algoconfig.tilesUsed, algoconfig.bufsize, algoconfig.maxBatches);
+    err = partition::greedy(bucket_pairs, A, B, algoconfig.tilesUsed, algoconfig.bufsize, algoconfig.maxBatches);
     break;
   }
   return bucket_pairs;
@@ -468,7 +464,14 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
   }
   #endif
 
-  auto mapping = fillBuckets(algoconfig, A, B);
+  int errval = 0;
+  auto mapping = fillBuckets(algoconfig, A, B, errval);
+
+  if (errval) {
+    std::cout << "Bucket filling failed.";
+    exit(1);
+  }
+
   std::vector<std::tuple<int, int, int>> buckets(algoconfig.tilesUsed, {0, 0, 0});
 
   seqMapping = std::vector<int>(A.size(), 0);

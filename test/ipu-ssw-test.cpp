@@ -376,7 +376,9 @@ TEST(PartitioningTest, FillFull) {
     b.push_back(std::string("A", maxAB));
   }
 
-  auto buckets = driver.fillBuckets(a, b);
+  int errval = 0;
+  auto buckets = driver.fillBuckets(a, b, errval);
+  EXPECT_EQ(errval, 0);
 }
 
 TEST(PrepareTest, simple) {
