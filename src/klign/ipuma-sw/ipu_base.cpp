@@ -142,6 +142,7 @@ IPUAlgorithm::IPUAlgorithm(SWConfig config) : config(config) {
     }
 
     device = std::move(*it);
+    PLOGD << "Attached to IPU ID: " << device.getId();
     target = device.getTarget();
 }
 
