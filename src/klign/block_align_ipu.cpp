@@ -1,4 +1,5 @@
 #include <plog/Log.h>
+#undef LOG
 
 #include "ssw.hpp"
 #include "klign.hpp"
@@ -97,6 +98,7 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
                                local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL,
                                [](int sender_rank, vector<string> A, vector<string> B) {
                                  PLOGD << "Launching rpc on " << rank_me() << " from " << sender_rank;
+                                 PLOGD << "Sent " << A.size() << " comparisons to compare_local";
                                  getDriver()->compare_local(A, B);
                                  auto res = getDriver()->get_result();
                                  vector<int32_t> sc(res.scores);
@@ -160,32 +162,34 @@ void validate_align_block(future<>& fut, CPUAligner& cpu_aligner, shared_ptr<Ali
       assert(aln_cpu.clen == aln_ipu.clen);
 
       if (aln_cpu.score1 != aln_ipu.score1) {
-        PLOGW.printf("\tmismatch want %d score %d got %d\n", i, aln_cpu.score1, aln_ipu.score1);
+        PLOGW.printf("\tmismatch want %d score %d got %d", i, aln_cpu.score1, aln_ipu.score1);
       }
 
       if (aln_cpu.cstart != aln_ipu.cstart || aln_cpu.cstop != aln_ipu.cstop ||
           aln_cpu.rstart != aln_ipu.rstart || aln_cpu.rstop != aln_ipu.rstop || 
           aln_cpu.identity != aln_ipu.identity) {
-        PLOGW.printf("mismatch A/B: %s / %s\n", al_copy->read_seqs[i].c_str(), al_copy->ctg_seqs[i].c_str());
+        PLOGW.printf("mismatch A/B: %s / %s", al_copy->read_seqs[i].c_str(), al_copy->ctg_seqs[i].c_str());
         if (aln_cpu.cstart != aln_ipu.cstart) {
-          PLOGW.printf("\tmismatch want %d cstart %d got %d\n", i, aln_cpu.cstart, aln_ipu.cstart);
+          PLOGW.printf("\tmismatch want %d cstart %d got %d", i, aln_cpu.cstart, aln_ipu.cstart);
         }
         if (aln_cpu.cstop != aln_ipu.cstop) {
-          PLOGW.printf("\tmismatch want %d cstop %d got %d\n", i, aln_cpu.cstop, aln_ipu.cstop);
+          PLOGW.printf("\tmismatch want %d cstop %d got %d", i, aln_cpu.cstop, aln_ipu.cstop);
         }
         if (aln_cpu.rstart != aln_ipu.rstart) {
-          PLOGW.printf("\tmismatch want %d rstart %d got %d\n", i, aln_cpu.rstart, aln_ipu.rstart);
+          PLOGW.printf("\tmismatch want %d rstart %d got %d", i, aln_cpu.rstart, aln_ipu.rstart);
         }
         if (aln_cpu.rstop != aln_ipu.rstop) {
-          PLOGW.printf("\tmismatch want %d rstop %d got %d\n", i, aln_cpu.rstop, aln_ipu.rstop);
+          PLOGW.printf("\tmismatch want %d rstop %d got %d", i, aln_cpu.rstop, aln_ipu.rstop);
         }
         if (aln_cpu.identity != aln_ipu.identity) {
-          PLOGW.printf("\tmismatch want %d identity %d got %d\n", i, aln_cpu.identity, aln_ipu.identity);
+          PLOGW.printf("\tmismatch want %d identity %d got %d", i, aln_cpu.identity, aln_ipu.identity);
         }
         mismatches++;
       }
     }
     if (mismatches) {
+      int matches = alns->size() - mismatches;
+      PLOGW << "Total number of mismatches/matches: " << mismatches << "/" << matches;
       exit(1);
     }
 }

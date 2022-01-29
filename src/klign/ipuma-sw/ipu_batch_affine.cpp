@@ -415,7 +415,8 @@ void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::ve
     size_t mapped_i = mapping[i];
     scores[i] = results[mapped_i + 2];
     if (scores[i] >= KLIGN_IPU_MAXAB_SIZE) {
-      printf("Thread %d received wrong data FIRST, try again data=%d, map_translate=%d\n", thread_id, scores[i], mapping[i]);
+      PLOGW << "Expected " << A.size() << " valid comparisons. But got " << i << " instead.";
+      PLOGW.printf("Thread %d received wrong data FIRST, try again data=%d, map_translate=%d\n", thread_id, scores[i], mapping[i]);
       exit(1);
       // goto retry;
     }
