@@ -343,6 +343,9 @@ message(STATUS "added upcxx_utils (${UPCXX_UTILS_VERSION})")
 # include mateidavid's zstr c++ library
 include_directories("zstr/src")
 
+# include logging library
+include_directories("plog/include")
+
 add_subdirectory(src)
 install(
   PROGRAMS upcxx-run-summit

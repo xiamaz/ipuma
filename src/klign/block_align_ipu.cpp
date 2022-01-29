@@ -1,3 +1,5 @@
+#include <plog/Log.h>
+
 #include "ssw.hpp"
 #include "klign.hpp"
 #include "kmer.hpp"
@@ -51,17 +53,17 @@ void insert_ipu_result_block(shared_ptr<AlignBlockData> aln_block_data, Alns *al
   for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
     Aln &aln = aln_block_data->kernel_alns[i];
     if (convertIpuToAln(aln, scores[i], a_range[i], b_range[i])){
-      SWARN("Conversion of IPU to Aln failed");
+      PLOGW << "Conversion of IPU to Aln failed";
       exit(1);
     }
     aln.identity = 100 * aln.score1 / aln_block_data->aln_scoring.match / aln.rlen;
     // aln.identity = (unsigned)100 * (unsigned)ssw_aln.sw_score / (unsigned)aln_scoring.match / (unsigned)aln.rlen;
     if (aln.identity < 0) {
-      printf("[%d]\tnegative identity\n", rank_me());
-      printf("[%d]\tA/B %s / %s\n",rank_me(), aln_block_data->read_seqs[i].c_str(), aln_block_data->ctg_seqs[i].c_str());
-      printf("[%d]\t%d\n",rank_me(), 100 * aln.score1);
-      printf("[%d]\t%d\n", rank_me(), aln_block_data->aln_scoring.match);
-      printf("[%d]\t%d\n", rank_me(), aln.rlen);
+      PLOGW.printf("[%d]\tnegative identity\n", rank_me());
+      PLOGW.printf("[%d]\tA/B %s / %s\n",rank_me(), aln_block_data->read_seqs[i].c_str(), aln_block_data->ctg_seqs[i].c_str());
+      PLOGW.printf("[%d]\t%d\n",rank_me(), 100 * aln.score1);
+      PLOGW.printf("[%d]\t%d\n", rank_me(), aln_block_data->aln_scoring.match);
+      PLOGW.printf("[%d]\t%d\n", rank_me(), aln.rlen);
       // std::ofstream oa("./dump_a.txt");
       // std::ofstream oa_len("./dump_a_len.txt");
       // std::ofstream ob("./dump_b.txt");
@@ -94,23 +96,22 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
   auto [sc, ar, br] = rpc(
                                local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL,
                                [](int sender_rank, vector<string> A, vector<string> B) {
-                                 cout << "Launching rpc on " << rank_me() << " from " << sender_rank << endl;
+                                 PLOGD << "Launching rpc on " << rank_me() << " from " << sender_rank;
                                  getDriver()->compare_local(A, B);
                                  auto res = getDriver()->get_result();
                                  vector<int32_t> sc(res.scores);
                                  vector<int32_t> ar(res.a_range_result);
                                  vector<int32_t> br(res.b_range_result);
-                                 cout << "Exiting rpc on " << rank_me() << " from " << sender_rank << endl;
+                                 PLOGD << "Exiting rpc on " << rank_me() << " from " << sender_rank;
                                  return make_tuple(sc, ar, br);
                                },
                                local_team().rank_me(), aln_block_data->ctg_seqs, aln_block_data->read_seqs)
                                .wait();
-  // cout << sc.size() << " " << endl;
   insert_ipu_result_block(aln_block_data, alns, ar, br, sc);
 
   return execute_in_thread_pool([]() { });
   // auto [scores, mismatches, a_range, b_range] = fuu2.wait();
-  // return rpc(local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL, [](){ cout << "done" << endl; });
+  // return rpc(local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL, [](){ PLOGD << "done"; });
 }
 
 void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
@@ -159,27 +160,27 @@ void validate_align_block(future<>& fut, CPUAligner& cpu_aligner, shared_ptr<Ali
       assert(aln_cpu.clen == aln_ipu.clen);
 
       if (aln_cpu.score1 != aln_ipu.score1) {
-        printf("\tmismatch want %d score %d got %d\n", i, aln_cpu.score1, aln_ipu.score1);
+        PLOGW.printf("\tmismatch want %d score %d got %d\n", i, aln_cpu.score1, aln_ipu.score1);
       }
 
       if (aln_cpu.cstart != aln_ipu.cstart || aln_cpu.cstop != aln_ipu.cstop ||
           aln_cpu.rstart != aln_ipu.rstart || aln_cpu.rstop != aln_ipu.rstop || 
           aln_cpu.identity != aln_ipu.identity) {
-        printf("mismatch A/B: %s / %s\n", al_copy->read_seqs[i].c_str(), al_copy->ctg_seqs[i].c_str());
+        PLOGW.printf("mismatch A/B: %s / %s\n", al_copy->read_seqs[i].c_str(), al_copy->ctg_seqs[i].c_str());
         if (aln_cpu.cstart != aln_ipu.cstart) {
-          printf("\tmismatch want %d cstart %d got %d\n", i, aln_cpu.cstart, aln_ipu.cstart);
+          PLOGW.printf("\tmismatch want %d cstart %d got %d\n", i, aln_cpu.cstart, aln_ipu.cstart);
         }
         if (aln_cpu.cstop != aln_ipu.cstop) {
-          printf("\tmismatch want %d cstop %d got %d\n", i, aln_cpu.cstop, aln_ipu.cstop);
+          PLOGW.printf("\tmismatch want %d cstop %d got %d\n", i, aln_cpu.cstop, aln_ipu.cstop);
         }
         if (aln_cpu.rstart != aln_ipu.rstart) {
-          printf("\tmismatch want %d rstart %d got %d\n", i, aln_cpu.rstart, aln_ipu.rstart);
+          PLOGW.printf("\tmismatch want %d rstart %d got %d\n", i, aln_cpu.rstart, aln_ipu.rstart);
         }
         if (aln_cpu.rstop != aln_ipu.rstop) {
-          printf("\tmismatch want %d rstop %d got %d\n", i, aln_cpu.rstop, aln_ipu.rstop);
+          PLOGW.printf("\tmismatch want %d rstop %d got %d\n", i, aln_cpu.rstop, aln_ipu.rstop);
         }
         if (aln_cpu.identity != aln_ipu.identity) {
-          printf("\tmismatch want %d identity %d got %d\n", i, aln_cpu.identity, aln_ipu.identity);
+          PLOGW.printf("\tmismatch want %d identity %d got %d\n", i, aln_cpu.identity, aln_ipu.identity);
         }
         mismatches++;
       }
@@ -201,8 +202,6 @@ void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vecto
     // Normal
     shared_ptr<AlignBlockData> aln_block_data = make_shared<AlignBlockData>(kernel_alns, ctg_seqs, read_seqs, max_clen, max_rlen, read_group_id, cpu_aligner.aln_scoring);
     auto aln_block_copy = copyAlignBlock(aln_block_data);
-    assert(kernel_alns.empty());
-    assert(max_clen != 0);
     active_kernel_fut = ipu_align_block(aln_block_data, alns);
     active_kernel_fut.wait();
 

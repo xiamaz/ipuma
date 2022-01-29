@@ -8,3 +8,6 @@
 [submodule "test/googletest"]
 	path = test/googletest
 	url = https://github.com/google/googletest/
+[submodule "plog"]
+	path = plog
+	url = https://github.com/SergiusTheBest/plog.git

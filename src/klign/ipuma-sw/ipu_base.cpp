@@ -1,3 +1,5 @@
+#include <plog/Log.h>
+
 #include <linux/limits.h>
 #include <string>
 #include <stdexcept>
@@ -107,7 +109,7 @@ std::string get_selfpath() {
 inline void addCodelets(Graph& graph) {
     auto selfPath = get_selfpath();
     auto rootPath = std::string(dirname(dirname(&selfPath[0])));
-    std::cout << rootPath << "\n";
+    PLOGD << "Loading codelets from "<< rootPath << "/bin/codelets/algoipu.gp";
     graph.addCodelets(rootPath + "/bin/codelets/algoipu.gp");
 }
 
@@ -121,7 +123,6 @@ inline int extractScoreSW(Engine& engine, const std::string& sA, const std::stri
     engine.readTensor("s-read", &*S.begin(), &*S.end());
     engine.readTensor("d-read", &*D.begin(), &*D.end());
 
-    // std::cout << S.toString() << std::endl;
     auto [x, y] = S.argmax();
     return S(x, y);
 }
@@ -130,13 +131,14 @@ IPUAlgorithm::IPUAlgorithm(SWConfig config) : config(config) {
     auto manager = poplar::DeviceManager::createDeviceManager();
     // Attempt to attach to a single IPU:
     auto devices = manager.getDevices(poplar::TargetType::IPU, 1);
-    std::cout << "Trying to attach to IPU\n";
+    PLOGD << "Trying to attach to IPU";
     auto it = std::find_if(devices.begin(), devices.end(), [](poplar::Device &device) {
        return device.attach();
     });
 
     if (it == devices.end()) {
-      std::cerr << "Error attaching to device\n";
+      PLOGW << "Error attaching to device";
+      exit(1);
     }
 
     device = std::move(*it);

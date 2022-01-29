@@ -40,6 +40,17 @@
  form.
 */
 
+// add custom logging library
+#include <plog/Log.h>
+#include <plog/Initializers/RollingFileInitializer.h>
+#include <plog/Appenders/ConsoleAppender.h>
+#include <plog/Formatters/TxtFormatter.h>
+
+#ifdef LOG
+#undef LOG  // this is needed to remove warning from upcxx-utils logger redefining LOG
+#endif
+// add here so everything from it will not shadow other libraries
+
 #include "options.hpp"
 
 #include <sys/stat.h>
@@ -534,6 +545,17 @@ bool Options::load(int argc, char **argv) {
   }
 
   auto logger_t = chrono::high_resolution_clock::now();
+
+  {
+    std::string plogname = "per_rank/ipuma_" + std::to_string(rank_me()) + ".log";
+    static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender; // Create the 2nd appender.
+    plog::init(plog::debug, plogname.c_str()).addAppender(&consoleAppender);
+    // auto ret = link("per_rank/", plogname.c_str());
+    // if (ret != 0) {
+    //   SWARN("Could not hard link ", plogname, " to per_rank/\n");
+    // }
+  }
+
   if (upcxx::local_team().rank_me() == 0) {
     // open 1 log per node
     // all have logs in per_rank

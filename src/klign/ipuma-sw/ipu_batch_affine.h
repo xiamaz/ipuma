@@ -80,11 +80,13 @@ class SWAlgorithm : public IPUAlgorithm {
   std::vector<int32_t> scores;
   std::vector<int32_t> a_range_result;
   std::vector<int32_t> b_range_result;
+  int thread_id;
 
   IPUAlgoConfig algoconfig;
  public:
 
   SWAlgorithm(SWConfig config, IPUAlgoConfig algoconfig);
+  SWAlgorithm(SWConfig config, IPUAlgoConfig algoconfig, int thread_id);
 
   static std::vector<std::tuple<int, int>> fillBuckets(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B, int& err);
   std::vector<std::tuple<int, int>> fillBuckets(const std::vector<std::string>& A, const std::vector<std::string>& B, int& err);
