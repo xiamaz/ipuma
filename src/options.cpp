@@ -549,7 +549,7 @@ bool Options::load(int argc, char **argv) {
   {
     std::string plogname = "per_rank/ipuma_" + std::to_string(rank_me()) + ".log";
     static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender; // Create the 2nd appender.
-    plog::init(plog::debug, plogname.c_str()).addAppender(&consoleAppender);
+    plog::init(plog::debug, plogname.c_str(), 0, 0).addAppender(&consoleAppender);
     // auto ret = link("per_rank/", plogname.c_str());
     // if (ret != 0) {
     //   SWARN("Could not hard link ", plogname, " to per_rank/\n");
