@@ -82,8 +82,8 @@ class SWAlgorithm : public IPUAlgorithm {
   std::vector<int32_t> b_range_result;
   int thread_id;
 
-  IPUAlgoConfig algoconfig;
  public:
+  IPUAlgoConfig algoconfig;
 
   SWAlgorithm(SWConfig config, IPUAlgoConfig algoconfig);
   SWAlgorithm(SWConfig config, IPUAlgoConfig algoconfig, int thread_id);
@@ -96,6 +96,8 @@ class SWAlgorithm : public IPUAlgorithm {
 
   // Local Buffers
   void compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B);
+
+  void refetch();
 
   // Remote bufffer
   void prepared_remote_compare(int32_t* inputs_begin,  int32_t* inputs_end, int32_t* results_begin, int32_t* results_end);

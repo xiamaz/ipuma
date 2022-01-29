@@ -315,6 +315,10 @@ std::vector<std::tuple<int, int>> SWAlgorithm::fillBuckets(IPUAlgoConfig& algoco
   return bucket_pairs;
 }
 
+void SWAlgorithm::refetch() {
+  engine->run(1);
+}
+
 void SWAlgorithm::prepared_remote_compare(int32_t* inputs_begin, int32_t* inputs_end, int32_t* results_begin, int32_t* results_end) {
   // We have to reconnect the streams to new memory locations as the destination will be in a shared memroy region.
   engine->connectStream(HOST_STREAM_CONCAT, inputs_begin);
