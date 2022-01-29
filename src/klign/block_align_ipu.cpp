@@ -23,31 +23,6 @@ ipu::batchaffine::IPUAlgoConfig algoconfig = {
     KLIGN_IPU_TILES, KLIGN_IPU_MAXAB_SIZE, KLIGN_IPU_MAX_BATCHES, KLIGN_IPU_BUFSIZE, ipu::batchaffine::VertexType::assembly,
 };
 
-//   void checkResults(const vector<Alignment>& alns_ipu) {
-//     AlnScoring aln_scoring = {.match = ALN_MATCH_SCORE,
-//                             .mismatch = ALN_MISMATCH_COST,
-//                             .gap_opening = ALN_GAP_OPENING_COST,
-//                             .gap_extending = ALN_GAP_EXTENDING_COST,
-//                             .ambiguity = ALN_AMBIGUITY_COST};
-
-//     vector<Alignment> alns(queries.size());
-//     for (int i = 0; i < queries.size(); ++i) {
-//       auto reflen = refs[i].size();
-//       auto qlen = queries[i].size();
-//       auto masklen = max((int)min(reflen, qlen) / 2, 15);
-//       Aligner cpu_aligner(aln_scoring.match, aln_scoring.mismatch, aln_scoring.gap_opening, aln_scoring.gap_extending,
-//                           aln_scoring.ambiguity);
-//       Filter ssw_filter(true, false, 0, 32767);
-//       cpu_aligner.Align(queries[i].c_str(), refs[i].c_str(), reflen, ssw_filter, &alns[i], masklen);
-
-//       EXPECT_EQ(alns[i].sw_score, alns_ipu[i].sw_score) << i << ": IPU score result does not match CPU SSW";
-//       EXPECT_EQ(alns[i].ref_begin, alns_ipu[i].ref_begin) << i << ": IPU reference start result does not match CPU SSW";
-//       EXPECT_EQ(alns[i].ref_end, alns_ipu[i].ref_end) << i << ": IPU reference end result does not match CPU SSW";
-//       EXPECT_EQ(alns[i].query_begin, alns_ipu[i].query_begin) << i << ": IPU query start result does not match CPU SSW";
-//       EXPECT_EQ(alns[i].query_end, alns_ipu[i].query_end) << i << ": IPU query end result does not match CPU SSW";
-//     }
-//   }
-// };
 std::tuple<int16_t, int16_t> convertPackedRange(int32_t packed) {
     int16_t begin = packed & 0xffff;
     int16_t end = packed >> 16;
@@ -234,37 +209,3 @@ void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vecto
     validate_align_block(active_kernel_fut, cpu_aligner, aln_block_copy, aln_block_data->kernel_alns);
   }
 }
-
-// void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vector<string> &ctg_seqs, vector<string> &read_seqs,
-//                         Alns *alns, future<> &active_kernel_fut, int read_group_id, int max_clen, int max_rlen,
-//                         IntermittentTimer &aln_kernel_timer) {
-//   while (!active_kernel_fut.ready() || kernel_alns.empty()) {
-//     progress();
-//   }
-//   if (!kernel_alns.empty()) {
-//     assert(active_kernel_fut.ready() && "active_kernel_fut should already be ready");
-//     active_kernel_fut.wait();  // should be ready already
-//     shared_ptr<AlignBlockData> aln_block_data =
-//         make_shared<AlignBlockData>(kernel_alns, ctg_seqs, read_seqs, max_clen, max_rlen, read_group_id,
-//         cpu_aligner.aln_scoring);
-
-//     if (cpu_aligner.ssw_filter.report_cigar) {
-//       SWARN("Not implemented cigar for IPUs");
-//       exit(1);
-//     }
-
-//     assert(kernel_alns.empty());
-//     active_kernel_fut = ipu_align_block(aln_block_data, alns, cpu_aligner.ssw_filter.report_cigar, aln_kernel_timer);
-//     // // for now, the GPU alignment doesn't support cigars
-//     // if (cpu_aligner.ssw_filter.report_cigar) {
-//     //   SWARN("Not implemented cigar for IPUs");
-//     //   exit(1);
-//     //   // active_kernel_fut = gpu_align_block(aln_block_data, alns, cpu_aligner.ssw_filter.report_cigar, aln_kernel_timer);
-//     // } else {
-//     //   active_kernel_fut = cpu_aligner.ssw_align_block(aln_block_data, alns);
-//     // }
-//   } else {
-//     SWARN("Block shall not be empty");
-//     exit(1);
-//   }
-// }}
