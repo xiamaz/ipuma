@@ -17,10 +17,6 @@ using namespace upcxx_utils;
 upcxx::global_ptr<int32_t> g_input;
 upcxx::global_ptr<int32_t> g_output;
 
-ipu::batchaffine::IPUAlgoConfig algoconfig = {
-    KLIGN_IPU_TILES, KLIGN_IPU_MAXAB_SIZE, KLIGN_IPU_MAX_BATCHES, KLIGN_IPU_BUFSIZE, ipu::batchaffine::VertexType::assembly,
-};
-
 std::tuple<int16_t, int16_t> convertPackedRange(int32_t packed) {
   int16_t begin = packed & 0xffff;
   int16_t end = packed >> 16;
@@ -66,8 +62,9 @@ void insert_ipu_result_block(shared_ptr<AlignBlockData> aln_block_data, Alns *al
 upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns) {
   std::vector<int> mapping;
 
-  ipu::batchaffine::SWAlgorithm::prepare_remote(algoconfig, aln_block_data->ctg_seqs, aln_block_data->read_seqs,
-                                                &g_input.local()[0], &g_input.local()[algoconfig.getInputBufferSize32b()], mapping);
+  auto algoconfig = ALGO_CONFIGURATION;
+
+  ipu::batchaffine::SWAlgorithm::prepare_remote(algoconfig, aln_block_data->ctg_seqs, aln_block_data->read_seqs, &g_input.local()[0], &g_input.local()[algoconfig.getInputBufferSize32b()], mapping);
   rpc(
       local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL,
       [](int sender_rank, std::vector<int> mapping, int comparisons, global_ptr<int32_t> in, global_ptr<int32_t> out) {
@@ -123,11 +120,12 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
 }
 
 void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
-  SWARN("Initialize global array\n");
-  size_t inputs_size = algoconfig.getInputBufferSize32b();
-  size_t results_size = algoconfig.getTotalNumberOfComparisons() * 3;
-  g_input = new_array<int32_t>(inputs_size);
-  g_output = new_array<int32_t>(results_size);
+ SWARN("Initialize global array\n");
+ auto algoconfig = ALGO_CONFIGURATION;
+ size_t inputs_size = algoconfig.getInputBufferSize32b();
+ size_t results_size = algoconfig.getTotalNumberOfComparisons() * 3;
+ g_input = new_array<int32_t>(inputs_size);
+ g_output = new_array<int32_t>(results_size);
 }
 
 void cleanup_aligner() {

@@ -70,23 +70,7 @@ void init_devices() {
     if (local_team().rank_me() < KLIGN_IPUS_LOCAL) {
       CPUAligner cpu_aln(false);
       auto& aln_scoring = cpu_aln.aln_scoring;
-      init_single_ipu(
-          {
-              .gapInit = -(ALN_GAP_OPENING_COST - ALN_GAP_EXTENDING_COST),
-              .gapExtend = -ALN_GAP_EXTENDING_COST,
-              .matchValue = ALN_MATCH_SCORE,
-              .mismatchValue = -ALN_MISMATCH_COST,
-              .ambiguityValue = -ALN_AMBIGUITY_COST,
-              .similarity = swatlib::Similarity::nucleicAcid,
-              .datatype = swatlib::DataType::nucleicAcid,
-          },
-          {
-            KLIGN_IPU_TILES,
-            KLIGN_IPU_MAXAB_SIZE,
-            KLIGN_IPU_MAX_BATCHES,
-            KLIGN_IPU_BUFSIZE,
-            ipu::batchaffine::VertexType::cpp,
-            ipu::batchaffine::partition::Algorithm::fillFirst});
+      init_single_ipu(SW_CONFIGURATION, ALGO_CONFIGURATION);
       std::cout << "Aquired IPU, rank " << local_team().rank_me() << std::endl;
     }
   });
