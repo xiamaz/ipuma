@@ -396,7 +396,7 @@ void SWAlgorithm::prepared_remote_compare(int32_t* inputs_begin, int32_t* inputs
 }
 
 void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B, bool errcheck) {
-  std::vector<int> mapping;
+  std::vector<int> mapping(A.size(), 0);
   size_t inputs_size = algoconfig.getInputBufferSize32b();
   std::vector<int32_t> inputs(inputs_size + 4);
 
@@ -407,7 +407,7 @@ void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::ve
   inputs[1] = 0xDEADBEEF;
   inputs[inputs_size + (1) + 1] = 0xFEEBDAED;
   inputs[inputs_size + (1) + 2] = 0xFEEBDAED;
-  prepare_remote(algoconfig, A, B, &*inputs.begin() + 2, &*inputs.end() - 2, mapping);
+  prepare_remote(algoconfig, A, B, &*inputs.begin() + 2, &*inputs.end() - 2, mapping.data());
 
   if (inputs[0] != 0xDEADBEEF || inputs[1] != 0xDEADBEEF) {
     std::vector<int32_t> subset(inputs.begin(), inputs.begin() + 10);
@@ -497,7 +497,7 @@ std::string SWAlgorithm::printTensors() {
   return graphstream.str();
 }
 
-void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B, int32_t* inputs_begin, int32_t* inputs_end, std::vector<int>& seqMapping) {
+void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B, int32_t* inputs_begin, int32_t* inputs_end, int * seqMapping) {
   swatlib::TickTock preprocessTimer;
   preprocessTimer.tick();
   checkSequenceSizes(algoconfig, A, B);
@@ -527,7 +527,7 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
 
   std::vector<std::tuple<int, int, int>> buckets(algoconfig.tilesUsed, {0, 0, 0});
 
-  seqMapping = std::vector<int>(A.size(), 0);
+  // seqMapping = std::vector<int>(A.size(), 0);
   size_t a_offset = getAOffset(algoconfig);
   size_t alen_offset = getAlenOffset(algoconfig);
   size_t b_offset = getBOffset(algoconfig);

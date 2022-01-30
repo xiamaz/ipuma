@@ -109,7 +109,7 @@ class SWAlgorithm : public IPUAlgorithm {
 
   // Remote bufffer
   void prepared_remote_compare(int32_t* inputs_begin,  int32_t* inputs_end, int32_t* results_begin, int32_t* results_end);
-  static void prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B,  int32_t* inputs_begin,  int32_t* inputs_end, std::vector<int>& deviceMapping);
+  static void prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B,  int32_t* inputs_begin,  int32_t* inputs_end, int * deviceMapping);
 };
 }  // namespace batchaffine
 }  // namespace ipu

@@ -14,6 +14,7 @@ using namespace std;
 using namespace upcxx;
 using namespace upcxx_utils;
 
+upcxx::global_ptr<int> g_mapping;
 upcxx::global_ptr<int32_t> g_input;
 upcxx::global_ptr<int32_t> g_output;
 
@@ -41,7 +42,7 @@ inline void convertIpuToAln(shared_ptr<AlignBlockData> aln_block_data, Aln &aln,
   aln.read_group_id = aln_block_data->read_group_id;
 }
 
-void insert_ipu_result_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns, std::vector<int32_t> &a_range,
+void insert_ipu_result_block(shared_ptr<AlignBlockData> aln_block_data, std::vector<int32_t> &a_range,
                              std::vector<int32_t> &b_range, std::vector<int32_t> &scores) {
   for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
     Aln &aln = aln_block_data->kernel_alns[i];
@@ -56,76 +57,83 @@ void insert_ipu_result_block(shared_ptr<AlignBlockData> aln_block_data, Alns *al
     }
     aln_block_data->alns->add_aln(aln);
   }
-  alns->append(*(aln_block_data->alns));
 }
 
-upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns) {
-  std::vector<int> mapping;
+upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns, IntermittentTimer &aln_kernel_timer) {
+    auto algoconfig = ALGO_CONFIGURATION;
 
-  auto algoconfig = ALGO_CONFIGURATION;
-
-  ipu::batchaffine::SWAlgorithm::prepare_remote(algoconfig, aln_block_data->ctg_seqs, aln_block_data->read_seqs, &g_input.local()[0], &g_input.local()[algoconfig.getInputBufferSize32b()], mapping);
-  rpc(
-      local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL,
-      [](int sender_rank, std::vector<int> mapping, int comparisons, global_ptr<int32_t> in, global_ptr<int32_t> out) {
-        PLOGD << "Launching rpc on " << rank_me() << " from " << sender_rank;
-        auto driver = getDriver();
-        driver->prepared_remote_compare(&in.local()[0], &in.local()[driver->algoconfig.getInputBufferSize32b()], &out.local()[0],
-                                        &out.local()[driver->algoconfig.getTotalNumberOfComparisons() * 3]);
-        // reorder results based on mapping
-        int nthTry = 0;
-        int sc;
-      retry:
-        nthTry++;
-        sc = 0;
-        for (size_t i = 0; i < mapping.size(); ++i) {
-          size_t mapped_i = mapping[i];
-          auto score = out.local()[mapped_i];
-          if (score >= KLIGN_IPU_MAXAB_SIZE) {
-            // PLOGW << "ERROR Expected " << A.size() << " valid comparisons. But got " << i << " instead.";
-            PLOGW.printf("ERROR Received wrong data FIRST, try again data=%d, map_translate=%d\n", score, mapped_i);
+    ipu::batchaffine::SWAlgorithm::prepare_remote(algoconfig, aln_block_data->ctg_seqs, aln_block_data->read_seqs,
+                                                  &g_input.local()[0], &g_input.local()[algoconfig.getInputBufferSize32b()],
+                                                  &g_mapping.local()[0]);
+    aln_kernel_timer.start();
+    auto fut = rpc(
+        local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL,
+        [](int sender_rank, global_ptr<int> mapping, int comparisons, global_ptr<int32_t> in, global_ptr<int32_t> out) {
+          PLOGD << "Launching rpc on " << rank_me() << " from " << sender_rank;
+          auto driver = getDriver();
+          driver->prepared_remote_compare(&in.local()[0], &in.local()[driver->algoconfig.getInputBufferSize32b()], &out.local()[0],
+                                          &out.local()[driver->algoconfig.getTotalNumberOfComparisons() * 3]);
+          // reorder results based on mapping
+          int nthTry = 0;
+          int sc;
+        retry:
+          nthTry++;
+          sc = 0;
+          for (size_t i = 0; i < comparisons; ++i) {
+            size_t mapped_i = mapping.local()[i];
+            auto score = out.local()[mapped_i];
+            if (score >= KLIGN_IPU_MAXAB_SIZE) {
+              // PLOGW << "ERROR Expected " << A.size() << " valid comparisons. But got " << i << " instead.";
+              PLOGW.printf("ERROR Received wrong data FIRST, try again data=%d, map_translate=%d\n", score, mapped_i);
+              driver->refetch();
+              goto retry;
+            }
+            sc += score > 0;
+          }
+          if ((double)sc / comparisons < 0.5) {
+            PLOGW << "ERROR Too many scores are 0, retry number " << (nthTry - 1);
             driver->refetch();
             goto retry;
           }
-          sc += score > 0;
-        }
-        if ((double)sc / comparisons < 0.5) {
-          PLOGW << "ERROR Too many scores are 0, retry number " << (nthTry - 1);
-          driver->refetch();
-          goto retry;
-        }
-        PLOGD << "Exiting rpc on " << rank_me() << " from " << sender_rank;
-      },
-      local_team().rank_me(), mapping, aln_block_data->ctg_seqs.size(), g_input, g_output)
-      .wait();
+          PLOGD << "Exiting rpc on " << rank_me() << " from " << sender_rank;
+        }, local_team().rank_me(), g_mapping, aln_block_data->ctg_seqs.size(), g_input, g_output);
+  fut = fut.then([alns = alns, aln_block_data]() {
+    PLOGW.printf("merge data on %d from RPC on %d", rank_me(), local_team().rank_me() % KLIGN_IPUS_LOCAL);
+    // aln_kernel_timer.stop();
+    auto algoconfig = ALGO_CONFIGURATION;
+    const auto totalComparisonsCount = algoconfig.getTotalNumberOfComparisons();
 
-  const auto totalComparisonsCount = algoconfig.getTotalNumberOfComparisons();
+    vector<int32_t> ars(algoconfig.getTotalNumberOfComparisons());
+    vector<int32_t> brs(algoconfig.getTotalNumberOfComparisons());
+    vector<int32_t> scs(algoconfig.getTotalNumberOfComparisons());
 
-  vector<int32_t> ars(algoconfig.getTotalNumberOfComparisons());
-  vector<int32_t> brs(algoconfig.getTotalNumberOfComparisons());
-  vector<int32_t> scs(algoconfig.getTotalNumberOfComparisons());
+    size_t a_range_offset = scs.size();
+    size_t b_range_offset = a_range_offset + ars.size();
 
-  size_t a_range_offset = scs.size();
-  size_t b_range_offset = a_range_offset + ars.size();
-
-  for (size_t i = 0; i < mapping.size(); ++i) {
-    size_t mapped_i = mapping[i];
-    scs[i] = g_output.local()[mapped_i];
-    ars[i] = g_output.local()[a_range_offset + mapped_i];
-    brs[i] = g_output.local()[b_range_offset + mapped_i];
-  }
-
-  insert_ipu_result_block(aln_block_data, alns, ars, brs, scs);
-  return upcxx_utils::execute_in_thread_pool([]() {});
+    int * mapping = g_mapping.local();
+  for (size_t i = 0; i < aln_block_data->ctg_seqs.size(); ++i) {
+      size_t mapped_i = mapping[i];
+      scs[i] = g_output.local()[mapped_i];
+      ars[i] = g_output.local()[a_range_offset + mapped_i];
+      brs[i] = g_output.local()[b_range_offset + mapped_i];
+    }
+    insert_ipu_result_block(aln_block_data, ars, brs, scs);
+  });
+  fut = fut.then([alns = alns, aln_block_data]() {
+    PLOGD << "appending and returning "<< aln_block_data->alns->size();
+    alns->append(*(aln_block_data->alns));
+  });
+  return fut;
 }
 
 void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
- SWARN("Initialize global array\n");
- auto algoconfig = ALGO_CONFIGURATION;
- size_t inputs_size = algoconfig.getInputBufferSize32b();
- size_t results_size = algoconfig.getTotalNumberOfComparisons() * 3;
- g_input = new_array<int32_t>(inputs_size);
- g_output = new_array<int32_t>(results_size);
+  SWARN("Initialize global array\n");
+  auto algoconfig = ALGO_CONFIGURATION;
+  size_t inputs_size = algoconfig.getInputBufferSize32b();
+  size_t results_size = algoconfig.getTotalNumberOfComparisons() * 3;
+  g_input = new_array<int32_t>(inputs_size);
+  g_output = new_array<int32_t>(results_size);
+  g_mapping = new_array<int>(algoconfig.getTotalNumberOfComparisons());
 }
 
 void cleanup_aligner() {
@@ -133,6 +141,7 @@ void cleanup_aligner() {
   SWARN("Delete global array\n");
   delete_array(g_input);
   delete_array(g_output);
+  delete_array(g_mapping);
 }
 
 shared_ptr<AlignBlockData> copyAlignBlock(shared_ptr<AlignBlockData> al) {
@@ -192,11 +201,11 @@ void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vecto
     if (do_test) {
       PLOGW << "Do parity check";
       auto aln_block_copy = copyAlignBlock(aln_block_data);
-      active_kernel_fut = ipu_align_block(aln_block_data, alns);
+      active_kernel_fut = ipu_align_block(aln_block_data, alns, aln_kernel_timer);
       active_kernel_fut.wait();
       validate_align_block(active_kernel_fut, cpu_aligner, aln_block_copy, aln_block_data->kernel_alns);
     } else {
-      active_kernel_fut = ipu_align_block(aln_block_data, alns);
+      active_kernel_fut = ipu_align_block(aln_block_data, alns, aln_kernel_timer);
     }
   }
 }
