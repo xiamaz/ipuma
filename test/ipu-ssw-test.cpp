@@ -197,11 +197,11 @@ TEST_F(ParityTest, UseMultiAssembly) {
   checkResults(alns_ipu);
 }
 
-TEST(IPUDev, DISABLED_TestStriping) {
+TEST(IPUDev, TestStriping) {
   int numWorkers = 1;
-  int numCmps = 30;
-  int strlen = 20;
-  int bufsize = 1000;
+  int numCmps = 6;
+  int strlen = 6;
+  int bufsize = 6;
   auto driver = ipu::batchaffine::SWAlgorithm({
     .gapInit = 0,
     .gapExtend = -ALN_GAP_EXTENDING_COST,
@@ -210,19 +210,25 @@ TEST(IPUDev, DISABLED_TestStriping) {
     .ambiguityValue = -ALN_AMBIGUITY_COST,
     .similarity = swatlib::Similarity::nucleicAcid,
     .datatype = swatlib::DataType::nucleicAcid,
-  }, {numWorkers, strlen, numCmps, bufsize, ipu::batchaffine::VertexType::stripedasm});
+  }, {numWorkers, strlen, numCmps, bufsize, ipu::batchaffine::VertexType::multistriped});
 
   vector<string> queries, refs;
   for (int i = 0; i < 1; ++i) {
-    queries.push_back("AAAA");
-    refs.push_back("AAAA");
+    queries.push_back(std::string(strlen, 'A'));
+    refs.push_back(std::string(strlen, 'A'));
+    // queries.push_back("AAAAAAAAAA");
+    // refs.push_back("AAAAAAAAAA");
   }
+  // std::cout << queries[0] << "\n";
   // refs[1] = "TTAAAA";
   // refs[4] = "TTTTTT";
+
   driver.compare_local(queries, refs);
   auto aln_results = driver.get_result();
+  // std::cout << driver.printTensors();
   std::cout << "Aln results:\n";
-  std::cout << swatlib::printVector(aln_results.scores) << "\n";
+  std::cout << swatlib::printVectorD(aln_results.scores) << "\n";
+  std::cout << swatlib::printVectorD(aln_results.a_range_result) << "\n";
 }
 
 TEST(IPUDev, DISABLED_MultiVertexSeparate) {
@@ -401,7 +407,7 @@ TEST(PrepareTest, simple) {
     B.push_back(std::string("A", maxAB));
   }
 
-  std::vector<int32_t> inputs(config.getInputBufferSize() + 2);
+  std::vector<int32_t> inputs(config.getInputBufferSize32b() + 2);
   std::vector<int> mapping;
 
   inputs[0] = 0xDEADBEEF;

@@ -38,9 +38,9 @@ const std::string HOST_STREAM_CONCAT = "host-stream-concat";
 const std::string IPU_AFFINE_CPP = "SWAffine";
 const std::string IPU_AFFINE_ASM = "SWAffineAsm";
 
-enum class VertexType { cpp, assembly, multi, multiasm, stripedasm };
+enum class VertexType { cpp, assembly, multi, multiasm, stripedasm, multistriped };
 
-static const std::string typeString[] = {"SWAffine", "SWAffineAsm", "MultiSWAffine", "MultiSWAffineAsm", "StripedSWAffineAsm"};
+static const std::string typeString[] = {"SWAffine", "SWAffineAsm", "MultiSWAffine", "MultiSWAffineAsm", "StripedSWAffineAsm", "MultiSWStriped"};
 std::string vertexTypeToString(VertexType v);
 
 struct IPUAlgoConfig {
@@ -56,16 +56,17 @@ struct IPUAlgoConfig {
    * 
    * @return int 
    */
-  int getTotalNumberOfComparisons();
+  int getTotalNumberOfComparisons() const;
 
   /**
    * @brief This calculated the required buffer size for input strings across all vertices.
    * 
    * @return int 
    */
-  int getTotalBufferSize();
-
-  int getInputBufferSize();
+  int getTotalBufferSize8b() const;
+  int getTotalBufferSize32b() const;
+  int getLenBufferSize32b() const;
+  int getInputBufferSize32b() const;
 };
 
 struct BlockAlignmentResults {
@@ -82,11 +83,18 @@ class SWAlgorithm : public IPUAlgorithm {
   std::vector<int32_t> b_range_result;
   int thread_id;
 
+  static size_t getAOffset(const IPUAlgoConfig& config);
+  static size_t getBOffset(const IPUAlgoConfig& config);
+  static size_t getAlenOffset(const IPUAlgoConfig& config);
+  static size_t getBlenOffset(const IPUAlgoConfig& config);
+
  public:
   IPUAlgoConfig algoconfig;
 
   SWAlgorithm(SWConfig config, IPUAlgoConfig algoconfig);
   SWAlgorithm(SWConfig config, IPUAlgoConfig algoconfig, int thread_id);
+
+  std::string printTensors();
 
   static std::vector<std::tuple<int, int>> fillBuckets(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B, int& err);
   std::vector<std::tuple<int, int>> fillBuckets(const std::vector<std::string>& A, const std::vector<std::string>& B, int& err);
@@ -95,7 +103,7 @@ class SWAlgorithm : public IPUAlgorithm {
   BlockAlignmentResults get_result();
 
   // Local Buffers
-  void compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B);
+  void compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B, bool errcheck = true);
 
   void refetch();
 

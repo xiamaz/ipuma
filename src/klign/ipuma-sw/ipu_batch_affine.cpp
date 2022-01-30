@@ -131,11 +131,14 @@ long long getCellCount(const std::vector<std::string>& A, const std::vector<std:
   return cellCount;
 }
 
-int IPUAlgoConfig::getTotalNumberOfComparisons() { return tilesUsed * maxBatches; }
+int IPUAlgoConfig::getTotalNumberOfComparisons() const { return tilesUsed * maxBatches; }
 
-int IPUAlgoConfig::getTotalBufferSize() { return tilesUsed * bufsize; }
+int IPUAlgoConfig::getLenBufferSize32b() const {return getTotalNumberOfComparisons() * 2;};
 
-int IPUAlgoConfig::getInputBufferSize() { return std::ceil(getTotalBufferSize() / 4) * 2 + getTotalNumberOfComparisons() * 2 * 2; }
+int IPUAlgoConfig::getTotalBufferSize8b() const { return tilesUsed * bufsize; }
+int IPUAlgoConfig::getTotalBufferSize32b() const { return std::ceil(static_cast<double>(getTotalBufferSize8b()) / 4.0); }
+
+int IPUAlgoConfig::getInputBufferSize32b() const { return getTotalBufferSize32b() * 2 + getLenBufferSize32b() * 2; }
 
 std::string vertexTypeToString(VertexType v) { return typeString[static_cast<int>(v)]; }
 
@@ -150,8 +153,8 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
   auto target = graph.getTarget();
   int tileCount = target.getTilesPerIPU();
 
-  Tensor As = graph.addVariable(INT, {activeTiles, static_cast<size_t>(std::ceil(bufSize / 4))}, "A");
-  Tensor Bs = graph.addVariable(INT, {activeTiles, static_cast<size_t>(std::ceil(bufSize / 4))}, "B");
+  Tensor As = graph.addVariable(INT, {activeTiles, static_cast<size_t>(std::ceil(static_cast<double>(bufSize) / 4.0))}, "A");
+  Tensor Bs = graph.addVariable(INT, {activeTiles, static_cast<size_t>(std::ceil(static_cast<double>(bufSize) / 4.0))}, "B");
 
   Tensor Alens = graph.addVariable(INT, {activeTiles, maxBatches * 2}, "Alen");
   Tensor Blens = graph.addVariable(INT, {activeTiles, maxBatches * 2}, "Blen");
@@ -165,6 +168,7 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
     case VertexType::assembly: sType = FLOAT; break;
     case VertexType::multi: sType = INT; workerMultiplier = target.getNumWorkerContexts(); break;
     case VertexType::multiasm: sType = FLOAT; workerMultiplier = target.getNumWorkerContexts(); break;
+    case VertexType::multistriped: sType = INT; break;  // all threads are going to work on the same problem
     case VertexType::stripedasm: sType = HALF; break;
   }
 
@@ -219,6 +223,10 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
                                     });
     graph.setFieldSize(vtx["C"], maxAB * workerMultiplier);
     graph.setFieldSize(vtx["bG"], maxAB * workerMultiplier);
+    if (vtype == VertexType::multistriped) {
+      graph.setFieldSize(vtx["tS"], target.getNumWorkerContexts());
+      graph.setFieldSize(vtx["locks"], target.getNumWorkerContexts());
+    }
     graph.setTileMapping(vtx, tileIndex);
     graph.setPerfEstimate(vtx, 1);
   }
@@ -230,6 +238,12 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
   auto device_stream_concat = graph.addDeviceToHostFIFO(STREAM_CONCAT_ALL, INT, Scores.numElements() + ARanges.numElements() + BRanges.numElements());
   auto h2d_prog_concat = program::Sequence({poplar::program::Copy(host_stream_concat, inputs_tensor)});
   auto d2h_prog_concat = program::Sequence({poplar::program::Copy(outputs_tensor, device_stream_concat)});
+
+  auto print_tensors_prog = program::Sequence({
+    // program::PrintTensor("Alens", Alens),
+    // program::PrintTensor("Blens", Blens),
+    program::PrintTensor("Scores", Scores),
+  });
 #ifdef IPUMA_DEBUG
  program::Sequence  main_prog;
   main_prog.add(program::Execute(frontCs));
@@ -249,7 +263,6 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
 
 SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig, int thread_id) : IPUAlgorithm(config), algoconfig(algoconfig), thread_id(thread_id) {
   const auto totalComparisonsCount = algoconfig.getTotalNumberOfComparisons();
-  const auto inputBufferSize = algoconfig.getTotalBufferSize();
 
   scores.resize(totalComparisonsCount);
   a_range_result.resize(totalComparisonsCount);
@@ -315,6 +328,22 @@ std::vector<std::tuple<int, int>> SWAlgorithm::fillBuckets(IPUAlgoConfig& algoco
   return bucket_pairs;
 }
 
+size_t SWAlgorithm::getAOffset(const IPUAlgoConfig& config) {
+  return 0;
+}
+
+size_t SWAlgorithm::getAlenOffset(const IPUAlgoConfig& config) {
+  return config.getTotalBufferSize32b();
+}
+
+size_t SWAlgorithm::getBOffset(const IPUAlgoConfig& config) {
+  return getAlenOffset(config) + config.getLenBufferSize32b();
+}
+
+size_t SWAlgorithm::getBlenOffset(const IPUAlgoConfig& config) {
+  return getBOffset(config) + config.getTotalBufferSize32b();
+}
+
 void SWAlgorithm::refetch() {
   engine->run(1);
 }
@@ -336,8 +365,8 @@ void SWAlgorithm::prepared_remote_compare(int32_t* inputs_begin, int32_t* inputs
   auto timeInner = static_cast<double>(cyclesInner) / getTarget().getTileClockFrequency();
   PLOGD << "Poplar cycle count: " << cyclesInner << "/" << cyclesOuter << " computed time (in s): " << timeInner << "/" << timeOuter;
 
-  size_t alen_offset = std::ceil(algoconfig.getTotalBufferSize() / 4);
-  size_t blen_offset = alen_offset + (algoconfig.getTotalNumberOfComparisons() * 2) + std::ceil(algoconfig.getTotalBufferSize() / 4);
+  size_t alen_offset = getAlenOffset(algoconfig);
+  size_t blen_offset = getBlenOffset(algoconfig);
 
   int32_t* a_len = inputs_begin + alen_offset;
   int32_t* b_len = inputs_begin + blen_offset;
@@ -357,7 +386,7 @@ void SWAlgorithm::prepared_remote_compare(int32_t* inputs_begin, int32_t* inputs
 
   // dataCount - actual data content transferred
   // totalTransferSize - size of buffer being transferred
-  double totalTransferSize = algoconfig.getTotalBufferSize() * 2;
+  double totalTransferSize = algoconfig.getInputBufferSize32b() * 4;
 
   auto transferTime = timeOuter - timeInner;
   auto transferInfoRatio = static_cast<double>(dataCount) / totalTransferSize * 100;
@@ -366,9 +395,9 @@ void SWAlgorithm::prepared_remote_compare(int32_t* inputs_begin, int32_t* inputs
 #endif
 }
 
-void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B) {
+void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::vector<std::string>& B, bool errcheck) {
   std::vector<int> mapping;
-  size_t inputs_size = algoconfig.getInputBufferSize();
+  size_t inputs_size = algoconfig.getInputBufferSize32b();
   std::vector<int32_t> inputs(inputs_size + 4);
 
   size_t results_size = scores.size() + a_range_result.size() + b_range_result.size();
@@ -412,6 +441,8 @@ void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::ve
     exit(1);
   }
 
+  // PLOGD << "Unordered results: " << swatlib::printVector(std::vector<int32_t>(results.begin() + 2, results.begin() + scores.size() + 2));
+
   // reorder results based on mapping
   int nthTry = 0;
   int sc;
@@ -421,11 +452,13 @@ void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::ve
   for (size_t i = 0; i < mapping.size(); ++i) {
     size_t mapped_i = mapping[i];
     scores[i] = results[mapped_i + 2];
-    if (scores[i] >= KLIGN_IPU_MAXAB_SIZE) {
-      PLOGW << "ERROR Expected " << A.size() << " valid comparisons. But got " << i << " instead.";
-      PLOGW.printf("ERROR Thread %d received wrong data FIRST, try again data=%d, map_translate=%d\n", thread_id, scores[i], mapping[i] + 2);
-      engine->run(1);
-      goto retry;
+    if (errcheck) {
+      if (scores[i] >= algoconfig.maxAB) {
+        PLOGW << "ERROR Expected " << A.size() << " valid comparisons. But got " << i << " instead.";
+        PLOGW.printf("ERROR Thread %d received wrong data FIRST, try again data=%d, map_translate=%d\n", thread_id, scores[i], mapping[i] + 2);
+        refetch();
+        goto retry;
+      }
     }
     sc += scores[i] > 0;
     size_t a_range_offset = scores.size();
@@ -433,10 +466,12 @@ void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::ve
     a_range_result[i] = results[a_range_offset + mapped_i + 2];
     b_range_result[i] = results[b_range_offset + mapped_i + 2];
   }
-  if ((double)sc/A.size() < 0.5) {
-    PLOGW << "ERROR Too many scores are 0, retry number " << (nthTry - 1);
-    engine->run(1);
-    goto retry;
+  if (errcheck) {
+    if ((double)sc/A.size() < 0.5) {
+      PLOGW << "ERROR Too many scores are 0, retry number " << (nthTry - 1);
+      refetch();
+      goto retry;
+    }
   }
   // return;
 // retry:
@@ -453,6 +488,13 @@ void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::ve
 //     a_range_result[i] = unord_a_range[mapping[i]];
 //     b_range_result[i] = unord_b_range[mapping[i]];
 //   }
+}
+
+std::string SWAlgorithm::printTensors() {
+  std::stringstream graphstream;
+  engine->setPrintTensorStream(graphstream);
+  engine->run(2);
+  return graphstream.str();
 }
 
 void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<std::string>& A, const std::vector<std::string>& B, int32_t* inputs_begin, int32_t* inputs_end, std::vector<int>& seqMapping) {
@@ -486,10 +528,10 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
   std::vector<std::tuple<int, int, int>> buckets(algoconfig.tilesUsed, {0, 0, 0});
 
   seqMapping = std::vector<int>(A.size(), 0);
-  size_t a_offset = 0;
-  size_t alen_offset = std::ceil(algoconfig.getTotalBufferSize() / 4);
-  size_t b_offset = alen_offset + (algoconfig.getTotalNumberOfComparisons() * 2);
-  size_t blen_offset = b_offset + std::ceil(algoconfig.getTotalBufferSize() / 4);
+  size_t a_offset = getAOffset(algoconfig);
+  size_t alen_offset = getAlenOffset(algoconfig);
+  size_t b_offset = getBOffset(algoconfig);
+  size_t blen_offset = getBlenOffset(algoconfig);
 
   int8_t* a = (int8_t*)inputs_begin;
   int32_t* a_len = inputs_begin + alen_offset;
