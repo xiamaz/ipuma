@@ -108,6 +108,39 @@ TEST_P(AlgoPerformance, StressTest) {
   EXPECT_EQ(invalidRuns, 0) << " invalid runs encountered in total " << numBatches << " runs";
 }
 
+TEST_P(AlgoPerformance, RunOptimalWithReverse) {
+  auto algotype = GetParam();
+  int numWorkers = 8832;
+  int numCmps = 40;
+  int strlen = 150;
+  if (algotype == ipu::batchaffine::VertexType::multi || algotype == ipu::batchaffine::VertexType::multiasm) {
+    numWorkers = numWorkers / 6;
+    numCmps = numCmps * 6;
+  }
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, algotype});
+
+  // generate input strings
+  int numBatches = 10;
+  for (int n = 0; n < numBatches; ++n) {
+    refs = {};
+    queries = {};
+    for (int i = 0; i < numCmps * numWorkers; ++i) {
+      refs.push_back(string(strlen, 'A'));
+      queries.push_back(string(strlen, 'A'));
+    }
+    driver.compare_local(queries, refs, false);
+    auto results = driver.get_result();
+    for (int i = 0; i < numCmps * numWorkers; ++i) {
+      EXPECT_EQ(results.scores[i], strlen) << "n: " << n << " mismatching score";
+    }
+  }
+  // auto alns = driver.get_result();
+  // for (int i = 0; i < numWorkers * numCmps; ++i) {
+  //   std::cout << alns.scores[i] << " ";
+  // }
+  // std::cout << "\n";
+}
+
 TEST_P(AlgoPerformance, RunOptimal) {
   auto algotype = GetParam();
   int numWorkers = 8832;
