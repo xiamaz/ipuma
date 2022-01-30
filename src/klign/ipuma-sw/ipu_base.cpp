@@ -130,7 +130,7 @@ inline int extractScoreSW(Engine& engine, const std::string& sA, const std::stri
 IPUAlgorithm::IPUAlgorithm(SWConfig config) : config(config) {
     auto manager = poplar::DeviceManager::createDeviceManager();
     // Attempt to attach to a single IPU:
-    auto devices = manager.getDevices(poplar::TargetType::IPU, 1);
+    auto devices = manager.getDevices(poplar::TargetType::IPU, KLIGN_MULTI_IPU_N);
     PLOGD << "Trying to attach to IPU";
     auto it = std::find_if(devices.begin(), devices.end(), [](poplar::Device &device) {
        return device.attach();

@@ -13,6 +13,10 @@
 #define KLIGN_IPUS_LOCAL 1
 #endif
 
+#ifndef KLIGN_MULTI_IPU_N
+#define KLIGN_MULTI_IPU_N 1
+#endif
+
 #ifndef KLIGN_IPU_MAX_BATCHES
 #define KLIGN_IPU_MAX_BATCHES 300
 #endif
