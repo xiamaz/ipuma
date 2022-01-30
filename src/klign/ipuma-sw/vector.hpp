@@ -34,6 +34,17 @@ inline std::string printVector(std::vector<T> v) {
     return ss.str();
 }
 
+template<typename T>
+inline std::string printVectorD(std::vector<T> v) {
+    std::stringstream ss;
+    ss << "Vector[";
+    for (auto& vv : v) {
+        ss << vv << ",";
+    }
+    ss << "]";
+    return ss.str();
+}
+
 }
 
 #endif // VECTOR_HELPER_H

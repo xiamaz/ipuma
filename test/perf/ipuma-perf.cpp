@@ -1,3 +1,6 @@
+#include <plog/Log.h>
+#undef LOG
+
 #include <sstream>
 #include <string>
 #include <vector>
@@ -64,6 +67,47 @@ protected:
 class AlgoPerformance : public PerformanceBase, public ::testing::WithParamInterface<ipu::batchaffine::VertexType> {
 };
 
+TEST_P(AlgoPerformance, StressTest) {
+  auto algotype = GetParam();
+  int numWorkers = 8832;
+  int numCmps = 40;
+  int strlen = 150;
+  if (algotype == ipu::batchaffine::VertexType::multi || algotype == ipu::batchaffine::VertexType::multiasm) {
+    numWorkers = numWorkers / 6;
+    numCmps = numCmps * 6;
+  }
+  // auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, algotype});
+
+  // generate input strings
+  int invalidRuns = 0;
+  int numBatches = 1000;
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, algotype});
+  for (int n = 0; n < numBatches; ++n) {
+    refs = {};
+    queries = {};
+    for (int i = 0; i < numCmps * numWorkers; ++i) {
+      refs.push_back(string(strlen, 'A'));
+      queries.push_back(string(strlen, 'T'));
+    }
+    driver.compare_local(queries, refs, false);
+    auto results = driver.get_result();
+    bool valid = true;
+    for (int i = 0; i < numCmps * numWorkers; ++i) {
+      if (results.scores[i] != 0) {
+        valid = false;
+        // std::cout << driver.printTensors() << "\n";
+        // exit(1);
+      }
+      // EXPECT_EQ(results.scores[i], 0) << "n: " << n << " mismatching score";
+    }
+    if (!valid) {
+      PLOGW << "Invalid run encountered";
+      invalidRuns++;
+    }
+  }
+  EXPECT_EQ(invalidRuns, 0) << " invalid runs encountered in total " << numBatches << " runs";
+}
+
 TEST_P(AlgoPerformance, RunOptimal) {
   auto algotype = GetParam();
   int numWorkers = 8832;
@@ -84,7 +128,7 @@ TEST_P(AlgoPerformance, RunOptimal) {
       refs.push_back(string(strlen, 'A'));
       queries.push_back(string(strlen, 'T'));
     }
-    driver.compare_local(queries, refs);
+    driver.compare_local(queries, refs, false);
     auto results = driver.get_result();
     for (int i = 0; i < numCmps * numWorkers; ++i) {
       EXPECT_EQ(results.scores[i], 0) << "n: " << n << " mismatching score";
@@ -107,11 +151,11 @@ class PartitionPerformance : public PerformanceBase, public ::testing::WithParam
 };
 
 TEST_P(PartitionPerformance, RealBatches) {
-  int numWorkers = 8832;
-  int numCmps = 20;
+  int numWorkers = 8832 / 6;
+  int numCmps = 100;
   int strlen = 200;
 
-  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, numCmps * strlen, ipu::batchaffine::VertexType::assembly, GetParam()});
+  auto driver = ipu::batchaffine::SWAlgorithm({}, {numWorkers, strlen, numCmps, 8000, ipu::batchaffine::VertexType::multiasm, GetParam()});
   for (auto& [path_a, path_b] : INPUT_BATCHS) {
     refs = loadSequences(path_a);
     queries = loadSequences(path_b);
