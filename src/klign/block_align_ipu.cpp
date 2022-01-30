@@ -112,7 +112,7 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
   //                              .wait();
   std::vector<int> mapping;
 
-  auto algoconfig = getDriver()->algoconfig;
+  auto algoconfig = ALGO_CONFIGURATION;
 
   ipu::batchaffine::SWAlgorithm::prepare_remote(algoconfig, aln_block_data->ctg_seqs, aln_block_data->read_seqs, &g_input.local()[0], &g_input.local()[algoconfig.getInputBufferSize32b()], mapping);
   rpc(
@@ -174,7 +174,7 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
 
 void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
  SWARN("Initialize global array\n");
- auto algoconfig = getDriver()->algoconfig;
+ auto algoconfig = ALGO_CONFIGURATION;
  size_t inputs_size = algoconfig.getInputBufferSize32b();
  size_t results_size = algoconfig.getTotalNumberOfComparisons() * 3;
  g_input = new_array<int32_t>(inputs_size);
