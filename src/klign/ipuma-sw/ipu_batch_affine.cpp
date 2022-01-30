@@ -149,7 +149,6 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
                                          unsigned long bufSize, unsigned long maxBatches,
                                          const swatlib::Matrix<int8_t> similarityData, int gapInit, int gapExt) {
   program::Sequence prog;
-  program::Sequence initProg;
 
   auto target = graph.getTarget();
   int tileCount = target.getTilesPerIPU();
@@ -259,7 +258,7 @@ std::vector<program::Program> buildGraph(Graph& graph, VertexType vtype, unsigne
 #ifdef IPUMA_DEBUG
   addCycleCount(graph, prog, CYCLE_COUNT_OUTER);
 #endif
-  return {prog, initProg, print_tensors_prog};
+  return {prog, d2h_prog_concat};
 }
 
 SWAlgorithm::SWAlgorithm(ipu::SWConfig config, IPUAlgoConfig algoconfig, int thread_id) : IPUAlgorithm(config), algoconfig(algoconfig), thread_id(thread_id) {
@@ -345,13 +344,14 @@ size_t SWAlgorithm::getBlenOffset(const IPUAlgoConfig& config) {
   return getBOffset(config) + config.getTotalBufferSize32b();
 }
 
+void SWAlgorithm::refetch() {
+  engine->run(1);
+}
+
 void SWAlgorithm::prepared_remote_compare(int32_t* inputs_begin, int32_t* inputs_end, int32_t* results_begin, int32_t* results_end) {
   // We have to reconnect the streams to new memory locations as the destination will be in a shared memroy region.
-  engine->connectStream(HOST_STREAM_CONCAT, inputs_begin, inputs_end);
-  engine->connectStream(STREAM_CONCAT_ALL, results_begin, results_end);
-
-  std::stringstream graphstream;
-  engine->setPrintTensorStream(graphstream);
+  engine->connectStream(HOST_STREAM_CONCAT, inputs_begin);
+  engine->connectStream(STREAM_CONCAT_ALL, results_begin);
 
   swatlib::TickTock t;
   t.tick();
@@ -359,7 +359,6 @@ void SWAlgorithm::prepared_remote_compare(int32_t* inputs_begin, int32_t* inputs
   t.tock();
 
 #ifdef IPUMA_DEBUG
-  PLOGD << "Print tensor: " << graphstream.str();
   auto cyclesOuter = getTotalCycles(*engine, CYCLE_COUNT_OUTER);
   auto cyclesInner = getTotalCycles(*engine, CYCLE_COUNT_INNER);
   auto timeOuter = static_cast<double>(cyclesOuter) / getTarget().getTileClockFrequency();
@@ -376,19 +375,10 @@ void SWAlgorithm::prepared_remote_compare(int32_t* inputs_begin, int32_t* inputs
   // auto cellCount = getCellCount(A, B);
   uint64_t cellCount = 0;
   uint64_t dataCount = 0;
-  int validComparisons = 0;
-  int emptyComparisons = 0;
   for (size_t i = 0; i < algoconfig.getTotalNumberOfComparisons(); i++) {
     cellCount += a_len[2*i] * b_len[2*i];
     dataCount += a_len[2*i] + b_len[2*i];
-    if (a_len[2*i] == 0 || b_len[2*i] == 0) {
-      ++emptyComparisons;
-    } else {
-      ++validComparisons;
-    }
   }
-
-  PLOGD << "Total number of valid comparisons: " << validComparisons << " empty comparisons: " << emptyComparisons;
   
   double GCUPSOuter = static_cast<double>(cellCount) / timeOuter / 1e9;
   double GCUPSInner = static_cast<double>(cellCount) / timeInner / 1e9;
@@ -417,7 +407,6 @@ void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::ve
   inputs[1] = 0xDEADBEEF;
   inputs[inputs_size + (1) + 1] = 0xFEEBDAED;
   inputs[inputs_size + (1) + 2] = 0xFEEBDAED;
-
   prepare_remote(algoconfig, A, B, &*inputs.begin() + 2, &*inputs.end() - 2, mapping);
 
   if (inputs[0] != 0xDEADBEEF || inputs[1] != 0xDEADBEEF) {
@@ -455,37 +444,35 @@ void SWAlgorithm::compare_local(const std::vector<std::string>& A, const std::ve
   // PLOGD << "Unordered results: " << swatlib::printVector(std::vector<int32_t>(results.begin() + 2, results.begin() + scores.size() + 2));
 
   // reorder results based on mapping
-  std::stringstream graphstream;
-  int numZeros = 0;
-  int slept = false;
+  int nthTry = 0;
+  int sc;
+  retry:
+  nthTry++;
+  sc = 0;
   for (size_t i = 0; i < mapping.size(); ++i) {
     size_t mapped_i = mapping[i];
     scores[i] = results[mapped_i + 2];
     if (errcheck) {
-      if (scores[i] > algoconfig.maxAB) {
-        PLOGW << "Expected " << A.size() << " valid comparisons. But got " << i << " instead.";
-        PLOGW.printf("Thread %d received wrong data FIRST, try again data=%d, map_translate=%d\n", thread_id, scores[i], mapping[i]);
-        goto broke;
-        // goto retry;
-      } else if (scores[i] == 0) {
-        numZeros++;
-      }
-      if (numZeros > 100) {
-        PLOGW << "Too many zeros. Very suspicious " << numZeros << " index at: " << i << " mapped_i at: " << mapped_i;
-        goto broke;
+      if (scores[i] >= algoconfig.maxAB) {
+        PLOGW << "ERROR Expected " << A.size() << " valid comparisons. But got " << i << " instead.";
+        PLOGW.printf("ERROR Thread %d received wrong data FIRST, try again data=%d, map_translate=%d\n", thread_id, scores[i], mapping[i] + 2);
+        refetch();
+        goto retry;
       }
     }
+    sc += scores[i] > 0;
     size_t a_range_offset = scores.size();
     size_t b_range_offset = a_range_offset + a_range_result.size();
     a_range_result[i] = results[a_range_offset + mapped_i + 2];
     b_range_result[i] = results[b_range_offset + mapped_i + 2];
   }
-  return;
-broke:
-  engine->setPrintTensorStream(graphstream);
-  engine->run(2);
-  PLOGW << "Print tensor: " << graphstream.str();
-  exit(1);
+  if (errcheck) {
+    if ((double)sc/A.size() < 0.5) {
+      PLOGW << "ERROR Too many scores are 0, retry number " << (nthTry - 1);
+      refetch();
+      goto retry;
+    }
+  }
   // return;
 // retry:
 //   prepared_remote_compare(a.data(), a_len.data(), b.data(), b_len.data(), unord_scores.data(), unord_mismatches.data(), unord_a_range.data(),
@@ -574,8 +561,6 @@ void SWAlgorithm::prepare_remote(IPUAlgoConfig& algoconfig, const std::vector<st
   }
 
   preprocessTimer.tock();
-
-  PLOGD << "Total mapping size: " << mapping.size();
 
 #ifdef IPUMA_DEBUG
   int emptyBuckets = 0;
