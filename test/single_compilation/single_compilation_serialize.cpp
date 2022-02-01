@@ -214,8 +214,6 @@ int main(int argc, char *argv[]) {
   // ------------------------------------------------------------------------------------
   // EXECUTABLE
   // ------------------------------------------------------------------------------------
-
-
   OptionFlags optionss{{"exchange.streamBufferOverlap", "none"},
                       {"exchange.enablePrefetch", "true"}};
 

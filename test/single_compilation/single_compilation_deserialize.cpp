@@ -35,6 +35,10 @@ public:
 #include <poplar/DebugContext.hpp>
 
 #include <boost/optional.hpp>
+// #include <capnp/compat/json.h>
+// #include <capnp/message.h>
+// #include <capnp/serialize.h>
+// #include <kj/std/iostream.h>
 
 #include <algorithm>
 #include <iostream>
@@ -91,127 +95,85 @@ std::ostream &operator<<(std::ostream &os, const std::vector<float> &values) {
 
 int main(int argc, char *argv[]) {
 
-    cout << "one" << endl;
-    // char data[10000];
-    // std::fstream infile; 
-    // infile.open("./resources/tensor.json");
-    // infile >> data;
-    // std::cout << data;
+  cout << "one" << endl;
 
-    const unsigned elements = 8;
-    const unsigned repeat = 5;
-    const unsigned numIpus = 1;
+  const unsigned elements = 8;
+  const unsigned repeat = 5;
+  const unsigned numIpus = 1;
 
-    // Obtain list of available devices
-    auto manager = DeviceManager::createDeviceManager();
-    auto devices = manager.getDevices(poplar::TargetType::IPU, numIpus);
-    if (devices.empty()) {
-        throw poplar::poplar_error("No devices found");
+  // Obtain list of available devices
+  auto manager = DeviceManager::createDeviceManager();
+  auto devices = manager.getDevices(poplar::TargetType::IPU, numIpus);
+  if (devices.empty()) {
+      throw poplar::poplar_error("No devices found");
+  }
+
+  cout << "two" << endl;
+  // Connect to first available device
+  auto it = std::find_if(devices.begin(), devices.end(), [](Device &d){ return d.attach(); });
+  if (it == devices.end()) {
+      throw poplar::poplar_error("Could not attach to any device");
+  }
+
+  auto device = std::move(*it);
+
+  cout << "three" << endl;
+
+  // https://docs.graphcore.ai/projects/tensorflow1-user-guide/en/latest/tensorflow/compiling.html
+
+  std::fstream infile;
+  infile.open("./resources/exec.poplar_exec");
+  cout << "four" << endl;
+  if (!infile.is_open()) {
+    cout << "nooooooo!" << endl;
+  }
+
+  OptionFlags options{{"exchange.streamBufferOverlap", "none"},
+                    {"exchange.enablePrefetch", "true"}};
+
+  // https://github.com/graphcore/popart/blob/15ce5b098638dc34a4d41ae2a7621003458df798/willow/src/popx/executablexserialization.cpp
+
+  cout << "five" << endl;
+  auto exe = Executable::deserialize(infile);
+  cout << "six" << endl;
+
+  Engine eng(std::move(exe), options);
+  cout << "seven" << endl;
+  
+  eng.load(device);
+  // eng.run(0);
+
+  // Connect output
+  std::vector<float> hOut(elements);
+  eng.connectStream("out", hOut.data(),
+                    std::next(hOut.data(), hOut.size()));
+
+  boost::optional<float> previous;
+  for (float in : {1.0f, 3.0f, 3.0f, 9.0f, 9.0f}) {
+    if (previous != in) {
+      std::cout << "Set input callback\n";
+      std::unique_ptr<FillCallback> cb{new FillCallback(in, elements)};
+      eng.connectStreamToCallback("in", std::move(cb));
     }
 
-    cout << "two" << endl;
-    // Connect to first available device
-    auto it = std::find_if(devices.begin(), devices.end(), [](Device &d){ return d.attach(); });
-    if (it == devices.end()) {
-        throw poplar::poplar_error("Could not attach to any device");
-    }
-
-    auto device = std::move(*it);
-
-    cout << "three" << endl;
-
-    // https://docs.graphcore.ai/projects/tensorflow1-user-guide/en/latest/tensorflow/compiling.html
-
-    std::fstream infile; 
-    infile.open("./resources/exec.poplar_exec");
-    cout << "four" << endl;
-    if (!infile.is_open()) {
-      cout << "fuck!" << endl;
-    }
-
-    OptionFlags optionss{{"exchange.streamBufferOverlap", "none"},
-                      {"exchange.enablePrefetch", "true"}};
-
-
-
-    // https://github.com/graphcore/popart/blob/15ce5b098638dc34a4d41ae2a7621003458df798/willow/src/popx/executablexserialization.cpp
-
-    cout << "five" << endl;
-
-    infile.tellg();
-
-    Engine eng(Executable::deserialize(infile), optionss);
-
-    eng.load(device);
+    std::cout << "Running\n";
     eng.run(0);
 
+    // Values in output result should be 'in' plus 1
+    float expected = in + 1;
+    auto match_expected =
+        std::bind(std::equal_to<float>(), std::placeholders::_1, expected);
+    bool success = std::all_of(hOut.begin(), hOut.end(), match_expected);
+    if (!success) {
+      std::stringstream ss("Unexpected result. ");
+      ss << "Expected: " << expected << ";\n"
+         << "Actual : " << hOut << "\n";
+      throw std::runtime_error(ss.str());
+    }
 
+    previous = in;
+  }  
 
-
-
-
-
-    // Graph elements
-    // Graph graph(device);
-    // Tensor t = graph.deserializeTensors(infile, SerializationFormat::Binary).front();
-    // // Tensor t = graph.addVariable(FLOAT, {elements}, "data");
-//   graph.setTileMapping(t, 0);
-
-//   graph.addCodelets(__FILE__);
-
-//   ComputeSet cs = graph.addComputeSet();
-//   auto v1 = graph.addVertex(cs, "Increment");
-//   graph.setTileMapping(v1, 0);
-
-//   graph.connect(v1["x"], t);
-//   graph.connect(v1["y"], t);
-
-//   // Streams
-//   auto inStream = graph.addHostToDeviceFIFO("in", FLOAT, t.numElements());
-//   auto outStream = graph.addDeviceToHostFIFO("out", FLOAT, t.numElements());
-
-//   // Program
-//   auto prog = Repeat(
-//       repeat, Sequence({Copy(inStream, t), Execute(cs), Copy(t, outStream)}));
-
-//   // Compile program
-//   OptionFlags options{{"exchange.streamBufferOverlap", "none"},
-//                       {"exchange.enablePrefetch", "true"}};
-//   Engine eng(graph, prog, options);
-//   eng.load(device);
-
-//   // Connect output
-//   std::vector<float> hOut(t.numElements());
-//   eng.connectStream("out", hOut.data(),
-//                     std::next(hOut.data(), hOut.size()));
-
-//   // Run the program multiple times.
-//   // Replace input stream callback when value changes.
-//   boost::optional<float> previous;
-//   for (float in : {1.0f, 3.0f, 3.0f, 9.0f, 9.0f}) {
-//     if (previous != in) {
-//       std::cout << "Set input callback\n";
-//       std::unique_ptr<FillCallback> cb{new FillCallback(in, t.numElements())};
-//       eng.connectStreamToCallback("in", std::move(cb));
-//     }
-
-//     std::cout << "Running\n";
-//     eng.run(0);
-
-//     // Values in output result should be 'in' plus 1
-//     float expected = in + 1;
-//     auto match_expected =
-//         std::bind(std::equal_to<float>(), std::placeholders::_1, expected);
-//     bool success = std::all_of(hOut.begin(), hOut.end(), match_expected);
-//     if (!success) {
-//       std::stringstream ss("Unexpected result. ");
-//       ss << "Expected: " << expected << ";\n"
-//          << "Actual : " << hOut << "\n";
-//       throw std::runtime_error(ss.str());
-//     }
-
-//     previous = in;
-//   }
 
   return 0;
 }
