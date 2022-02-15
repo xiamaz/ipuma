@@ -57,12 +57,12 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 add_definitions(-DIPUMA_DEBUG)
 
-if(ENABLE_POPLAR)
-  add_subdirectory(ipuma-sw)
-  # add_library(IPUMA_LIBRARY "ipuma-sw/matrix.cpp" "ipuma-sw/similarity.cpp" "ipuma-sw/encoding.cpp")
+# if(ENABLE_POPLAR)
+#   add_subdirectory(ipuma-sw)
+#   # add_library(IPUMA_LIBRARY "ipuma-sw/matrix.cpp" "ipuma-sw/similarity.cpp" "ipuma-sw/encoding.cpp")
 
-  set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} IPUMA_LIBRARY poplar)
-endif()
+#   set(MHM2_LINK_LIBRARIES ${MHM2_LINK_LIBRARIES} IPUMA_LIBRARY poplar)
+# endif()
 
 if(ENABLE_CUDA)
   set_property(TARGET KLIGN_LIBRARY PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF)

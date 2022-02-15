@@ -46,9 +46,9 @@
 #include "gpu-utils/gpu_utils.hpp"
 #include "devices_ipu.hpp"
 
-#include "ipuma-sw/driver.hpp"
-#include "ipuma-sw/ipu_base.h"
-#include "ipuma-sw/ipu_batch_affine.h"
+#include "driver.hpp"
+#include "ipu_base.h"
+#include "ipu_batch_affine.h"
 
 #include "aligner_cpu.hpp"
 #include "klign.hpp"

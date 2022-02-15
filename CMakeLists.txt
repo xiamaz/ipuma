@@ -108,34 +108,39 @@ endif()
 option(ENABLE_POPLAR "Enable POPLAR" OFF)
 if(ENABLE_POPLAR)
   add_definitions(-DPOPLAR_ENABLED)
-  include(AddGPLibrary)
-  message(STATUS "Building for IPU with POPLAR")
-  set(POPLIBS_ENABLED_IPU_ARCH_NAMES "cpu;ipu2")
-  # if(NOT DEFINED POPLIBS_ENABLED_IPU_ARCH_NAMES)
-  #     set(POPLIBS_ENABLED_IPU_ARCH_NAMES "cpu;ipu1;ipu2" CACHE STRING
-  #         "The architectures to build the poplibs library objects for")
+  add_subdirectory(ipuma-lib)
+  include_directories(ipuma-lib/src)
+  include_directories(ipuma-lib)
+  include_directories(/)
+
+  # include(AddGPLibrary)
+  # message(STATUS "Building for IPU with POPLAR")
+  # set(POPLIBS_ENABLED_IPU_ARCH_NAMES "cpu;ipu2")
+  # # if(NOT DEFINED POPLIBS_ENABLED_IPU_ARCH_NAMES)
+  # #     set(POPLIBS_ENABLED_IPU_ARCH_NAMES "cpu;ipu1;ipu2" CACHE STRING
+  # #         "The architectures to build the poplibs library objects for")
+  # # endif()
+  # message("Enabled popc architectures: ${POPLIBS_ENABLED_IPU_ARCH_NAMES}")
+  
+  # set(DEFAULT_TEST_VARIANTS "cpu;IpuModel2;")
+  
+  # set(POPC_EXECUTABLE "popc")
+  
+  # # Set up popc flags.
+  # set(POPC_FLAGS -I ${CMAKE_SOURCE_DIR}/include)
+  
+  # if(CMAKE_BUILD_TYPE STREQUAL Debug)
+  #   list(APPEND POPC_FLAGS -g)
+  # elseif(CMAKE_BUILD_TYPE STREQUAL RelWithDebInfo)
+  #   list(APPEND POPC_FLAGS -O3 -g)
+  # else()
+  #   list(APPEND POPC_FLAGS -O3)
   # endif()
-  message("Enabled popc architectures: ${POPLIBS_ENABLED_IPU_ARCH_NAMES}")
   
-  set(DEFAULT_TEST_VARIANTS "cpu;IpuModel2;")
-  
-  set(POPC_EXECUTABLE "popc")
-  
-  # Set up popc flags.
-  set(POPC_FLAGS -I ${CMAKE_SOURCE_DIR}/include)
-  
-  if(CMAKE_BUILD_TYPE STREQUAL Debug)
-    list(APPEND POPC_FLAGS -g)
-  elseif(CMAKE_BUILD_TYPE STREQUAL RelWithDebInfo)
-    list(APPEND POPC_FLAGS -O3 -g)
-  else()
-    list(APPEND POPC_FLAGS -O3)
-  endif()
-  
-  # If requested, optimise the debug builds too.
-  if (OPTIMISE_IPU_DEBUG AND CMAKE_BUILD_TYPE STREQUAL Debug)
-    list(APPEND POPC_FLAGS -O3)
-  endif()
+  # # If requested, optimise the debug builds too.
+  # if (OPTIMISE_IPU_DEBUG AND CMAKE_BUILD_TYPE STREQUAL Debug)
+  #   list(APPEND POPC_FLAGS -O3)
+  # endif()
 endif()
 
 option(MHM2_VECTORS "Test for optimal arch-specific compiler flags" ON)

@@ -5,10 +5,10 @@
 #include "klign.hpp"
 #include "kmer.hpp"
 #include "aligner_cpu.hpp"
-#include "ipuma-sw/driver.hpp"
-#include "ipuma-sw/ipu_batch_affine.h"
-#include "ipuma-sw/ipu_base.h"
-#include "ipuma-sw/ipu_batch_affine.h"
+#include "driver.hpp"
+#include "ipu_batch_affine.h"
+#include "ipu_base.h"
+#include "ipu_batch_affine.h"
 
 using namespace std;
 using namespace upcxx;
@@ -61,9 +61,13 @@ void insert_ipu_result_block(shared_ptr<AlignBlockData> aln_block_data, std::vec
 
 upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns, IntermittentTimer &aln_kernel_timer) {
     auto algoconfig = ALGO_CONFIGURATION;
+    auto swconfig = SW_CONFIGURATION;
 
-    ipu::batchaffine::SWAlgorithm::prepare_remote(algoconfig, aln_block_data->ctg_seqs, aln_block_data->read_seqs,
-                                                  &g_input.local()[0], &g_input.local()[algoconfig.getInputBufferSize32b()],
+    ipu::batchaffine::SWAlgorithm::prepare_remote(swconfig, algoconfig,
+                                                  aln_block_data->ctg_seqs,
+                                                  aln_block_data->read_seqs,
+                                                  &g_input.local()[0],
+                                                  &g_input.local()[algoconfig.getInputBufferSize32b()],
                                                   &g_mapping.local()[0]);
     aln_kernel_timer.start();
     auto fut = rpc(
