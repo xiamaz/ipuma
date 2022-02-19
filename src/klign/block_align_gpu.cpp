@@ -102,7 +102,7 @@ static upcxx::future<> gpu_align_block(shared_ptr<AlignBlockData> aln_block_data
   return fut;
 }
 
-void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
+void init_aligner(AlnScoring &aln_scoring, int rlen_limit, IntermittentTimer &aln_kernel_timer) {
   if (!gpu_utils::gpus_present()) {
     // CPU only
     SWARN("No GPU will be used for alignments");

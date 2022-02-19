@@ -9,6 +9,10 @@
 #include "ipu_batch_affine.h"
 #include "ipu_base.h"
 #include "ipu_batch_affine.h"
+#include <atomic>
+#include <thread>
+#include <queue>
+#include <tuple>
 
 using namespace std;
 using namespace upcxx;
@@ -59,50 +63,46 @@ void insert_ipu_result_block(shared_ptr<AlignBlockData> aln_block_data, std::vec
   }
 }
 
-upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns, IntermittentTimer &aln_kernel_timer) {
-    auto algoconfig = ALGO_CONFIGURATION;
-    auto swconfig = SW_CONFIGURATION;
+std::mutex upload;
+bool done_upload = true;
 
-    ipu::batchaffine::SWAlgorithm::prepare_remote(swconfig, algoconfig,
-                                                  aln_block_data->ctg_seqs,
-                                                  aln_block_data->read_seqs,
-                                                  &g_input.local()[0],
-                                                  &g_input.local()[algoconfig.getInputBufferSize32b()],
-                                                  &g_mapping.local()[0]);
-    aln_kernel_timer.start();
-    auto fut = rpc(
-        local_team(), local_team().rank_me() % KLIGN_IPUS_LOCAL,
-        [](int sender_rank, global_ptr<int> mapping, int comparisons, global_ptr<int32_t> in, global_ptr<int32_t> out) {
-          PLOGD << "Launching rpc on " << rank_me() << " from " << sender_rank;
-          auto driver = getDriver();
-          driver->prepared_remote_compare(&in.local()[0], &in.local()[driver->algoconfig.getInputBufferSize32b()], &out.local()[0],
-                                          &out.local()[driver->algoconfig.getTotalNumberOfComparisons() * 3]);
-          // reorder results based on mapping
-          int nthTry = 0;
-          int sc;
-        retry:
-          nthTry++;
-          sc = 0;
-          for (size_t i = 0; i < comparisons; ++i) {
-            size_t mapped_i = mapping.local()[i];
-            auto score = out.local()[mapped_i];
-            if (score >= KLIGN_IPU_MAXAB_SIZE) {
-              // PLOGW << "ERROR Expected " << A.size() << " valid comparisons. But got " << i << " instead.";
-              PLOGW.printf("ERROR Received wrong data FIRST, try again data=%d, map_translate=%d\n", score, mapped_i);
-              driver->refetch();
-              goto retry;
-            }
-            sc += score > 0;
-          }
-          if ((double)sc / comparisons < 0.5) {
-            PLOGW << "ERROR Too many scores are 0, retry number " << (nthTry - 1);
-            driver->refetch();
-            goto retry;
-          }
-          PLOGD << "Exiting rpc on " << rank_me() << " from " << sender_rank;
-        }, local_team().rank_me(), g_mapping, aln_block_data->ctg_seqs.size(), g_input, g_output);
+upcxx::future<> uprunner;
+bool done_uprunner;
+upcxx::persona progress_persona;
+std::queue<std::tuple<int32_t *, int32_t *, int>> backlog;
+
+upcxx::persona resume_persona;
+bool got_result = true;
+
+upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns, IntermittentTimer &aln_kernel_timer) {
+  auto algoconfig = ALGO_CONFIGURATION;
+  auto swconfig = SW_CONFIGURATION;
+
+  ipu::batchaffine::SWAlgorithm::prepare_remote(swconfig, algoconfig, aln_block_data->ctg_seqs, aln_block_data->read_seqs,
+                                                &g_input.local()[0], &g_input.local()[algoconfig.getInputBufferSize32b()],
+                                                &g_mapping.local()[0]);
+
+  const int ipu_executor_rank = (local_team().rank_me()) % KLIGN_IPUS_LOCAL;
+  PLOGD.printf("Push backlog");
+  rpc(
+      ipu_executor_rank,
+      [](global_ptr<int32_t> in, global_ptr<int32_t> out, int src) {
+        PLOGD.printf("lpc backlog");
+        return progress_persona.lpc([in = in.local(), out = out.local(), src = src] {
+          backlog.push({in, out, src});
+          PLOGD.printf("Backlog pushed");
+        });
+      },
+      g_input, g_output, rank_me())
+      .wait();
+  got_result = false;
+  auto fut = upcxx_utils::execute_in_thread_pool([]() {
+    upcxx::persona_scope scope(resume_persona);
+    PLOGD.printf("Wait for completion of execution semaphore locally");
+    while (!got_result) upcxx::progress();
+  });
   fut = fut.then([alns = alns, aln_block_data]() {
-    PLOGW.printf("merge data on %d from RPC on %d", rank_me(), local_team().rank_me() % KLIGN_IPUS_LOCAL);
+    PLOGD.printf("merge data on %d from RPC on %d", rank_me(), local_team().rank_me() % KLIGN_IPUS_LOCAL);
     // aln_kernel_timer.stop();
     auto algoconfig = ALGO_CONFIGURATION;
     const auto totalComparisonsCount = algoconfig.getTotalNumberOfComparisons();
@@ -114,8 +114,8 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
     size_t a_range_offset = scs.size();
     size_t b_range_offset = a_range_offset + ars.size();
 
-    int * mapping = g_mapping.local();
-  for (size_t i = 0; i < aln_block_data->ctg_seqs.size(); ++i) {
+    int *mapping = g_mapping.local();
+    for (size_t i = 0; i < aln_block_data->ctg_seqs.size(); ++i) {
       size_t mapped_i = mapping[i];
       scs[i] = g_output.local()[mapped_i];
       ars[i] = g_output.local()[a_range_offset + mapped_i];
@@ -124,13 +124,53 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
     insert_ipu_result_block(aln_block_data, ars, brs, scs);
   });
   fut = fut.then([alns = alns, aln_block_data]() {
-    PLOGD << "appending and returning "<< aln_block_data->alns->size();
+    PLOGD << "appending and returning " << aln_block_data->alns->size();
     alns->append(*(aln_block_data->alns));
   });
   return fut;
 }
 
-void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
+void init_aligner(AlnScoring &aln_scoring, int rlen_limit, IntermittentTimer &aln_kernel_timer) {
+  done_uprunner = false;
+  if (rank_me() <= KLIGN_IPUS_LOCAL) {
+    uprunner = upcxx_utils::execute_in_new_thread([&aln_kernel_timer]() {
+      // push progress_persona onto this thread's persona stack
+      upcxx::persona_scope scope(progress_persona);
+      // progress thread drains progress until work is done
+      PLOGD.printf("Start Executer");
+      while (true) {
+        if (backlog.empty() && done_uprunner) {
+          PLOGD.printf("Exit Uploader thread");
+          break;
+        }
+        if (!backlog.empty()) {
+          auto driver = getDriver();
+          if (!driver->buf_has_capacity()) {
+            sched_yield();
+            upcxx::progress();
+            continue;
+          }
+          auto [in, out, src] = backlog.front();
+          backlog.pop();
+          PLOGD.printf("Going to aquire slot");
+          int slot = driver->queue_slot();
+          PLOGD.printf("Going to upload on slot%d", slot);
+          int *inptr = (int *)in;
+          PLOGD.printf("Call uploading slot %d", slot);
+          getDriver()->upload(&inptr[0], &inptr[getDriver()->algoconfig.getInputBufferSize32b()], slot);
+          PLOGD.printf("Called uploading slot %d", slot);
+          aln_kernel_timer.start();
+          driver->prepared_remote_compare(&in[0], &in[driver->algoconfig.getInputBufferSize32b()], &out[0],
+                                          &out[driver->algoconfig.getTotalNumberOfComparisons() * 3], slot);
+          aln_kernel_timer.stop();
+          PLOGD.printf("Execution done");
+          rpc_ff(src, []() { resume_persona.lpc_ff([]() { got_result = true; }); });
+        }
+        sched_yield();
+        upcxx::progress();
+      }
+    });
+  }
   SWARN("Initialize global array\n");
   auto algoconfig = ALGO_CONFIGURATION;
   size_t inputs_size = algoconfig.getInputBufferSize32b();
@@ -142,6 +182,10 @@ void init_aligner(AlnScoring &aln_scoring, int rlen_limit) {
 
 void cleanup_aligner() {
   barrier();
+  if (rank_me() <= KLIGN_IPUS_LOCAL) {
+    progress_persona.lpc([]() { done_uprunner = true; }).wait();
+    uprunner.wait();
+  }
   SWARN("Delete global array\n");
   delete_array(g_input);
   delete_array(g_output);
@@ -181,11 +225,12 @@ void validate_align_block(future<> &fut, CPUAligner &cpu_aligner, shared_ptr<Ali
       if (aln_cpu.cstart != aln_ipu.cstart) {
         PLOGW.printf("\tmismatch want %d cstart %d got %d", i, aln_cpu.cstart, aln_ipu.cstart);
       }
+      exit(1);
     }
-    if (mismatches) {
-      int matches = alns->size() - mismatches;
-      PLOGW << "Total number of mismatches/matches: " << mismatches << "/" << matches;
-    }
+  }
+  if (mismatches) {
+    int matches = alns->size() - mismatches;
+    PLOGW << "Total number of mismatches/matches: " << mismatches << "/" << matches;
   }
 }
 

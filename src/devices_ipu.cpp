@@ -70,7 +70,15 @@ void init_devices() {
     if (local_team().rank_me() < KLIGN_IPUS_LOCAL) {
       CPUAligner cpu_aln(false);
       auto& aln_scoring = cpu_aln.aln_scoring;
-      init_single_ipu(SW_CONFIGURATION, ALGO_CONFIGURATION);
+      static const ipu::batchaffine::IPUAlgoConfig algo_conf = {
+            KLIGN_IPU_TILES,
+            KLIGN_IPU_MAXAB_SIZE,
+            KLIGN_IPU_MAX_BATCHES,
+            KLIGN_IPU_BUFSIZE,
+            ipu::batchaffine::VertexType::assembly,
+            ipu::partition::Algorithm::greedy
+      };
+      init_single_ipu(SW_CONFIGURATION, algo_conf);
       std::cout << "Aquired IPU, rank " << local_team().rank_me() << std::endl;
     }
   });
