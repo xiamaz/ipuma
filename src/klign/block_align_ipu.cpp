@@ -145,7 +145,7 @@ void init_aligner(AlnScoring &aln_scoring, int rlen_limit, IntermittentTimer &al
         }
         if (!backlog.empty()) {
           auto driver = getDriver();
-          if (!driver->buf_has_capacity()) {
+          if (!driver->slot_available()) {
             sched_yield();
             upcxx::progress();
             continue;
