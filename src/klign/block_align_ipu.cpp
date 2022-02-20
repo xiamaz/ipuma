@@ -21,6 +21,7 @@ using namespace upcxx_utils;
 upcxx::global_ptr<int> g_mapping;
 upcxx::global_ptr<int32_t> g_input;
 upcxx::global_ptr<int32_t> g_output;
+const bool do_test = false;
 
 std::tuple<int16_t, int16_t> convertPackedRange(int32_t packed) {
   int16_t begin = packed & 0xffff;
@@ -51,7 +52,7 @@ void insert_ipu_result_block(shared_ptr<AlignBlockData> aln_block_data, std::vec
   for (int i = 0; i < aln_block_data->kernel_alns.size(); i++) {
     Aln &aln = aln_block_data->kernel_alns[i];
     convertIpuToAln(aln_block_data, aln, scores[i], a_range[i], b_range[i]);
-    if (aln.identity < 0) {
+    if (do_test && aln.identity < 0) {
       PLOGW.printf("[%d]\tnegative identity\n", rank_me());
       PLOGW.printf("[%d]\tA/B %s / %s\n", rank_me(), aln_block_data->read_seqs[i].c_str(), aln_block_data->ctg_seqs[i].c_str());
       PLOGW.printf("[%d]\t%d\n", rank_me(), 100 * aln.score1);
@@ -63,7 +64,6 @@ void insert_ipu_result_block(shared_ptr<AlignBlockData> aln_block_data, std::vec
   }
 }
 
-std::mutex upload;
 bool done_upload = true;
 
 upcxx::future<> uprunner;
@@ -101,7 +101,7 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
     PLOGD.printf("Wait for completion of execution semaphore locally");
     while (!got_result) upcxx::progress();
   });
-  fut = fut.then([alns = alns, aln_block_data]() {
+  fut = fut.then([alns = alns, aln_block_data, mapping=g_mapping.local()]() {
     PLOGD.printf("merge data on %d from RPC on %d", rank_me(), local_team().rank_me() % KLIGN_IPUS_LOCAL);
     // aln_kernel_timer.stop();
     auto algoconfig = ALGO_CONFIGURATION;
@@ -114,7 +114,6 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
     size_t a_range_offset = scs.size();
     size_t b_range_offset = a_range_offset + ars.size();
 
-    int *mapping = g_mapping.local();
     for (size_t i = 0; i < aln_block_data->ctg_seqs.size(); ++i) {
       size_t mapped_i = mapping[i];
       scs[i] = g_output.local()[mapped_i];
@@ -132,7 +131,7 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
 
 void init_aligner(AlnScoring &aln_scoring, int rlen_limit, IntermittentTimer &aln_kernel_timer) {
   done_uprunner = false;
-  if (rank_me() <= KLIGN_IPUS_LOCAL) {
+  if (rank_me() < KLIGN_IPUS_LOCAL) {
     uprunner = upcxx_utils::execute_in_new_thread([&aln_kernel_timer]() {
       // push progress_persona onto this thread's persona stack
       upcxx::persona_scope scope(progress_persona);
@@ -182,7 +181,7 @@ void init_aligner(AlnScoring &aln_scoring, int rlen_limit, IntermittentTimer &al
 
 void cleanup_aligner() {
   barrier();
-  if (rank_me() <= KLIGN_IPUS_LOCAL) {
+  if (rank_me() < KLIGN_IPUS_LOCAL) {
     progress_persona.lpc([]() { done_uprunner = true; }).wait();
     uprunner.wait();
   }
@@ -237,7 +236,6 @@ void validate_align_block(future<> &fut, CPUAligner &cpu_aligner, shared_ptr<Ali
 void kernel_align_block(CPUAligner &cpu_aligner, vector<Aln> &kernel_alns, vector<string> &ctg_seqs, vector<string> &read_seqs,
                         Alns *alns, future<> &active_kernel_fut, int read_group_id, int max_clen, int max_rlen,
                         IntermittentTimer &aln_kernel_timer) {
-  const bool do_test = true;
   if (!kernel_alns.empty()) {
     active_kernel_fut.wait();  // should be ready already
 

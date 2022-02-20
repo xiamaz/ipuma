@@ -844,18 +844,20 @@ static double do_alignments(KmerCtgDHT<MAX_K> &kmer_ctg_dht, vector<PackedReads 
 
   aligner.log_ctg_bytes_fetched();
 
+  double aln_kernel_secs = aln_kernel_timer.get_elapsed();
+  double aln_total_kernel_secs = reduce_one(aln_kernel_secs, op_fast_add, 0).wait(); 
+
   fetch_ctg_seqs_timer.done_all();
   aln_cpu_bypass_timer.done_all();
   get_ctgs_timer.done_all();
   compute_alns_timer.done_all();
   aln_kernel_timer.done_all();
-  double aln_kernel_secs = aln_kernel_timer.get_elapsed();
   fetch_ctg_seqs_timer.clear();
   aln_cpu_bypass_timer.clear();
   get_ctgs_timer.clear();
   compute_alns_timer.clear();
   aln_kernel_timer.clear();
-  return aln_kernel_secs;
+  return aln_total_kernel_secs;
 }
 
 template <int MAX_K>
