@@ -75,7 +75,7 @@ void init_devices() {
             KLIGN_IPU_MAXAB_SIZE,
             KLIGN_IPU_MAX_BATCHES,
             KLIGN_IPU_BUFSIZE,
-            ipu::batchaffine::VertexType::assembly,
+            ipu::batchaffine::VertexType::multiasm,
             ipu::partition::Algorithm::greedy
       };
       init_single_ipu(SW_CONFIGURATION, algo_conf);
