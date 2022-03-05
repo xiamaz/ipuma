@@ -69,16 +69,7 @@ void init_devices() {
   detect_ipu_fut = execute_in_thread_pool([]() {
     if (local_team().rank_me() < KLIGN_IPUS_LOCAL) {
       CPUAligner cpu_aln(false);
-      auto& aln_scoring = cpu_aln.aln_scoring;
-      static const ipu::batchaffine::IPUAlgoConfig algo_conf = {
-            KLIGN_IPU_TILES,
-            KLIGN_IPU_MAXAB_SIZE,
-            KLIGN_IPU_MAX_BATCHES,
-            KLIGN_IPU_BUFSIZE,
-            ipu::batchaffine::VertexType::multiasm,
-            ipu::partition::Algorithm::greedy
-      };
-      init_single_ipu(SW_CONFIGURATION, algo_conf);
+      init_single_ipu(SW_CONFIGURATION, ALGO_CONFIGURATION);
       std::cout << "Aquired IPU, rank " << local_team().rank_me() << std::endl;
     }
   });

@@ -69,7 +69,7 @@ bool done_upload = true;
 upcxx::future<> uprunner;
 bool done_uprunner;
 upcxx::persona progress_persona;
-std::queue<std::tuple<int32_t *, int32_t *, int>> backlog;
+std::queue<std::tuple<int32_t *, int32_t *, int, int>> backlog;
 
 upcxx::persona resume_persona;
 bool got_result = true;
@@ -78,22 +78,21 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
   auto algoconfig = ALGO_CONFIGURATION;
   auto swconfig = SW_CONFIGURATION;
 
-  ipu::batchaffine::SWAlgorithm::prepare_remote(swconfig, algoconfig, aln_block_data->ctg_seqs, aln_block_data->read_seqs,
+  int maxb = ipu::batchaffine::SWAlgorithm::prepare_remote(swconfig, algoconfig, aln_block_data->ctg_seqs, aln_block_data->read_seqs,
                                                 &g_input.local()[0], &g_input.local()[algoconfig.getInputBufferSize32b()],
                                                 &g_mapping.local()[0]);
 
   const int ipu_executor_rank = (local_team().rank_me()) % KLIGN_IPUS_LOCAL;
-  PLOGD.printf("Push backlog");
   rpc(
       ipu_executor_rank,
-      [](global_ptr<int32_t> in, global_ptr<int32_t> out, int src) {
-        PLOGD.printf("lpc backlog");
-        return progress_persona.lpc([in = in.local(), out = out.local(), src = src] {
-          backlog.push({in, out, src});
-          PLOGD.printf("Backlog pushed");
+      [](global_ptr<int32_t> in, global_ptr<int32_t> out, int src, int max_bucket) {
+        // PLOGD.printf("lpc backlog");
+        return progress_persona.lpc([in = in.local(), out = out.local(), src = src, mb=max_bucket] {
+          backlog.push({in, out, src, mb});
+          // PLOGD.printf("Backlog pushed");
         });
       },
-      g_input, g_output, rank_me())
+      g_input, g_output, rank_me(), maxb)
       .wait();
   got_result = false;
   auto fut = upcxx_utils::execute_in_thread_pool([]() {
@@ -103,7 +102,6 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
   });
   fut = fut.then([alns = alns, aln_block_data, mapping=g_mapping.local()]() {
     PLOGD.printf("merge data on %d from RPC on %d", rank_me(), local_team().rank_me() % KLIGN_IPUS_LOCAL);
-    // aln_kernel_timer.stop();
     auto algoconfig = ALGO_CONFIGURATION;
     const auto totalComparisonsCount = algoconfig.getTotalNumberOfComparisons();
 
@@ -143,21 +141,22 @@ void init_aligner(AlnScoring &aln_scoring, int rlen_limit, IntermittentTimer &al
           break;
         }
         if (!backlog.empty()) {
+          auto [in, out, src, mb] = backlog.front();
           auto driver = getDriver();
-          if (!driver->slot_available()) {
+          if (!driver->slot_available(mb)) {
             sched_yield();
             upcxx::progress();
             continue;
           }
-          auto [in, out, src] = backlog.front();
           backlog.pop();
-          PLOGD.printf("Going to aquire slot");
-          int slot = driver->queue_slot();
-          PLOGD.printf("Going to upload on slot%d", slot);
+          // PLOGD.printf("Going to aquire slot");
+          int slot = driver->queue_slot(mb);
+          // PLOGD.printf("Going to upload on slot%d", slot);
           int *inptr = (int *)in;
-          PLOGD.printf("Call uploading slot %d", slot);
+          PLOGD.printf("Upload+Execute data from rank(%d)", src);
+          // PLOGD.printf("Call uploading slot %d", slot);
           getDriver()->upload(&inptr[0], &inptr[getDriver()->algoconfig.getInputBufferSize32b()], slot);
-          PLOGD.printf("Called uploading slot %d", slot);
+          // PLOGD.printf("Called uploading slot %d", slot);
           aln_kernel_timer.start();
           driver->prepared_remote_compare(&in[0], &in[driver->algoconfig.getInputBufferSize32b()], &out[0],
                                           &out[driver->algoconfig.getTotalNumberOfComparisons() * 3], slot);

@@ -46,8 +46,8 @@ sub printStats {
    foreach my $field (@fields) {
      if (not defined $stats{$field}) { print STDERR "No $field found\n"; }
    }
-   print join("\t", @fields) . "\n";
-   print join("\t", @stats{@fields}) . "\n";
+   print join(";", @fields) . "\n";
+   print join(";", @stats{@fields}) . "\n";
 }
 
 $stats{"Operator"} = $ENV{"USER"};
@@ -178,12 +178,16 @@ while (<>) {
 
         if (/Found (\d+) .* unique kmers/) {
             $stats{"DistinctKmersWithFP"} = $1;
+        } else {
+            $stats{"DistinctKmersWithFP"} = 0;
         }
         if (/After purge of kmers < .*, there are (\d+) unique kmers/) {
             if (defined $stats{"MinDepthKmers"}) {
                 $stats{"DistinctKmersWithFP"} = $stats{"MinDepthKmers"}; # the previous one
             }
             $stats{"MinDepthKmers"} = $1; # the last one
+        } else {
+            $stats{"MinDepthKmers"} = 0; # the last one
         }
         if (not defined $stats{'MinDepthKmers'}) {
            if (/ hash table final size is (\d+) entries and final load factor/) {

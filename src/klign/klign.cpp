@@ -39,6 +39,8 @@
  sublicense such enhancements or derivative works thereof, in binary and source code
  form.
 */
+#include <plog/Log.h>
+#undef LOG
 
 #include <fcntl.h>
 #include <math.h>
@@ -337,8 +339,8 @@ class Aligner {
         current_bucket_elems++;
       };
       #ifdef POPLAR_ENABLED
-      bool bucket_oom = (total_ctg_len + cseq.size()  >= KLIGN_IPU_BUFSIZE) || (total_read_len + rseq.size() >= KLIGN_IPU_BUFSIZE);
-      bool bucket_ooe = current_bucket_elems + 1 > KLIGN_IPU_MAX_BATCHES;
+      bool bucket_oom = (total_ctg_len + cseq.size() + total_read_len + rseq.size() >= (int) KLIGN_IPU_BUFSIZE * 0.975);
+      bool bucket_ooe = current_bucket_elems + 1 > ((int) KLIGN_IPU_MAX_BATCHES);
       if (bucket_oom || bucket_ooe) {
         if (current_ipu_bucket + 1 == KLIGN_IPU_TILES) {
           // Our buckets are all full.
@@ -425,9 +427,12 @@ class Aligner {
     t.start();
     auto num = kernel_alns.size();
     if (num) {
+      PLOGD.printf("Flush Remaining, incomplete block.");
       SLOG("Flush Remaining, incomplete block.");
       kernel_align_block(cpu_aligner, kernel_alns, ctg_seqs, read_seqs, alns, active_kernel_fut, read_group_id, max_clen, max_rlen,
                          aln_kernel_timer);
+
+      PLOGD.printf("===============================================================================");
       clear_aln_bufs();
     }
     bool is_ready = active_kernel_fut.ready();

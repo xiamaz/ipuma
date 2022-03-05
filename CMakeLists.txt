@@ -367,3 +367,4 @@ option(MHM2_ENABLE_TESTING "Enable testing in MHM2" ON)
 if(MHM2_ENABLE_TESTING)
   add_subdirectory(test)
 endif()
+
