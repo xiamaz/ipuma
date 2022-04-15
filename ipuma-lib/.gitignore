@@ -1,0 +1,10 @@
+.build*
+build
+build-*
+build_*
+.dir-locals.el
+nbproject
+install
+.vscode
+contrib/collect_comm_stats
+**/*.poplar_exec 
