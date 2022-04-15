@@ -72,3 +72,4 @@ __MACRO_KLIGN__(128, extern template);
 #if MAX_BUILD_KMER >= 160
 __MACRO_KLIGN__(160, extern template);
 #endif
+

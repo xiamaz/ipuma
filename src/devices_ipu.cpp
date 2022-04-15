@@ -52,6 +52,7 @@
 
 #include "aligner_cpu.hpp"
 #include "klign.hpp"
+#include "ipuswconfig.hpp"
 
 using namespace std;
 using namespace upcxx;
@@ -69,7 +70,8 @@ void init_devices() {
   detect_ipu_fut = execute_in_thread_pool([]() {
     if (local_team().rank_me() < KLIGN_IPUS_LOCAL) {
       CPUAligner cpu_aln(false);
-      init_single_ipu(SW_CONFIGURATION, ALGO_CONFIGURATION);
+
+      init_single_ipu(MHM_SWCONFIG, MHM_ALGOCONFIG, rank_me(), KLIGN_MULTI_IPU_N);
       std::cout << "Aquired IPU, rank " << local_team().rank_me() << std::endl;
     }
   });

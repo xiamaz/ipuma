@@ -9,10 +9,12 @@
 #include "ipu_batch_affine.h"
 #include "ipu_base.h"
 #include "ipu_batch_affine.h"
+#include "msd/channel.hpp"
 #include <atomic>
 #include <thread>
 #include <queue>
 #include <tuple>
+#include "ipuswconfig.hpp"
 
 using namespace std;
 using namespace upcxx;
@@ -22,6 +24,10 @@ upcxx::global_ptr<int> g_mapping;
 upcxx::global_ptr<int32_t> g_input;
 upcxx::global_ptr<int32_t> g_output;
 const bool do_test = false;
+msd::channel<std::tuple<ipu::batchaffine::Job *, int>> jobs{100000};
+
+const auto algoconfig = MHM_ALGOCONFIG;
+const auto swconfig = MHM_SWCONFIG;
 
 std::tuple<int16_t, int16_t> convertPackedRange(int32_t packed) {
   int16_t begin = packed & 0xffff;
@@ -66,43 +72,45 @@ void insert_ipu_result_block(shared_ptr<AlignBlockData> aln_block_data, std::vec
 
 bool done_upload = true;
 
-upcxx::future<> uprunner;
-bool done_uprunner;
+upcxx::future<> uprunner = make_future();
+upcxx::future<> uprunnerPusher = make_future();
+bool done_uprunner = false;
 upcxx::persona progress_persona;
-std::queue<std::tuple<int32_t *, int32_t *, int, int>> backlog;
 
 upcxx::persona resume_persona;
 bool got_result = true;
 
 upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns *alns, IntermittentTimer &aln_kernel_timer) {
-  auto algoconfig = ALGO_CONFIGURATION;
-  auto swconfig = SW_CONFIGURATION;
 
-  int maxb = ipu::batchaffine::SWAlgorithm::prepare_remote(swconfig, algoconfig, aln_block_data->ctg_seqs, aln_block_data->read_seqs,
-                                                &g_input.local()[0], &g_input.local()[algoconfig.getInputBufferSize32b()],
-                                                &g_mapping.local()[0]);
+  int maxb = ipu::batchaffine::SWAlgorithm::prepare_remote(
+      swconfig, algoconfig, aln_block_data->ctg_seqs, aln_block_data->read_seqs, &g_input.local()[0],
+      &g_input.local()[algoconfig.getInputBufferSize32b()], &g_mapping.local()[0]);
 
   const int ipu_executor_rank = (local_team().rank_me()) % KLIGN_IPUS_LOCAL;
   rpc(
       ipu_executor_rank,
       [](global_ptr<int32_t> in, global_ptr<int32_t> out, int src, int max_bucket) {
         // PLOGD.printf("lpc backlog");
-        return progress_persona.lpc([in = in.local(), out = out.local(), src = src, mb=max_bucket] {
-          backlog.push({in, out, src, mb});
+        return progress_persona.lpc([in = in.local(), out = out.local(), src = src, mb = max_bucket] {
+          auto *job = getDriver()->async_submit_prepared_remote_compare(
+              &in[0], &in[getDriver()->algoconfig.getInputBufferSize32b()], &out[0],
+              &out[getDriver()->algoconfig.getTotalNumberOfComparisons() * 3]);
+          std::make_tuple(job, src) >> jobs;
           // PLOGD.printf("Backlog pushed");
         });
       },
       g_input, g_output, rank_me(), maxb)
       .wait();
+
   got_result = false;
   auto fut = upcxx_utils::execute_in_thread_pool([]() {
     upcxx::persona_scope scope(resume_persona);
     PLOGD.printf("Wait for completion of execution semaphore locally");
     while (!got_result) upcxx::progress();
   });
-  fut = fut.then([alns = alns, aln_block_data, mapping=g_mapping.local()]() {
+  fut = fut.then([alns = alns, aln_block_data, mapping = g_mapping.local()]() {
     PLOGD.printf("merge data on %d from RPC on %d", rank_me(), local_team().rank_me() % KLIGN_IPUS_LOCAL);
-    auto algoconfig = ALGO_CONFIGURATION;
+    // auto algoconfig = ALGO_CONFIGURATION;
     const auto totalComparisonsCount = algoconfig.getTotalNumberOfComparisons();
 
     vector<int32_t> ars(algoconfig.getTotalNumberOfComparisons());
@@ -128,62 +136,44 @@ upcxx::future<> ipu_align_block(shared_ptr<AlignBlockData> aln_block_data, Alns 
 }
 
 void init_aligner(AlnScoring &aln_scoring, int rlen_limit, IntermittentTimer &aln_kernel_timer) {
-  done_uprunner = false;
-  if (rank_me() < KLIGN_IPUS_LOCAL) {
-    uprunner = upcxx_utils::execute_in_new_thread([&aln_kernel_timer]() {
-      // push progress_persona onto this thread's persona stack
-      upcxx::persona_scope scope(progress_persona);
-      // progress thread drains progress until work is done
-      PLOGD.printf("Start Executer");
-      while (true) {
-        if (backlog.empty() && done_uprunner) {
-          PLOGD.printf("Exit Uploader thread");
-          break;
-        }
-        if (!backlog.empty()) {
-          auto [in, out, src, mb] = backlog.front();
+  if (done_uprunner == false && rank_me() < KLIGN_IPUS_LOCAL) {
+      uprunnerPusher = upcxx_utils::execute_in_new_thread([&aln_kernel_timer]() {
+        PLOGD.printf("Start Executer");
+        for (auto [job, src] : jobs) {
           auto driver = getDriver();
-          if (!driver->slot_available(mb)) {
-            sched_yield();
-            upcxx::progress();
-            continue;
-          }
-          backlog.pop();
-          // PLOGD.printf("Going to aquire slot");
-          int slot = driver->queue_slot(mb);
-          // PLOGD.printf("Going to upload on slot%d", slot);
-          int *inptr = (int *)in;
-          PLOGD.printf("Upload+Execute data from rank(%d)", src);
-          // PLOGD.printf("Call uploading slot %d", slot);
-          getDriver()->upload(&inptr[0], &inptr[getDriver()->algoconfig.getInputBufferSize32b()], slot);
-          // PLOGD.printf("Called uploading slot %d", slot);
-          aln_kernel_timer.start();
-          driver->prepared_remote_compare(&in[0], &in[driver->algoconfig.getInputBufferSize32b()], &out[0],
-                                          &out[driver->algoconfig.getTotalNumberOfComparisons() * 3], slot);
-          aln_kernel_timer.stop();
+          driver->blocking_join_prepared_remote_compare(*job);
+          aln_kernel_timer.inc_elapsed(job->sb.runTick.duration() / 1000.0);
           PLOGD.printf("Execution done");
           rpc_ff(src, []() { resume_persona.lpc_ff([]() { got_result = true; }); });
         }
-        sched_yield();
-        upcxx::progress();
-      }
-    });
+      });
+    done_uprunner = true;
+      uprunner = upcxx_utils::execute_in_new_thread([&aln_kernel_timer]() {
+        upcxx::persona_scope scope(progress_persona);
+        PLOGD.printf("Start Executer");
+        while (done_uprunner) {
+          sched_yield();
+          upcxx::progress();
+        }
+      });
   }
   SWARN("Initialize global array\n");
-  auto algoconfig = ALGO_CONFIGURATION;
+  // auto algoconfig = ALGO_CONFIGURATION;
   size_t inputs_size = algoconfig.getInputBufferSize32b();
   size_t results_size = algoconfig.getTotalNumberOfComparisons() * 3;
   g_input = new_array<int32_t>(inputs_size);
   g_output = new_array<int32_t>(results_size);
   g_mapping = new_array<int>(algoconfig.getTotalNumberOfComparisons());
+  barrier();
 }
 
 void cleanup_aligner() {
   barrier();
-  if (rank_me() < KLIGN_IPUS_LOCAL) {
-    progress_persona.lpc([]() { done_uprunner = true; }).wait();
-    uprunner.wait();
-  }
+  // if (rank_me() < KLIGN_IPUS_LOCAL) {
+  //   progress_persona.lpc([]() { done_uprunner = true; }).wait();
+  //   // jobs.close();
+  //   uprunner.wait();
+  // }
   SWARN("Delete global array\n");
   delete_array(g_input);
   delete_array(g_output);

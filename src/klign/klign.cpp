@@ -339,7 +339,7 @@ class Aligner {
         current_bucket_elems++;
       };
       #ifdef POPLAR_ENABLED
-      bool bucket_oom = (total_ctg_len + cseq.size() + total_read_len + rseq.size() >= (int) KLIGN_IPU_BUFSIZE * 0.975);
+      bool bucket_oom = (total_ctg_len + cseq.size() + total_read_len + rseq.size() >= (int) KLIGN_IPU_BUFSIZE * 0.955);
       bool bucket_ooe = current_bucket_elems + 1 > ((int) KLIGN_IPU_MAX_BATCHES);
       if (bucket_oom || bucket_ooe) {
         if (current_ipu_bucket + 1 == KLIGN_IPU_TILES) {
