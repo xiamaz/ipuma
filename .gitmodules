@@ -11,3 +11,12 @@
 [submodule "plog"]
 	path = plog
 	url = https://github.com/SergiusTheBest/plog.git
+[submodule "ipuma-lib/extern/cxxopts"]
+	path = ipuma-lib/extern/cxxopts
+	url = https://github.com/jarro2783/cxxopts.git
+[submodule "ipuma-lib/googletest"]
+	path = ipuma-lib/googletest
+	url = https://github.com/google/googletest/
+[submodule "ipuma-lib/plog"]
+	path = ipuma-lib/plog
+	url = https://github.com/SergiusTheBest/plog.git
