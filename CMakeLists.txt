@@ -370,6 +370,8 @@ install(PROGRAMS ci/check_asm_quality.py ci/ci_asm_qual_test.sh
 install(FILES ci/good-arctic-sample0.txt ci/good-arctic-sample0-k63.txt
               ci/good-arctic-sample0-k31k63.txt ci/good-arcticsynth.txt
         DESTINATION ${CMAKE_INSTALL_PREFIX}/share)
+install(PROGRAMS ${PROJECT_BINARY_DIR}/bin/codelets/algoipu.gp
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/bin/codelets/)
 
 option(MHM2_ENABLE_TESTING "Enable testing in MHM2" ON)
 if(MHM2_ENABLE_TESTING)
